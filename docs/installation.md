@@ -129,11 +129,21 @@ A countdown banner appears in the header as the trial or licence approaches expi
 Recommended for: local development, demos, POC with a client.
 Everything runs in Docker on a single machine. No Kubernetes required.
 
-#### Step 1 — Clone and run quickstart
+#### Step 1 — Clone and authenticate
 
 ```bash
 git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
+
+# Authenticate to the VibOps container registry (token provided by VibOps)
+make login VIBOPS_REGISTRY_TOKEN=<your-token>
+```
+
+> **Registry token:** VibOps Docker images are hosted on a private registry. You will receive a `VIBOPS_REGISTRY_TOKEN` from VibOps alongside your installation package. This token is required to pull the Docker images. Contact david@vibops.ai if you did not receive one.
+
+#### Step 2 — Run quickstart
+
+```bash
 make quickstart
 ```
 
@@ -143,7 +153,7 @@ make quickstart
 - Starts the full stack with `docker compose up -d`
 - Runs `make check` to verify all services are healthy
 
-#### Step 2 — Set your LLM provider
+#### Step 3 — Set your LLM provider
 
 Open `.env` and set your API key:
 
@@ -163,9 +173,9 @@ LLM_PROVIDER=ollama
 Then restart the agent: `docker compose restart agent`
 
 > **POC mode:** `AUTH_PASSWORD_HASH` is empty by default — the console opens without a login
-> screen. Suitable for a controlled POC environment. See Step 4 to enable auth.
+> screen. Suitable for a controlled POC environment. See Step 5 to enable auth.
 
-#### Step 3 — Verify
+#### Step 4 — Verify
 
 ```bash
 make check
@@ -189,7 +199,7 @@ Services started by the stack:
 | `grafana` | **3000** | Dashboards — admin / `${GRAFANA_PASSWORD:-vibops}` |
 | `backup` | — | Daily `pg_dump` → `/backups/` (30-day retention) |
 
-#### Step 4 — Bootstrap the first admin user (if auth is enabled)
+#### Step 5 — Bootstrap the first admin user (if auth is enabled)
 
 To enable login, generate a password hash and add it to `.env`:
 
