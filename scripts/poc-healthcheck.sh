@@ -116,7 +116,7 @@ fi
 # ── 7. Console ────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}6. Console${NC}"
-CONSOLE_URL="${BASE_URL%:8000}:8080"
+CONSOLE_URL="${BASE_URL%:8000}:8003"
 if curl -sf --max-time 5 "${CONSOLE_URL}/" &>/dev/null; then
   ok "Console reachable at ${CONSOLE_URL}"
 else

@@ -222,7 +222,7 @@ It prints the JWT token directly, ready to use for the first API calls.
 
 Log in at **http://localhost:8003** (or **http://SERVER_IP:8003** on a remote server) with the credentials shown.
 
-> **Pilot clients** — to provision additional client orgs (each isolated), run `make pilot-create-client` once per client. See [`docs/runbooks/pilot-runbook.md`](runbooks/pilot-runbook.md) for the full onboarding checklist.
+> **Pilot clients** — to provision additional client orgs (each isolated), run `make pilot-create-client` once per client. To provision additional client orgs (each isolated), run `make pilot-create-client` once per client.
 
 > **Password reset by email** — for the "Forgot password" flow to send emails, configure `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` in `.env` before going live. Without SMTP, the reset token is returned directly in the API response (dev mode only — not suitable for production).
 
@@ -293,7 +293,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/vibops/core:latest python -c \
+docker run --rm ghcr.io/vibopsai/core:latest python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
@@ -745,14 +745,10 @@ and LLM inference costs are absorbed by the client's own GPU infrastructure.
 
 ## 12. Upgrading
 
-For full upgrade procedures, rollback steps, and Alembic migration reference, see
-[`docs/runbooks/upgrade-migration.md`](runbooks/upgrade-migration.md).
-
-### Docker Compose (quick reference)
+### Docker Compose
 
 ```bash
-git pull && docker compose build && docker compose up -d
-make check   # verify the upgrade
+make update   # pulls latest images, restarts services, runs healthcheck
 ```
 
 ### Helm (quick reference)

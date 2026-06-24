@@ -92,7 +92,7 @@ else
   echo ""
   echo "  source $ENV_FILE && docker compose --profile connect up connect --build"
   echo ""
-  echo "  ou directement :"
+  echo "  ou avec docker compose :"
   echo ""
-  echo "  CONNECT_GATEWAY_ID=$CONNECT_GATEWAY_ID CONNECT_TOKEN=<token> python connect/worker.py"
+  echo "  CONNECT_GATEWAY_ID=$CONNECT_GATEWAY_ID CONNECT_TOKEN=<token> docker compose --profile connect up -d connect"
 fi

@@ -19,11 +19,11 @@ scrape_configs:
       - targets: ['agent:8001']
     metrics_path: '/metrics'
 
-  # GPU Simulator — métriques DCGM factices pour démo (remplacé par vrai DCGM en prod)
-  - job_name: 'dcgm-exporter'
-    static_configs:
-      - targets: ['gpu-simulator:9400']
-    metrics_path: '/metrics'
+  # DCGM Exporter — GPU metrics (uncomment when dcgm-exporter is deployed on GPU nodes)
+  # - job_name: 'dcgm-exporter'
+  #   static_configs:
+  #     - targets: ['dcgm-exporter:9400']
+  #   metrics_path: '/metrics'
 
   # kube-state-metrics — état des pods, deployments, nodes
   # - job_name: 'kube-state-metrics'

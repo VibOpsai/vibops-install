@@ -3,3 +3,5 @@
 .connect-env
 backups/
 *.log
+*.tar.gz
+my-values.yaml
