@@ -14,7 +14,7 @@ Deploy VibOps on your infrastructure in minutes. This repository contains everyt
 
 ```bash
 # 1. Clone this repository
-git clone https://github.com/VibOpsai/vibops-install-.git
+git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
 
 # 2. Authenticate to the VibOps container registry (token provided by VibOps)

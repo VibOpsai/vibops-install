@@ -132,7 +132,7 @@ Everything runs in Docker on a single machine. No Kubernetes required.
 #### Step 1 — Clone and run quickstart
 
 ```bash
-git clone https://github.com/VibOpsai/vibops-install-.git
+git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
 make quickstart
 ```
