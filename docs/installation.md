@@ -21,7 +21,8 @@ GPU cluster and a working agent conversation.
 10. [On-prem LLM (air-gapped / sovereign)](#10-on-prem-llm-air-gapped--sovereign)
 11. [Billing model](#11-billing-model)
 12. [Upgrading](#12-upgrading)
-13. [Uninstalling](#13-uninstalling)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Uninstalling](#14-uninstalling)
 
 ---
 
@@ -765,7 +766,37 @@ Alembic migrations run automatically on startup (Docker Compose: on core start; 
 
 ---
 
-## 13. Uninstalling
+## 13. Troubleshooting
+
+If something isn't working after installation, generate a debug bundle:
+
+```bash
+make debug
+```
+
+This produces a `vibops-debug-YYYY-MM-DD-HHMMSS.tar.gz` file containing:
+- System info (OS, CPU, RAM, disk, Docker version)
+- Container status and resource usage
+- Logs (last 500 lines per service)
+- Health check results
+- PostgreSQL and Redis connectivity
+- Environment configuration (all secrets automatically redacted)
+
+Send this file to **david@vibops.ai** for support. No secrets are included.
+
+### Common issues
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `make check` fails on core | Database not ready or migration error | `docker compose logs core` — check for Alembic errors |
+| Agent returns empty responses | `LLM_API_KEY` not set or invalid | Check `.env`, then `docker compose restart agent` |
+| Console loads but chat doesn't work | Agent not healthy | `docker compose logs agent` — check LLM provider connectivity |
+| `docker compose pull` fails with 401 | Registry token expired or missing | `make login VIBOPS_REGISTRY_TOKEN=<token>` |
+| GPU cluster not appearing in Fleet | Gateway not connected | Check gateway logs on the cluster side, verify outbound HTTPS to VibOps server |
+
+---
+
+## 14. Uninstalling
 
 ### Docker Compose
 

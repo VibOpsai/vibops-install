@@ -83,6 +83,18 @@ See [docs/installation.md](docs/installation.md) for the complete guide includin
 - Configuration reference
 - Upgrade and backup procedures
 
+## Troubleshooting
+
+If something isn't working, generate a debug bundle and send it to VibOps support:
+
+```bash
+make debug
+# → vibops-debug-2026-06-24-143000.tar.gz
+# Send this file to david@vibops.ai
+```
+
+The bundle collects logs, container status, health checks, resource usage and configuration — all secrets are automatically redacted.
+
 ## Support
 
 - Email: david@vibops.ai
