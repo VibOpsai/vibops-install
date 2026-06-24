@@ -7,7 +7,7 @@
 #   make logs SERVICE=core            # tail logs for a service
 #   make pilot-create-client ORG=acme EMAIL=admin@acme.com PASSWORD=s3cr3t
 
-.PHONY: up down logs quickstart check pilot-create-client backup-now backup-list help login
+.PHONY: up down logs quickstart check pilot-create-client backup-now backup-list debug help login
 
 # ── Registry login ────────────────────────────────────────────────────────────
 
@@ -127,6 +127,11 @@ backup-list:
 	@echo "Available backups:"
 	docker compose exec backup sh -c 'ls -lh /backups/vibops_*.sql.gz 2>/dev/null || echo "(none)"'
 
+# ── Debug ──────────────────────────────────────────────────────────────────────
+
+debug:
+	@bash scripts/debug-bundle.sh
+
 # ── Help ───────────────────────────────────────────────────────────────────────
 
 help:
@@ -147,4 +152,6 @@ help:
 	@echo ""
 	@echo "  make backup-now                             Manual PostgreSQL backup"
 	@echo "  make backup-list                            List available backups"
+	@echo ""
+	@echo "  make debug                                  Generate debug bundle for support"
 	@echo ""
