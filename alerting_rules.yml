@@ -1,0 +1,84 @@
+groups:
+
+  - name: vibops.platform
+    rules:
+
+      # ── 1. Service Down ───────────────────────────────────────────────────
+      # Fires when the Prometheus scrape target for the VibOps Core API is
+      # unreachable. This covers crashes, OOM kills, and network splits.
+      # `up` is set to 0 by Prometheus automatically when a scrape fails.
+      - alert: VibOpsCoreDown
+        expr: up{job="vibops-core"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VibOps Core API is down"
+          description: >
+            The VibOps Core API ({{ $labels.instance }}) has not responded
+            to Prometheus scrapes for more than 1 minute.
+            Check: docker compose logs core
+
+      - alert: VibOpsWorkerDown
+        expr: up{job="vibops-core"} == 1
+              unless on() vibops_jobs_total offset 10m
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No Celery workers appear to be processing jobs"
+          description: >
+            The Core API is up but no job completions have been recorded
+            in the last 10 minutes. The Celery worker may be stopped.
+            Check: docker compose logs worker
+
+  - name: vibops.jobs
+    rules:
+
+      # ── 2. Job Failure Rate > 10% ─────────────────────────────────────────
+      # Uses the vibops_jobs_total counter incremented in job_tasks.py.
+      # Fires when more than 10% of jobs completed in the last 5 minutes failed.
+      # Minimum volume guard (> 5 total) avoids noise during low-traffic periods.
+      - alert: VibOpsHighJobFailureRate
+        expr: |
+          (
+            rate(vibops_jobs_total{status="failed"}[5m])
+            /
+            rate(vibops_jobs_total[5m])
+          ) > 0.10
+          and rate(vibops_jobs_total[5m]) * 300 > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High job failure rate (> 10%)"
+          description: >
+            {{ printf "%.0f" (query "rate(vibops_jobs_total{status=\"failed\"}[5m]) / rate(vibops_jobs_total[5m]) * 100" | first | value) }}% of jobs are failing in the last 5 minutes
+            (action: {{ $labels.action }}).
+            Check worker logs for connector errors.
+
+  - name: vibops.finops
+    rules:
+
+      # ── 3. Budget Hard Cap ────────────────────────────────────────────────
+      # Fires when the Core API returns HTTP 429 (hard cap enforced) on job
+      # submission endpoints. A sustained stream of 429s means a customer org
+      # has hit its monthly hard cap and jobs are being blocked.
+      - alert: VibOpsBudgetHardCapBreached
+        expr: |
+          increase(
+            http_requests_total{
+              job="vibops-core",
+              handler=~".*/jobs.*",
+              status="429"
+            }[10m]
+          ) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Budget hard cap triggered — jobs being blocked"
+          description: >
+            More than 3 HTTP 429 responses on job endpoints in the last 10 minutes.
+            At least one org has reached its monthly hard cap.
+            Review FinOps → Budget alerts in the console.

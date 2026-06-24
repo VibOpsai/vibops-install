@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerting_rules.yml
+
+scrape_configs:
+
+  # VibOps Core — métriques FastAPI (http_requests_total, latency, etc.)
+  - job_name: 'vibops-core'
+    static_configs:
+      - targets: ['core:8000']
+    metrics_path: '/metrics'
+
+  # VibOps Agent
+  - job_name: 'vibops-agent'
+    static_configs:
+      - targets: ['agent:8001']
+    metrics_path: '/metrics'
+
+  # GPU Simulator — métriques DCGM factices pour démo (remplacé par vrai DCGM en prod)
+  - job_name: 'dcgm-exporter'
+    static_configs:
+      - targets: ['gpu-simulator:9400']
+    metrics_path: '/metrics'
+
+  # kube-state-metrics — état des pods, deployments, nodes
+  # - job_name: 'kube-state-metrics'
+  #   static_configs:
+  #     - targets: ['<kube-state-metrics-svc>:8080']

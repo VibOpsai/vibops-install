@@ -1,0 +1,5 @@
+.env
+.env.bak
+.connect-env
+backups/
+*.log
