@@ -7,7 +7,7 @@
 #   make logs SERVICE=core            # tail logs for a service
 #   make pilot-create-client ORG=acme EMAIL=admin@acme.com PASSWORD=s3cr3t
 
-.PHONY: up down logs quickstart check pilot-create-client backup-now backup-list debug help login
+.PHONY: up down logs quickstart update check pilot-create-client backup-now backup-list debug help login
 
 # ── Registry login ────────────────────────────────────────────────────────────
 
@@ -77,6 +77,16 @@ quickstart:
 up:
 	docker compose up -d
 
+update:
+	@echo "→ Pulling latest VibOps images..."
+	docker compose pull
+	@echo "→ Restarting services..."
+	docker compose up -d
+	@sleep 8
+	@$(MAKE) check --no-print-directory
+	@echo ""
+	@echo "✅ VibOps updated successfully."
+
 down:
 	docker compose down
 
@@ -140,6 +150,7 @@ help:
 	@echo ""
 	@echo "  make login VIBOPS_REGISTRY_TOKEN=<token>    Authenticate to the VibOps registry"
 	@echo "  make quickstart                             First-time setup + start"
+	@echo "  make update                                 Pull latest images + restart"
 	@echo "  make up                                     Start the stack"
 	@echo "  make down                                   Stop the stack"
 	@echo "  make check                                  Health check (all services)"
