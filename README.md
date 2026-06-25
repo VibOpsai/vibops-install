@@ -57,6 +57,15 @@ make pilot-create-client ORG="My Company" EMAIL=admin@company.com PASSWORD=yourp
 | Grafana | 3000 | Dashboards (admin / auto-generated password) |
 | Prometheus | 9090 | Metrics |
 
+## API Documentation (Swagger)
+
+The full interactive API documentation is available at:
+
+- **Swagger UI:** `http://SERVER_IP:8000/docs`
+- **ReDoc:** `http://SERVER_IP:8000/redoc`
+
+Both endpoints are enabled by default (`APP_ENV=development`). In production mode (`APP_ENV=production`), they are disabled and return 404 for security.
+
 ## Connect a GPU cluster
 
 GPU clusters connect to VibOps via an outbound-only gateway (no inbound ports required on the cluster side):
