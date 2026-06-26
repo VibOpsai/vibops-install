@@ -54,6 +54,7 @@ make pilot-create-client ORG="My Company" EMAIL=admin@company.com PASSWORD=yourp
 | Console | **8003** | Web UI — open in browser |
 | Core API | 8000 | REST API + job engine |
 | Agent | 8001 | LLM agent |
+| LLM Proxy | 8004 | OpenAI-compatible inference proxy — per-agent GPU cost attribution |
 | Grafana | 3000 | Dashboards (admin / auto-generated password) |
 | Prometheus | 9090 | Metrics |
 
@@ -65,6 +66,23 @@ The full interactive API documentation is available at:
 - **ReDoc:** `http://SERVER_IP:8000/redoc`
 
 Both endpoints are enabled by default (`APP_ENV=development`). In production mode (`APP_ENV=production`), they are disabled and return 404 for security.
+
+## LLM Inference Proxy (per-agent FinOps)
+
+VibOps includes a transparent OpenAI-compatible proxy that tracks GPU cost per AI agent. Point your agents at the proxy instead of your LLM server:
+
+```bash
+# Your agents call the proxy instead of vLLM/Ollama directly
+OPENAI_BASE_URL=http://SERVER_IP:8004/v1
+
+# Add a header to attribute costs per agent
+curl -X POST http://SERVER_IP:8004/v1/chat/completions \
+  -H "X-VibOps-Agent-Id: pricing-agent" \
+  -H "X-VibOps-Team: supply-chain" \
+  -d '{"model": "mistral:7b", "messages": [...]}'
+```
+
+Per-agent cost attribution is visible in the console under **FinOps → Agent LLM Usage**.
 
 ## Connect a GPU cluster
 

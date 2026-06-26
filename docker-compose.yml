@@ -26,6 +26,9 @@ x-vibops-gateway: &gateway-image
 x-vibops-connect: &connect-image
   image: ghcr.io/vibopsai/connect:${VIBOPS_VERSION:-latest}
 
+x-vibops-llm-proxy: &llm-proxy-image
+  image: ghcr.io/vibopsai/llm-proxy:${VIBOPS_VERSION:-latest}
+
 services:
 
   # ─── Infrastructure ───────────────────────────────────────────────────────
@@ -228,6 +231,25 @@ services:
     #         - driver: nvidia
     #           count: all
     #           capabilities: [gpu]
+    networks:
+      - vibops_net
+
+  # ─── LLM Inference Proxy ──────────────────────────────────────────────────
+  # Transparent OpenAI-compatible proxy that captures inference metrics
+  # per agent for FinOps attribution. Agents point here instead of vLLM/Ollama.
+  llm-proxy:
+    <<: *llm-proxy-image
+    container_name: vibops_llm_proxy
+    restart: unless-stopped
+    environment:
+      CORE_API_URL: http://core:8000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
+      DEFAULT_BACKEND_URL: http://ollama:11434
+    ports:
+      - "8004:8004"
+    depends_on:
+      core:
+        condition: service_healthy
     networks:
       - vibops_net
 
