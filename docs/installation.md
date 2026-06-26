@@ -20,9 +20,10 @@ GPU cluster and a working agent conversation.
 9. [Configuration reference](#9-configuration-reference)
 10. [On-prem LLM (air-gapped / sovereign)](#10-on-prem-llm-air-gapped--sovereign)
 11. [Billing model](#11-billing-model)
-12. [Upgrading](#12-upgrading)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Uninstalling](#14-uninstalling)
+12. [LLM Inference Proxy](#12-llm-inference-proxy)
+13. [Upgrading](#13-upgrading)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Uninstalling](#15-uninstalling)
 
 ---
 
@@ -192,6 +193,7 @@ Services started by the stack:
 | `console` | **8003** | Web UI — open this in your browser |
 | `core` | 8000 | REST API + job engine (Swagger: `/docs`) |
 | `agent` | 8001 | LLM agent |
+| `llm-proxy` | 8004 | LLM inference proxy — per-agent GPU cost attribution |
 | `worker` | — | Celery worker (job execution) |
 | `beat` | — | Celery Beat (scheduled tasks) |
 | `postgres` | 5432 | Database (internal) |
@@ -743,7 +745,59 @@ and LLM inference costs are absorbed by the client's own GPU infrastructure.
 
 ---
 
-## 12. Upgrading
+## 12. LLM Inference Proxy
+
+VibOps includes a transparent OpenAI-compatible proxy (port 8004) that sits between your AI agents and your LLM inference servers. It tracks every inference with per-agent cost attribution.
+
+### Why use it
+
+- **FinOps per agent** — which agent costs how much in GPU
+- **Budget enforcement** — block agents that exceed their monthly spend limit
+- **Model policy** — control which agent can use which LLM model
+- **Anomaly detection** — alert on cost spikes, request surges, error rate jumps
+
+### Configuration
+
+Set the backend routing in `.env`:
+
+```bash
+# Map model name prefixes to upstream LLM servers
+BACKENDS='{"mistral": "http://vllm-mistral:8000", "llama": "http://vllm-llama:8001"}'
+
+# Fallback if no prefix matches
+DEFAULT_BACKEND_URL=http://ollama:11434
+```
+
+### Usage
+
+Point your AI agents (n8n, LangChain, CrewAI, Dify, or any OpenAI-compatible client) to the proxy:
+
+```bash
+# Change your agent's base URL
+OPENAI_BASE_URL=http://SERVER_IP:8004/v1
+
+# Add headers for agent attribution
+curl -X POST http://SERVER_IP:8004/v1/chat/completions \
+  -H "X-VibOps-Agent-Id: pricing-agent-v2" \
+  -H "X-VibOps-Team: supply-chain" \
+  -d '{"model": "mistral:7b", "messages": [...]}'
+```
+
+Results are visible in the console under **FinOps → Agent LLM Usage**.
+
+### Verify
+
+```bash
+curl http://SERVER_IP:8004/health
+# → {"status": "ok", "backend": "http://ollama:11434"}
+
+curl http://SERVER_IP:8004/v1/models
+# → lists available models from all backends
+```
+
+---
+
+## 13. Upgrading
 
 ### Docker Compose
 
@@ -762,7 +816,7 @@ Alembic migrations run automatically on startup (Docker Compose: on core start; 
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 If something isn't working after installation, generate a debug bundle:
 
@@ -792,7 +846,7 @@ Send this file to **david@vibops.ai** for support. No secrets are included.
 
 ---
 
-## 14. Uninstalling
+## 15. Uninstalling
 
 ### Docker Compose
 
