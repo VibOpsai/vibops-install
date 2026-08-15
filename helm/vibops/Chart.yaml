@@ -1,0 +1,12 @@
+apiVersion: v2
+name: vibops
+description: VibOps — Intent-driven MLOps platform
+type: application
+version: 0.25.0
+appVersion: "0.25.0"
+
+dependencies:
+  - name: postgresql
+    version: "15.5.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled

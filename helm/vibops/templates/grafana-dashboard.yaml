@@ -1,0 +1,13 @@
+{{- if .Values.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vibops.fullname" . }}-dashboard
+  namespace: {{ .Values.grafanaDashboard.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  vibops.json: |-
+{{ .Files.Get "dashboards/vibops.json" | indent 4 }}
+{{- end }}

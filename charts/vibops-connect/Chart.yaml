@@ -1,0 +1,18 @@
+apiVersion: v2
+name: vibops-connect
+description: >
+  VibOps Connect — lightweight edge gateway for CSP infrastructure.
+  Deploys the connector agent that bridges client Kubernetes clusters
+  to the central VibOps platform.
+type: application
+version: 0.23.1
+appVersion: "0.23.1"
+keywords:
+  - kubernetes
+  - gpu
+  - mlops
+  - connector
+  - edge
+home: https://github.com/davidmacamara-boop/vibops
+maintainers:
+  - name: VibOps Team

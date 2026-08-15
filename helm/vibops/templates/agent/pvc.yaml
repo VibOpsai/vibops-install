@@ -1,0 +1,17 @@
+{{- if and .Values.agent.enabled .Values.agent.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vibops.fullname" . }}-agent-training
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  accessModes:
+    - {{ .Values.agent.persistence.accessMode }}
+  storageClassName: {{ .Values.agent.persistence.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.agent.persistence.size }}
+{{- end }}

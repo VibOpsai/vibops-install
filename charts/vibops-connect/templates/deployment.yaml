@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vibops-connect.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops-connect.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vibops-connect.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vibops-connect.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "vibops-connect.serviceAccountName" . }}
+      containers:
+        - name: connect
+          image: {{ include "vibops-connect.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: VIBOPS_CORE_URL
+              value: {{ .Values.vibops.coreUrl | required "vibops.coreUrl is required" | quote }}
+            - name: VIBOPS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops-connect.secretName" . }}
+                  key: token
+            - name: GATEWAY_NAME
+              value: {{ .Values.gateway.name | required "gateway.name is required" | quote }}
+            - name: GATEWAY_CLUSTER
+              value: {{ .Values.gateway.cluster | quote }}
+            - name: GATEWAY_ORG_ID
+              value: {{ .Values.gateway.orgId | quote }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheus.url | quote }}
+            {{- if .Values.platformType }}
+            - name: PLATFORM_TYPE
+              value: {{ .Values.platformType | quote }}
+            {{- end }}
+            {{- if .Values.proxmox.url }}
+            - name: PROXMOX_URL
+              value: {{ .Values.proxmox.url | quote }}
+            - name: PROXMOX_USER
+              value: {{ .Values.proxmox.user | quote }}
+            - name: PROXMOX_TOKEN_ID
+              value: {{ .Values.proxmox.tokenId | quote }}
+            - name: PROXMOX_TOKEN
+              value: {{ .Values.proxmox.token | quote }}
+            {{- end }}
+            {{- if .Values.xenOrchestra.url }}
+            - name: XO_URL
+              value: {{ .Values.xenOrchestra.url | quote }}
+            - name: XO_TOKEN
+              value: {{ .Values.xenOrchestra.token | quote }}
+            {{- end }}
+            {{- if .Values.kubeconfig.secretName }}
+            - name: KUBECONFIG
+              value: {{ printf "%s/config" .Values.kubeconfig.mountPath | quote }}
+            {{- end }}
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          {{- if .Values.kubeconfig.secretName }}
+          volumeMounts:
+            - name: kubeconfig
+              mountPath: {{ .Values.kubeconfig.mountPath }}
+              readOnly: true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.kubeconfig.secretName }}
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: {{ .Values.kubeconfig.secretName }}
+      {{- end }}

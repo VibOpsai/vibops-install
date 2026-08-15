@@ -1,0 +1,116 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VibOps Connect — values.yaml
+# Helm chart for the VibOps Connect gateway deployed on client infrastructure.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+image:
+  repository: ghcr.io/davidmacamara-boop/vibops-connect
+  tag: "0.30.0"
+  pullPolicy: IfNotPresent
+
+# ── Gateway identity ──────────────────────────────────────────────────────────
+gateway:
+  # Unique name (displayed in VibOps console, e.g. "client-acme-prod")
+  name: ""
+  # Associated cluster name (e.g. "gpu-cluster-west")
+  cluster: ""
+  # Organization ID (provided by VibOps)
+  orgId: ""
+
+# ── Connection to VibOps Core API ─────────────────────────────────────────────
+vibops:
+  # URL of the core API (e.g. https://vibops.example.com)
+  coreUrl: ""
+  # Authentication token (generated from the console)
+  token: ""
+  # Existing K8s Secret containing the key "token"
+  existingSecret: ""
+
+# ── Local Kubernetes access ───────────────────────────────────────────────────
+kubeconfig:
+  # Secret containing a kubeconfig (key "config")
+  # If empty, uses the in-cluster ServiceAccount
+  secretName: ""
+  mountPath: "/root/.kube"
+
+# ── Platform type ─────────────────────────────────────────────────────────────
+# "kubernetes" (default), "hypervisor", "slurm", "hybrid"
+platformType: ""
+
+# ── Hypervisor config (platformType=hypervisor or hybrid) ─────────────────────
+# Proxmox VE
+proxmox:
+  url: ""          # https://proxmox.example.com:8006
+  user: "root@pam"
+  tokenId: ""
+  token: ""
+
+# Xen Orchestra (Vates / XCP-ng)
+xenOrchestra:
+  url: ""          # https://xo.example.com
+  token: ""
+
+# VMware vSphere (via pyVmomi — requires gateway image with pyVmomi)
+vsphere:
+  url: ""          # https://vcenter.example.com
+  user: ""
+  password: ""
+  verifySsl: "false"
+
+# ── Slurm config (platformType=slurm or hybrid) ──────────────────────────────
+slurm:
+  host: ""           # Slurm head node hostname
+  sshUser: "root"
+  sshPort: 22
+  sshKeySecret: ""   # K8s Secret name containing SSH private key
+  restUrl: ""        # Optional slurmrestd URL
+
+# ── Prometheus local ──────────────────────────────────────────────────────────
+prometheus:
+  url: "http://prometheus-operated:9090"
+
+# ── Network Discovery ────────────────────────────────────────────────────────
+networkScan:
+  # Scan the local subnet at boot for infrastructure services
+  enabled: true
+  # Subnet to scan (auto-detected from gateway IP if empty)
+  subnet: ""
+  # Timeout per port probe in milliseconds
+  timeoutMs: 500
+
+# ── mTLS (mutual TLS) ────────────────────────────────────────────────────────
+mtls:
+  enabled: false
+  # K8s Secret containing tls.crt and tls.key for client certificate auth
+  clientCertSecret: ""
+  # K8s Secret containing ca.crt for verifying core's server certificate
+  caSecret: ""
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── RBAC ──────────────────────────────────────────────────────────────────────
+rbac:
+  create: true
+  clusterRole: true
+
+# ── Extra environment variables ───────────────────────────────────────────────
+env: {}

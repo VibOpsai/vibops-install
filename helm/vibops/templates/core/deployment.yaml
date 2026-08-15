@@ -1,0 +1,98 @@
+{{- if .Values.core.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vibops.fullname" . }}-core
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: core
+spec:
+  replicas: {{ .Values.core.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: core
+  template:
+    metadata:
+      labels:
+        {{- include "vibops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: core
+    spec:
+      {{- include "vibops.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "vibops.fullname" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      {{- if .Values.core.kubeconfig.secretName }}
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: {{ .Values.core.kubeconfig.secretName }}
+            defaultMode: 0400
+        - name: tmp
+          emptyDir: {}
+      {{- else }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- end }}
+      initContainers:
+        - name: alembic-migrate
+          image: "{{ .Values.images.core.repository }}:{{ .Values.images.core.tag }}"
+          imagePullPolicy: {{ .Values.images.core.pullPolicy }}
+          command: ["alembic", "upgrade", "heads"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ include "vibops.fullname" . }}-core
+          env:
+            - name: APP_ENV
+              value: {{ .Values.core.env.APP_ENV | quote }}
+          resources:
+            {{- toYaml .Values.alembicInit.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: core
+          image: "{{ .Values.images.core.repository }}:{{ .Values.images.core.tag }}"
+          imagePullPolicy: {{ .Values.images.core.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: {{ include "vibops.fullname" . }}-core
+          env:
+            - name: APP_ENV
+              value: {{ .Values.core.env.APP_ENV | quote }}
+            {{- if .Values.core.kubeconfig.secretName }}
+            - name: KUBECONFIG
+              value: {{ .Values.core.kubeconfig.mountPath }}/config
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.core.kubeconfig.secretName }}
+            - name: kubeconfig
+              mountPath: {{ .Values.core.kubeconfig.mountPath }}
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.core.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+{{- end }}

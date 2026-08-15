@@ -1,0 +1,250 @@
+# VibOps Helm Chart — values par défaut
+# Surcharger avec: helm install vibops ./helm/vibops -f my-values.yaml
+
+global:
+  imageRegistry: ""          # ex: registry.mycompany.com
+  imagePullSecrets: []
+
+# ── Registry credentials (private OCI registry) ───────────────────────────────
+# Creates a kubernetes.io/dockerconfigjson Secret and injects it as imagePullSecret
+imageCredentials:
+  enabled: true
+  registry: ghcr.io
+  username: vibops-deploy    # pull-only service account
+  password: ""               # set in values.secret.yaml (SOPS-encrypted)
+
+# ── Images ────────────────────────────────────────────────────────────────────
+images:
+  core:
+    repository: ghcr.io/vibops/core
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  agent:
+    repository: ghcr.io/vibops/agent
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  console:
+    repository: ghcr.io/vibops/console
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+# ── Namespace ─────────────────────────────────────────────────────────────────
+namespaceOverride: ""   # défaut: release namespace
+
+# ── Core (Execution Engine) ───────────────────────────────────────────────────
+core:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  env:
+    APP_ENV: production
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""   # ex: http://otel-collector:4317
+    # Surcharger les secrets via core.secret.*
+
+  secret:
+    secretKey: "change-me-in-production"
+    jwtSecretKey: "change-me-jwt-secret"
+    authUsername: "admin"
+    authPasswordHash: ""   # vide = auth désactivée
+    databaseUrl: ""        # auto-généré si postgresql.enabled
+    redisUrl: ""           # REQUIRED in production — e.g. redis://<redis-host>:6379/0
+    vaultKey: "change-me-vault-key"    # Fernet key — python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    internalApiKey: "change-me-internal-key"  # service-to-service auth — python -c "import secrets; print(secrets.token_hex(32))"
+    # Licence VibOps — laisser vide pour trial 14 jours
+    # Obtenir une clé : contacter david@vibops.ai
+    # La clé est un JWT RS256 signé par VibOps. Aucun secret partagé requis côté client.
+    licenceKey: ""
+
+  # Kubeconfig multi-cluster — monté dans le pod core pour le sélecteur de contexte
+  # Créer le secret avec : kubectl create secret generic vibops-kubeconfig \
+  #   --from-file=config=$HOME/.kube/config -n vibops
+  kubeconfig:
+    secretName: ""          # nom du secret K8s contenant la clé "config"
+    mountPath: /home/vibops/.kube  # chemin de montage dans le pod
+
+# ── Worker (Celery) ──────────────────────────────────────────────────────────
+worker:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+# ── Agent ─────────────────────────────────────────────────────────────────────
+agent:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+  service:
+    type: ClusterIP
+    port: 8001
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: standard   # remplacer par efs-sc (AWS) ou nfs-client (GCP)
+    accessMode: ReadWriteOnce    # ReadWriteMany si plusieurs replicas (EFS)
+
+  env:
+    # LLM provider: claude (default) | openai (on-prem: vLLM, Mistral…) | ollama | nemotron
+    LLM_PROVIDER: "claude"
+    # Model name — interpreted by the active provider
+    # claude:   claude-sonnet-4-6, claude-opus-4-6
+    # openai:   glm-4, mistral-7b, llama3
+    # ollama:   llama3:8b, mistral:7b
+    # nemotron: nvidia/llama-3.1-nemotron-ultra-253b-v1
+    LLM_MODEL: "claude-sonnet-4-6"
+    # On-prem OpenAI-compatible endpoint (required when LLM_PROVIDER=openai)
+    LLM_BASE_URL: ""      # e.g. http://glm-service.ai-infra.svc:8000/v1 (openai provider only)
+    LLM_API_KEY: ""       # set here only if not using secret.llmApiKey
+    # Ollama endpoint (required when LLM_PROVIDER=ollama)
+    OLLAMA_BASE_URL: "http://ollama:11434"
+    # NVIDIA NIM endpoint (required when LLM_PROVIDER=nemotron)
+    NEMOTRON_BASE_URL: "http://nim:8000/v1"
+
+  secret:
+    # API key for the active LLM provider.
+    # - claude (Anthropic): get a key at https://console.anthropic.com/settings/keys
+    # - openai / on-prem: your provider's API key (leave empty if no auth required)
+    # - ollama / nemotron: leave empty (on-prem NIM needs no auth)
+    llmApiKey: ""
+    # Base URL — required only when LLM_PROVIDER=openai (on-prem endpoint).
+    # Example: http://vllm-service.ai-infra.svc:8000/v1
+    # Leave empty for claude, ollama, or nemotron.
+    llmBaseUrl: ""
+    jwtSecretKey: "change-me-jwt-secret"
+
+# ── Console (UI) ──────────────────────────────────────────────────────────────
+console:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+  service:
+    type: ClusterIP
+    port: 8003
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  host: vibops.example.com
+  tls: []
+  # tls:
+  #   - secretName: vibops-tls
+  #     hosts:
+  #       - vibops.example.com
+
+# ── PostgreSQL (Bitnami sub-chart) ────────────────────────────────────────────
+postgresql:
+  enabled: true
+  auth:
+    username: vibops
+    password: ""   # REQUIRED — set via --set postgresql.auth.password=<strong-password>
+    database: vibops
+  primary:
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "1"
+        memory: "512Mi"
+
+# ── HPA (désactivé par défaut — activer avec values.ha.yaml) ─────────────────
+autoscaling:
+  enabled: false
+  core:
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  agent:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 60
+
+# ── PodDisruptionBudget (désactivé par défaut) ────────────────────────────────
+podDisruptionBudget:
+  enabled: false
+  core:
+    minAvailable: 1
+  agent:
+    minAvailable: 1
+  console:
+    minAvailable: 1
+
+# ── Prometheus ServiceMonitor (nécessite prometheus-operator) ────────────────
+serviceMonitor:
+  enabled: false          # activer si kube-prometheus-stack est installé
+  interval: "30s"
+  path: /metrics          # exposé par prometheus-fastapi-instrumentator
+
+# ── Grafana Dashboard (nécessite kube-prometheus-stack + sidecar dashboards) ─
+grafanaDashboard:
+  enabled: false          # activer si grafana sidecar est configuré (label grafana_dashboard: "1")
+  namespace: ""           # défaut: même namespace que la release (ou "monitoring" si Grafana est ailleurs)
+
+# ── Security Context (applied to all pods) ───────────────────────────────────
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# ── Alembic initContainer resources ──────────────────────────────────────────
+alembicInit:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+# ── Network Policies ─────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

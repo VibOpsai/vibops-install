@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VibOps Connect — exemple de configuration production
+# À déployer sur chaque cluster GPU/CSP client.
+#
+#   helm repo add vibops https://davidmacamara-boop.github.io/vibops
+#   helm repo update
+#   helm install vibops-connect vibops/vibops-connect \
+#     -f values-prod.yaml -n vibops-connect --create-namespace
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Identité du connecteur ─────────────────────────────────────────────────────
+gateway:
+  name: "client-acme-gpu-west"     # identifiant unique dans VibOps
+  cluster: "gpu-cluster-west"       # nom affiché dans la console
+  orgId: "org_xxxxxxxxxxxx"         # fourni par VibOps lors de l'onboarding
+
+# ── Connexion VibOps centrale ─────────────────────────────────────────────────
+#
+# Créer le Secret AVANT le helm install :
+#   kubectl create secret generic vibops-connect-token -n vibops-connect \
+#     --from-literal=token="<token généré depuis la console VibOps>"
+#
+vibops:
+  coreUrl: "https://vibops.mycompany.com"
+  existingSecret: "vibops-connect-token"
+
+# ── Accès Kubernetes ──────────────────────────────────────────────────────────
+# Option A (recommandée) : ServiceAccount in-cluster — laisser kubeconfig vide.
+# Option B : kubeconfig externe (ex: accès multi-cluster depuis un hub).
+#
+# kubeconfig:
+#   secretName: "vibops-kubeconfig-local"
+
+# ── Prometheus local ───────────────────────────────────────────────────────────
+prometheus:
+  url: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+
+# ── RBAC ─────────────────────────────────────────────────────────────────────
+rbac:
+  create: true
+  clusterRole: true     # nécessaire pour lire les métriques nodes
+
+# ── Ressources ────────────────────────────────────────────────────────────────
+replicaCount: 1
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"

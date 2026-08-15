@@ -1,0 +1,19 @@
+{{- if .Values.core.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vibops.fullname" . }}-core
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: core
+spec:
+  type: {{ .Values.core.service.type }}
+  selector:
+    {{- include "vibops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: core
+  ports:
+    - port: {{ .Values.core.service.port }}
+      targetPort: 8000
+      name: http
+{{- end }}

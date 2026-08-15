@@ -1,0 +1,175 @@
+# VibOps — Values de production (v0.23.0+)
+#
+# Usage:
+#   helm upgrade --install vibops ./helm/vibops \
+#     -n vibops --create-namespace \
+#     -f helm/vibops/values.production.yaml \
+#     -f my-secrets.yaml          ← NE PAS commiter
+#     --set images.core.tag=v0.23.0 \
+#     --set images.agent.tag=v0.23.0 \
+#     --set images.console.tag=v0.23.0
+#
+# Fichier my-secrets.yaml minimal (générer avec: python -c "import secrets; print(secrets.token_hex(32))"):
+#
+#   core:
+#     env:
+#       DATABASE_URL: "postgresql+asyncpg://vibops:<password>@<rds-host>:5432/vibops"
+#       REDIS_URL: "redis://<redis-host>:6379/0"
+#     secret:
+#       secretKey: "<random 64 hex>"
+#       jwtSecretKey: "<random 64 hex>"
+#       authPasswordHash: "<bcrypt hash>"   # python -c "from passlib.context import CryptContext; print(CryptContext(schemes=['bcrypt']).hash('password'))"
+#       vaultKey: "<fernet key>"            # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#       licenceKey: "<vibops licence JWT>"  # obtenir: david@vibops.ai
+#   agent:
+#     secret:
+#       llmApiKey: "sk-ant-..."             # clé Anthropic
+#       jwtSecretKey: "<même que core>"
+
+# ── Images ────────────────────────────────────────────────────────────────────
+images:
+  core:
+    repository: ghcr.io/vibops/core
+    tag: "v0.23.0"
+    pullPolicy: IfNotPresent
+  agent:
+    repository: ghcr.io/vibops/agent
+    tag: "v0.23.0"
+    pullPolicy: IfNotPresent
+  console:
+    repository: ghcr.io/vibops/console
+    tag: "v0.23.0"
+    pullPolicy: IfNotPresent
+
+# ── GHCR pull secret ──────────────────────────────────────────────────────────
+imageCredentials:
+  enabled: true
+  registry: ghcr.io
+  username: vibops-deploy
+  password: ""   # set via --set imageCredentials.password=<ghcr-pat>
+
+# ── Core (Execution Engine) ───────────────────────────────────────────────────
+core:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+
+  env:
+    APP_ENV: "production"
+    JWT_EXPIRE_HOURS: "8"
+    CORS_ORIGINS: "https://vibops.yourcompany.com"
+    # DATABASE_URL et REDIS_URL dans my-secrets.yaml
+
+  # Secrets — tous via my-secrets.yaml, ne pas mettre ici
+  secret:
+    secretKey: ""
+    jwtSecretKey: ""
+    authUsername: "admin"
+    authPasswordHash: ""
+    vaultKey: ""
+    licenceKey: ""
+
+  kubeconfig:
+    secretName: ""   # kubectl create secret generic vibops-kubeconfig --from-file=config=~/.kube/config
+    mountPath: /home/vibops/.kube
+
+# ── Agent (LLM service) ───────────────────────────────────────────────────────
+agent:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+
+  env:
+    LLM_PROVIDER: "claude"
+    LLM_MODEL: "claude-sonnet-4-6"
+    LLM_BASE_URL: ""
+
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: gp3       # AWS: gp3 | GCP: pd-ssd | Azure: managed-premium
+    accessMode: ReadWriteOnce
+
+  secret:
+    llmApiKey: ""
+    jwtSecretKey: ""
+
+# ── Console (UI) ──────────────────────────────────────────────────────────────
+console:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+# ── PostgreSQL — désactivé en prod (utiliser DB managée) ─────────────────────
+postgresql:
+  enabled: false
+
+# ── Ingress + TLS (cert-manager requis) ───────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: vibops.yourcompany.com
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  tls:
+    - secretName: vibops-tls
+      hosts:
+        - vibops.yourcompany.com
+
+# ── HPA (activer après validation charge) ─────────────────────────────────────
+autoscaling:
+  enabled: false   # passer à true après premier déploiement stable
+  core:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  agent:
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 60
+
+# ── PDB (disponibilité pendant rolling update) ────────────────────────────────
+podDisruptionBudget:
+  enabled: true
+  core:
+    minAvailable: 1
+  agent:
+    minAvailable: 1
+  console:
+    minAvailable: 1
+
+# ── Prometheus / Grafana ──────────────────────────────────────────────────────
+serviceMonitor:
+  enabled: false   # true si kube-prometheus-stack installé
+  interval: "30s"
+
+grafanaDashboard:
+  enabled: false   # true si Grafana sidecar configuré
+
+# ── ServiceAccount (IRSA / Workload Identity si cloud managé) ─────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  # AWS IRSA:    eks.amazonaws.com/role-arn: arn:aws:iam::123456789:role/vibops
+  # GCP WI:      iam.gke.io/gcp-service-account: vibops@project.iam.gserviceaccount.com
