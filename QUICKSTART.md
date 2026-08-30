@@ -43,6 +43,7 @@ VibOps uses an AI to understand your requests. You have three options — pick t
 | **Claude (Anthropic)** | Best results, cloud | An Anthropic API key |
 | **Any OpenAI-compatible API** | Your own provider or on-prem endpoint | An API key + the endpoint URL |
 | **Ollama (local)** | Air-gapped, no API key, free | Just install Ollama |
+| **Nemotron (NVIDIA NIM)** | Sovereign, on-prem only | A running NIM endpoint |
 
 **Option A — Claude (Anthropic)**
 1. Go to https://console.anthropic.com/settings/keys
@@ -152,6 +153,13 @@ Replace `LLM_BASE_URL` with your provider's endpoint if it is not OpenAI.
 **Ollama (local, no API key):**
 ```
 LLM_PROVIDER=ollama
+```
+
+**Nemotron (NVIDIA NIM):**
+```
+LLM_PROVIDER=nemotron
+LLM_MODEL=nvidia/llama-3.1-nemotron-ultra-253b-v1
+NEMOTRON_BASE_URL=http://nim:8000/v1
 ```
 
 Save the file, then restart the AI service:

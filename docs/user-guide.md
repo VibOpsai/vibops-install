@@ -60,6 +60,8 @@
 21. [Dataset & RLHF](#21-dataset--rlhf)
 22. [MCP Server](#22-mcp-server)
 23. [Quick reference](#23-quick-reference)
+- [Compliance Verification](#compliance-verification)
+- [Security Scans](#security-scans)
 
 ---
 
@@ -1682,6 +1684,40 @@ POST /api/v1/anomalies/{id}/resolve  — manually resolve (org_admin)
 
 ---
 
+### Proaction Required
+
+The **Proaction Required** panel appears at the top of the Dashboard tab when VibOps detects infrastructure issues that need attention. Unlike anomaly detection (which monitors GPU metrics), the proactive engine runs 7 event-driven checks every 5 minutes across anomalies, budgets, jobs, deployments, GPU health, and cost optimization.
+
+#### Insight types
+
+| Type | What it detects |
+|------|----------------|
+| `stale_anomaly` | Open anomalies unresolved for more than 1 hour |
+| `gpu_health_warning` | GPU temperature or utilization health warnings |
+| `budget_warning` | Budget > 90% consumed, with exhaustion date forecast |
+| `job_failure_pattern` | 3+ failures on the same action within 30 minutes |
+| `deployment_health` | Pods restarting 3+ times in 1 hour |
+| `capacity_forecast` | GPU utilization projected to hit 90% within 14 days |
+| `cost_optimization` | Clusters averaging < 30% utilization over 24 hours, with waste estimate |
+
+#### Click-to-chat recommendations
+
+Each insight includes a contextual recommendation with real data (daily burn rate, cluster names, error messages, waste estimates). Click the recommendation text to inject it directly into the agent chat — the agent will act on it immediately.
+
+#### Toast notifications
+
+Critical insights trigger a toast notification in the bottom-right corner. Notifications poll every 60 seconds.
+
+#### Auto-acknowledge
+
+When the agent resolves the underlying issue (e.g. resolves a stale anomaly, scales a deployment, adjusts a budget), the corresponding insight is automatically marked as acknowledged. No manual dismissal is required.
+
+#### Deduplication
+
+Insights are deduplicated within a 1-hour window — the same check will not produce a duplicate insight if one already exists for the same resource.
+
+---
+
 ### Live Workload Cost Attribution
 
 The **Live Cost** panel in the FinOps → Workloads tab shows real-time cost attribution for every currently running workload.
@@ -3250,6 +3286,106 @@ Agent:
 #### Security note
 
 Registry credentials are passed per-job in the payload. Store them in the VibOps Secrets vault and reference them via `{{ secrets.HARBOR_PASSWORD }}` in your agent instructions to avoid exposing them in conversation history.
+
+---
+
+## Compliance Verification
+
+VibOps includes a compliance agent that verifies SOC 2 controls are **active at runtime** — not just documented. It runs 8 checks daily via Celery Beat and can be triggered on-demand via API.
+
+### Triggering a compliance check
+
+**On-demand** (org admin only):
+
+```bash
+POST /api/v1/compliance/check
+```
+
+Returns the check results immediately. The 8 checks run in-process and complete within seconds.
+
+**Automatic**: a daily Celery Beat task runs the full 8-check suite. No configuration required — it is enabled by default.
+
+### The 8 SOC 2 runtime checks
+
+| # | Control | What it verifies |
+|---|---------|------------------|
+| 1 | CC6.1 — Access controls | Auth middleware is active, PolicyEngine is loaded, at least one user exists |
+| 2 | CC6.2 — Access provisioning | Agent identity tokens exist, rotation is configured, expired identities are flagged |
+| 3 | CC7.1 — Vulnerability scanning | A recent DAST scan has run (security agent active) |
+| 4 | CC7.2 — Incident detection | Anomaly detection is active, proactive insights are being generated |
+| 5 | CC7.4 — Audit trail integrity | HMAC-SHA256 chain on audit logs is intact (no tampering) |
+| 6 | CC8.1 — Change management | Alembic migrations are up to date (no pending migrations) |
+| 7 | A1.2 — Backup freshness | Most recent backup exists and is within the configured retention window |
+| 8 | C1.1 — Encryption active | Fernet encryption roundtrip succeeds, no default/placeholder keys in use |
+
+### Viewing results
+
+Non-compliant findings automatically create **ProactiveInsight** records. They appear in the **Proaction Required** panel on the Dashboard tab, alongside GPU health warnings, budget alerts, and security findings.
+
+Each finding includes:
+- The SOC 2 control reference (e.g., CC7.4)
+- A description of what failed
+- Remediation guidance
+
+### When to use it
+
+- **Before an audit**: trigger on-demand to verify all controls pass before presenting evidence to your auditor
+- **After infrastructure changes**: confirm that a migration, key rotation, or backup configuration change did not break a control
+- **Continuous monitoring**: the daily schedule provides SOC 2 CC7.1 evidence of ongoing verification
+
+---
+
+## Security Scans
+
+VibOps includes an automated DAST (Dynamic Application Security Testing) agent that continuously validates your instance's security posture. It runs 8 penetration checks weekly via Celery Beat, or on-demand via API.
+
+### Triggering a scan
+
+**On-demand** (org admin only):
+
+```bash
+POST /api/v1/security/scan
+```
+
+Returns a scan ID. The scan runs asynchronously and completes within seconds.
+
+**Automatic**: a weekly Celery Beat task runs the full 8-check suite. No configuration required — it is enabled by default.
+
+### Viewing findings
+
+**API**:
+
+```bash
+GET /api/v1/security/findings
+```
+
+Returns all scan results with severity, check name, description, and remediation guidance. Filter by severity with `?severity=critical` or `?severity=high`.
+
+**Dashboard**: critical and high findings automatically create ProactiveInsight records. They appear in the **Proaction Required** panel on the Dashboard tab, alongside GPU health warnings and budget alerts.
+
+### What the 8 checks test
+
+| # | Check | What it tests |
+|---|-------|---------------|
+| 1 | Scope bypass | Cross-org JWT — attempts to access data from another organization using your token |
+| 2 | Auth bypass | Unauthenticated access to protected endpoints |
+| 3 | Tenant isolation | Cross-org resource access (jobs, secrets, clusters) |
+| 4 | Input injection | Shell metacharacters in kubectl/helm payloads |
+| 5 | Rate limiting | Brute-force login detection and enforcement |
+| 6 | Privilege escalation | Non-admin user accessing admin-only endpoints |
+| 7 | IDOR | Guessed UUIDs belonging to another organization |
+| 8 | Header injection | X-Forwarded-For spoofing, Host header manipulation |
+
+### Dev mode vs prod mode
+
+The scanner is aware of the current environment mode (`APP_ENV`):
+
+| Mode | Behavior |
+|------|----------|
+| **production** | All findings reported at full severity. Critical/high findings create ProactiveInsight records. |
+| **development** | Expected findings (relaxed rate limiting, dev-only auth bypass) are downgraded from CRITICAL/HIGH to LOW/INFO. This prevents alert fatigue during development while keeping the same checks running. |
+
+A typical first scan in development mode returns 0 CRITICAL, 0 HIGH, several PASS, and a handful of LOW findings — this is expected behavior.
 
 ---
 

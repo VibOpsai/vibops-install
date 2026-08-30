@@ -9,6 +9,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.36.0] — 2026-08-18
+
+### Added
+- **VibOps Python SDK v0.1.0** (`sdk/`) — typed async-first client with sync wrapper; 27 resource namespaces covering 98 API endpoints; auto-retry with exponential backoff; typed exceptions (Auth, Forbidden, NotFound, Conflict, RateLimit, Timeout, Connection); typed response dataclasses; pagination support; SSE streaming for job logs; event hooks; PEP 561 typed package; MIT licensed; 129 tests; `pip install vibops`
+- **Pre-commit ruff lint check** — catches F401/F841/F541 before CI; `python3 -m ruff` fallback
+- Sync script `scripts/sync-sdk-repo.sh` for VibOpsai/vibops-sdk mirror
+
+---
+
+## [0.35.0] — 2026-08-19
+
+### Added
+- **Compliance agent** — 8 SOC 2 runtime checks verifying controls are active (not just documented): CC6.1 access controls, CC6.2 access provisioning, CC7.1 vulnerability scanning, CC7.2 incident detection, CC7.4 audit trail integrity (HMAC-SHA256 chain), CC8.1 change management (Alembic), A1.2 backup freshness, C1.1 encryption active (Fernet roundtrip, no default keys)
+- Daily Celery Beat schedule + on-demand API
+- Non-compliant findings auto-create ProactiveInsight
+- **ADR 0031** — Compliance agent architecture
+- 10 compliance agent tests
+
+---
+
+## [0.34.0] — 2026-08-18
+
+### Added
+- **Security agent (DAST)** — 8 automated penetration checks (scope bypass, auth bypass, tenant isolation, input injection, rate limiting, privilege escalation, IDOR, header injection) running weekly via Celery Beat or on-demand via `POST /security/scan`; dev/prod mode awareness; critical/high findings auto-create ProactiveInsight; ADR 0030
+- **Harness reinforcement** — 3 new guardrails: scope enforcement (UserContext namespace/cluster validation), input sanitization (shell injection patterns blocked), write cost cap (max 5 write actions/turn); 38 total guardrail tests
+- **SOC 2 readiness** — 17/17 Trust Service Criteria documented: security policy, incident response plan (P1-P4), backup & recovery policy, risk assessment (14 risks), board oversight, internal communication, readiness checklist
+- **ADR 0030** — Security Agent DAST architecture
+- 9 security agent tests, 14 new guardrail tests
+
+---
+
+## [0.33.0] — 2026-08-17
+
+### Added
+- **Proactive agent engine** — 7 event-driven insight types (`stale_anomaly`, `gpu_health_warning`, `budget_warning`, `job_failure_pattern`, `deployment_health`, `capacity_forecast`, `cost_optimization`) running every 5 min via Celery Beat; SQL-only checks (~5ms/run), deduplication (1h window), auto-acknowledge on agent remediation
+- **Dashboard "Proaction Required" panel** — click-to-chat recommendations that inject directly into the agent conversation; contextual data (daily burn, cluster names, error messages, waste estimates)
+- **Toast notification** for critical insights with 60s polling
+- **31 proactive agent tests**
+- **Agent modular prompt system** — system prompt assembled from 4 files: `system_prompt.md` + `routing_rules.md` + `response_templates.md` + 11 few-shot examples
+- **3 new behavioral rules**: Rule 17 (Planning — present numbered plan before multi-step actions), Rule 18 (Learn from corrections — save user corrections as memory), Rule 19 (Synthesize — lead with insight, not raw data)
+- **10 routing decision trees** — tool selection disambiguation for scale/deploy/monitor/cost/incident/secrets/git/helm confusions
+- **13 response templates** — structured formats for deployment, scaling, incident, cost, VM, error, budget warning, pipeline, anomaly resolution
+- **ToolGuardrails harness** — deterministic code-level enforcement: duplicate call detection, loop detection (>3 same tool/turn), namespace enforcement (K8s write without namespace blocked), budget guard flag
+- **ADR 0028** — Prompt Engineering + Harness Engineering dual-layer approach
+- **54 new agent tests**: 24 guardrail unit tests, 10 integration tests (real agent loop with mocked LLM), 7 prompt invariant tests, 13 behavioral tests
+
+### Fixed
+- **Security audit pass 1** — 27 findings fixed: 5 HIGH (proxy org isolation on create_secret/create_job/create_pipeline, CI missing test jobs), 12 MEDIUM (OData injection, body:dict→Pydantic, unbounded queries, VM HITL, kubeconfig auth, Dockerfile), 10 LOW (pipelines body:dict, INTERNAL_API_KEY leak, F821 lint, llm-proxy tests, dead code, nemotron key, DeepSeek streaming, Grafana auth, dynamic tools, function-level import)
+- **Security audit pass 2** — 6 findings fixed: correlated alerts LIMIT, delete_webhook_subscription org isolation, SSO error leakage, gpu-simulator root, Docker socket documentation
+- **CI console tests** — mock httpx.Response with headers/content for _proxy_to_core, remove stale git_client tests, add branding to PUBLIC_ENDPOINTS, CONVERSATIONS_DB_PATH env var, python -m pytest in all jobs, MCP extra [dev] not [test], mcp<2.0.0 pin, gateway ssl import, MCP EXPECTED_TOOLS whitelist updated
+- **Nemotron documentation** — added to README, QUICKSTART, technical-architecture, roadmap version headers updated to v0.32.0
+
+### Changed
+- **Agent prompt**: 16 → 19 behavioral rules, 8 → 11 few-shot examples
+- **Roadmap**: marked console split (HTML partials + JS modules) as done
+
+---
+
 ## [0.32.0] — 2026-08-15
 
 ### Added

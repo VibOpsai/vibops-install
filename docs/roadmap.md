@@ -1,6 +1,6 @@
 # VibOps — Technical Roadmap
 
-_Last updated: 2026-08-07 · v0.31.0_
+_Last updated: 2026-08-18 · v0.36.0_
 
 ## Principles
 
@@ -86,6 +86,7 @@ _Last updated: 2026-08-07 · v0.31.0_
 - [x] GitOps workflow — `git_clone` → `git_patch_yaml` → `git_commit_push` → `git_create_pr`
 - [x] NIM workflow — `nim_list_catalog` → `nim_profiles` → GPU audit → `nim_deploy`
 - [x] Memory system — `save_memory` / `recall_memory`, proactive saving after incidents and decisions
+- [x] **Proactive agent engine** — 7 event-driven insight types, dashboard "Proaction Required" panel with click-to-chat, auto-acknowledge on remediation, toast notifications (ADR 0029) ✓ v0.33.0
 
 ### Observability
 - [x] Prometheus webhook integration (`POST /api/v1/webhook/grafana`)
@@ -177,6 +178,8 @@ _Last updated: 2026-08-07 · v0.31.0_
 
 ### Security
 - [x] CVE scanning — `pip-audit` on all `requirements.txt` + Trivy filesystem scan, blocking on HIGH/CRITICAL, runs on every push and PR
+- [x] **Security agent (DAST)** — 8 automated pentest checks (scope bypass, auth bypass, tenant isolation, input injection, rate limiting, privilege escalation, IDOR, header injection); weekly Celery Beat schedule + on-demand `POST /security/scan`; dev/prod mode awareness (downgrades expected findings); critical/high findings auto-create ProactiveInsight; results in `security_scan_results` table; SOC 2 CC7.1 continuous monitoring evidence; 9 tests (ADR 0030)
+- [x] **Compliance agent** — 8 SOC 2 runtime checks (CC6.1, CC6.2, CC7.1, CC7.2, CC7.4, CC8.1, A1.2, C1.1) verifying controls are active at runtime; daily Celery Beat + on-demand API; non-compliant findings auto-create ProactiveInsight; 10 tests (ADR 0031) ✓ v0.35.0
 - [x] **Security Sprint (2026-06-20) — 19 vulnerabilities fixed across 5 commits (v0.20.1)**
   - CRITICAL: cross-org access bypass in `tenants.py` — `_enforce_org_isolation()` on all 13 org-scoped routes
   - HIGH: LDAP injection — `escape_filter_chars()` before filter substitution
@@ -329,18 +332,35 @@ _Last updated: 2026-08-07 · v0.31.0_
 ## P1 — Backlog (prioritized)
 
 ### FinOps maturity
+- [ ] **Reseller FinOps dashboard** — aggregate FinOps views for reseller orgs (~27h total):
+  - API: `GET /resellers/me/finops/summary` — per-customer spend MTD, top spenders, total (4h)
+  - API: `GET /resellers/me/finops/chargeback/{year}/{month}` — cross-customer chargeback breakdown (3h)
+  - API: `GET /resellers/me/finops/spend-trend` — aggregated 12-month trend across all customers (4h)
+  - Tests: 3 routes × happy path + edge cases (5h)
+  - Console: "Customers" tab in FinOps — table with spend/budget/trend per client, stacked chart, client filter, reseller guard (10h)
+  - OpenAPI regen (0.5h)
+- [ ] **Reseller data visibility controls (RGPD)** — configurable per-customer data sharing:
+  - Customer opt-in/opt-out on what the reseller can see
+  - Level 1 (billing only): GPU/h consumed, total cost — minimum for invoicing
+  - Level 2 (ops): + cluster names, namespace, workload count — for MCO
+  - Level 3 (full): + model names, agent names, detailed usage — opt-in only
+  - Default: Level 1 (billing only) — RGPD safe
+  - Stored on Organization model: `reseller_visibility_level` field
+  - API routes filter response fields based on customer's visibility level
+  - Consent recorded in audit trail
 - ~~[ ] `accelerator_detect_waste` — time-series mode: sustained underutilisation over N hours (not just snapshot)~~ ✓ Sprint 15
 - ~~[ ] Chargeback generation — automated monthly Celery Beat task (currently admin-triggered)~~ ✓ Sprint 15
 - [x] **GPU passthrough correlation (MOAT)** — detect PCIe passthrough in VM config, match VM hostname ↔ K8s node, unified FinOps (VM + GPU cost on same asset). Fleet VM table: GPU column + drill-down drawer (hypervisor → K8s → workload → combined cost). ✓ v0.26.0
+- [ ] **VM chargeback** — cost per tenant based on VM resources (vCPU/h + RAM/h + disk). Rate configurable per hypervisor. Aggregated monthly report per tenant. Same model as GPU chargeback but for CPU/RAM/disk. ~2 days.
+- [ ] **Chargeback export (pre-invoice)** — CSV/PDF export per tenant with consumption detail (GPU/h, VM/h, cost, period), ready to import into ERP (Sage, SAP, etc.). Signed HMAC for integrity. Covers both GPU and VM chargeback. ~1 day.
 - [ ] Cloud pricing API integration — live AWS/GCP/Azure GPU rates (currently manual ClusterRate)
 - [x] VM cost history — VmCostSnapshot table, 12-month spend trend parity with GPU ✓ v0.29.0
 - [x] Currency conversion — EUR/USD dynamic symbol from budget.currency ✓ v0.29.0
 - [x] White-label routing — custom domains per CSP via `white_label_domain` — `GET /branding` resolves CSP brand from Host header ✓ Sprint 7
-- [ ] FinOps UI — consent management + dataset export controls in console (ADR 0018 — Decision 5)
 - ~~[ ] Budget enforcement on pre-Sprint 9 jobs — sum Job records instead of ChargebackReport~~ ✓ Sprint 14
 
 ### Dataset & RLHF maturity
-- [ ] Dataset UI — consent management and export controls in console
+- [ ] Dataset UI — consent management + dataset export controls in console (ADR 0018 — Decision 5)
 - ~~[ ] GPU utilization per-job — per-pod DCGM via gateway (attribution currently impossible with concurrent workloads)~~ ✓ Sprint 4 (live cost attribution via ClusterRate × elapsed time)
 - ~~[ ] Salt rotation migration plan for `DATASET_PSEUDONYMIZATION_SALT`~~ ✓ Sprint 15
 - ~~[ ] Reseller consent ownership — which org sets consent for reseller_customer orgs~~ ✓ Sprint 15 (ADR 0020 Decision 2)
@@ -355,6 +375,7 @@ _Last updated: 2026-08-07 · v0.31.0_
 
 ### Intelligence
 - ~~[ ] Proactive incident detection — agent monitors metrics autonomously between sessions~~ ✓ Sprint 4 (anomaly detection Beat task)
+- [x] **Proactive agent engine** — 7 event-driven insight types (stale_anomaly, gpu_health_warning, budget_warning, job_failure_pattern, deployment_health, capacity_forecast, cost_optimization); Celery Beat every 5 min; SQL-only (~5ms/run); deduplication + auto-acknowledge; dashboard "Proaction Required" panel with click-to-chat; toast notifications for critical insights; 31 tests ✓ v0.33.0
 - [x] Datadog GPU polling — Celery beat task, virtual gateway type "datadog", writes to gpu_metrics_history ✓ v0.30.0
 - [x] Alert correlation across multiple services — AlertCorrelator groups by cluster/namespace/node, 5-min window, root cause heuristic, 14 tests ✓ v0.31.2
 - [x] Predictive GPU failure — temperature trend, sustained high util, utilization cliff; Celery beat 10min; 14 tests ✓ v0.31.2
@@ -431,12 +452,41 @@ _Last updated: 2026-08-07 · v0.31.0_
 ### MCP Server
 - [ ] MCP tool coverage parity with full agent tool set
 - [ ] MCP server Helm chart for self-hosted deployment
-- [ ] SDK: typed Python client generated from OpenAPI spec
+- [x] SDK: typed Python client (`sdk/`) — 9 resource namespaces, async-first with sync wrapper, auto-retry, typed exceptions, MIT licensed, 19 tests ✓ v0.35.0
+
+### Agent Fleet (custom graph, zero external dependencies)
+
+**Shipped (4 agents):**
+- [x] Ops Orchestrator — 224 tools, 19 rules, 7 guardrails, conversational ✓ v0.1
+- [x] Proactive Sensor — 7 event-driven insight types, 5-min Celery beat ✓ v0.33.0
+- [x] Security Scanner — 8 DAST pentest checks, weekly + on-demand ✓ v0.34.0
+- [x] Compliance Verifier — 8 SOC 2 runtime checks, daily ✓ v0.35.0
+
+**Phase 2 — Optimization agents:**
+- [ ] Cost Optimizer — continuous FinOps recommendations (placement, sizing, spot vs reserved, idle scale-down)
+- [ ] Capacity Planner — GPU demand forecasting at 30/60/90 days, procurement alerts
+- [ ] Vendor Arbitrator — real-time cost/performance comparison across NVIDIA, AMD, Intel, Cerebras; optimal placement recommendations
+
+**Phase 3 — Autonomous operations:**
+- [ ] Incident Responder — auto-remediate P3/P4 incidents without human intervention (diagnose → fix → verify → resolve)
+- [ ] Release Manager — canary deploy validation, auto-rollback on metric regression, progressive rollout
+- [ ] Drift Detector — compare GitOps desired state vs actual cluster state, alert and auto-reconcile
+- [ ] SLA Monitor — continuous SLO verification, auto-escalation on breach, trend-based early warning
+
+**Phase 4 — Governance & intelligence:**
+- [ ] Data Guardian — RGPD enforcement (consent verification, retention policies, anonymization triggers, right-to-erasure automation)
+- [ ] Chaos Agent — controlled fault injection to test resilience (GPU failure simulation, network partition, OOM scenarios)
+- [ ] Knowledge Agent — learns from past incidents and recommendations, enriches future diagnostics with historical patterns
+- [ ] Onboarding Assistant — conversational wizard for new clients (replaces HTML wizard with AI-guided setup)
+
+**Infrastructure:**
+- [ ] Agent graph dispatcher — custom state machine in DB (`agent_tasks` table) + Celery routing. No LangGraph/CrewAI dependency. ADR 0032.
+- [ ] Agent fleet dashboard — console panel showing all agents, status, last run, findings count
+- [ ] Inter-agent communication protocol — agents trigger each other via DB tasks (security → ops, compliance → security)
 
 ### Console frontend architecture
-- [ ] Split `index.html` (8000 lines) into Jinja2 partials — one per tab (wizard, fleet, finops, agents, settings)
-- [ ] Split `vibops.js` (4500 lines) into JS modules (wizard.js, fleet.js, finops.js, api.js) — concatenated at build
-- [ ] This intermediate step maps 1:1 to future React components — enables incremental migration without big-bang rewrite
+- [x] Split `index.html` (9285 lines) into Jinja2 partials — 18 partials, skeleton 406 lines ✓ v0.32.0
+- [x] Split `vibops.js` (5305 lines) into 13 JS modules — Object.assign assembler (38 lines) ✓ v0.32.0
 
 ---
 

@@ -88,7 +88,7 @@ services:
       DATADOG_SITE: ${DATADOG_SITE:-datadoghq.com}
       SLURM_DEMO_MODE: ${SLURM_DEMO_MODE:-true}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock  # SECURITY: host root-equiv — required for docker build ops. Use socket proxy in production.
       - ${HOME}/.kube:/root/.kube         # kubeconfig host — setup_kubeconfig écrit ici
     ports:
       - "8080:8080"   # kubectl port-forward (ex: open-webui)
@@ -163,6 +163,10 @@ services:
     env_file: .env
     environment:
       CORE_API_URL: http://core:8000
+      LLM_PROVIDER: ${LLM_PROVIDER:-claude}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
     ports:
       - "8001:8001"
     volumes:
@@ -309,7 +313,7 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-vibops}
       GF_SECURITY_ALLOW_EMBEDDING: "true"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"  # dev only — disable in production (Helm chart does not expose this)
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_FEATURE_TOGGLES_ENABLE: publicDashboards
     volumes:
