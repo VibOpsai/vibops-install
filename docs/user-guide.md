@@ -1979,6 +1979,95 @@ The **trial banner** at the top of the console (visible to admins only) changes 
 
 To renew or upgrade to a higher plan: contact **`david@vibops.ai`** or your VibOps sales representative.
 
+### Customers (reseller orgs only)
+
+This tab appears only when your organization is configured as a **reseller** (`org_type = "reseller"`). It provides multi-tenant management for CSPs and managed service providers.
+
+**Customer list:**
+
+| Column | Description |
+|--------|-------------|
+| **Name** | Customer organization name |
+| **Slug** | Unique identifier (URL-safe) |
+| **Created** | Date the customer was onboarded |
+
+**Actions:**
+- **Add Customer** — create a new customer org under your reseller account. Each customer gets isolated data (audit, budget, policies).
+- **View** — select a customer to manage their pricing overrides.
+
+**Pricing Rules (global):**
+
+Apply to all customers by default. Configure markup per vendor, accelerator type, and pricing tier.
+
+| Field | Description |
+|-------|-------------|
+| Vendor | GPU vendor (e.g. nvidia, amd) |
+| Accelerator | GPU model (e.g. H100, A100) |
+| Markup % | Percentage added to internal cost |
+| Tier | on_demand, spot, reserved_1y, reserved_3y |
+
+**Customer Pricing Overrides:**
+
+Per-customer exceptions to the global rules. Select a customer → Add Override.
+
+| Field | Description |
+|-------|-------------|
+| Discount % | GPU discount off standard markup |
+| Custom GPU price | Fixed $/GPU/h (overrides markup) |
+| vCPU $/h | Custom VM vCPU rate for this customer |
+| RAM $/GB/h | Custom VM RAM rate |
+| Disk $/GB/h | Custom VM disk rate |
+| Notes | Free text |
+
+> You can set GPU-only, VM-only, or both overrides in the same entry.
+
+**White-label:**
+
+Configure your brand for the customer-facing console:
+- `white_label_name` — brand name shown in the console header
+- `white_label_logo_url` — logo URL
+- `white_label_domain` — custom domain (e.g. `gpu.yourcompany.com`)
+
+### Security tab
+
+**SSO / OIDC:**
+
+VibOps supports Single Sign-On via any OIDC provider (Azure AD, Okta, Google, custom). Configure in Settings → Security:
+
+| Field | Description |
+|-------|-------------|
+| Provider URL | OIDC issuer URL (e.g. `https://login.microsoftonline.com/{tenant}/v2.0`) |
+| Client ID | Application client ID |
+| Client Secret | Application secret |
+| Redirect URI | `https://your-vibops/api/v1/auth/oidc/callback` |
+
+Users are provisioned automatically on first login (JIT provisioning).
+
+**LDAP / Active Directory:**
+
+Connect VibOps to your corporate directory for user authentication.
+
+| Field | Description |
+|-------|-------------|
+| LDAP URL | `ldaps://ad.company.com:636` |
+| Bind DN | `cn=vibops-svc,ou=Service Accounts,dc=company,dc=com` |
+| Bind Password | Service account password |
+| User Base DN | `ou=Users,dc=company,dc=com` |
+| User Filter | `(sAMAccountName={username})` |
+
+Supports TLS and STARTTLS. Users are created in VibOps on first successful LDAP login.
+
+**SIEM Export:**
+
+Push audit events to Splunk or Datadog for centralized security monitoring.
+
+| Field | Description |
+|-------|-------------|
+| Provider | `splunk` or `datadog` |
+| Endpoint | HEC URL (Splunk) or Logs API URL (Datadog) |
+| Token | HEC token (Splunk) or API key (Datadog) |
+| Format | `json`, `cef`, or `leef` |
+
 ---
 
 ## 18. Connect Gateway
