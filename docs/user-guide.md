@@ -2179,9 +2179,9 @@ Each pipeline response includes per-step status (`pending` / `running` / `succes
 
 ## 19. FinOps tab
 
-**What is it for?** The FinOps tab gives you a centralized view of what your GPUs cost, where the money goes, and how to control it. Five sub-tabs: **Waste**, **Budget**, **Chargeback**, **Alerts** (history of overruns), **Workloads** (live per-workload GPU utilisation).
+**What is it for?** The FinOps tab gives you a centralized view of what your GPUs and VMs cost, where the money goes, and how to control it. Sub-tabs: **Waste**, **Budget**, **Chargeback** (GPU + VM), **Alerts** (history of overruns), **Workloads** (live per-workload GPU utilisation), **VM Usage** (live per-VM cost attribution).
 
-**Who should use it:** admins, infrastructure leads, and anyone who needs to justify GPU costs to a finance director.
+**Who should use it:** admins, infrastructure leads, and anyone who needs to justify GPU or VM costs to a finance director.
 
 ---
 
@@ -2232,6 +2232,37 @@ It is 8am, the scan shows 4 GPUs idle since the night:
 → Click Scale down → scale to 0
 → Budget saved: ~$200/night depending on GPU type
 ```
+
+---
+
+### VM Waste Detection
+
+VibOps can scan VMs across all hypervisors (Proxmox, vSphere, XCP-ng) to detect waste:
+
+- **Stopped VMs** — allocated resources (CPU, RAM, disk) but not running
+- **Low CPU VMs** — running VMs with CPU utilization below threshold (default: 10%)
+- **Over-provisioned VMs** — large allocations (16+ vCPU, 64+ GB RAM) with minimal usage
+
+**Via the agent:**
+```
+Scan all Proxmox VMs for waste — stopped VMs and low CPU
+Run a VM waste scan across all hypervisors — Proxmox, vSphere, and XCP-ng
+```
+
+The agent returns a table with severity (HIGH/MEDIUM), VM name, waste type, and a concrete recommendation (delete, downsize, or archive).
+
+### VM Backup Compliance
+
+Check which VMs are missing a recent snapshot — essential for MCO/MCS:
+
+```
+Check backup compliance on the Proxmox cluster — which VMs have no recent snapshot?
+```
+
+The agent returns:
+- VMs with **no snapshot at all** (HIGH severity if running)
+- VMs with **stale snapshots** older than the threshold (default: 7 days)
+- Compliant VM count
 
 ---
 
@@ -2368,6 +2399,63 @@ POST /api/v1/clusters/h100-prod/rate/sync
 **AWS credentials:** the sync endpoint calls the AWS Pricing API via `boto3`. The gateway must have AWS credentials configured (IAM role, instance profile, or `AWS_ACCESS_KEY_ID` env var).
 
 **GCP note:** prices come from a curated static table (updated with each VibOps release). Azure prices are live from the public Microsoft Retail Prices API — no credentials required.
+
+---
+
+### VM Chargeback
+
+VibOps tracks VM costs separately from GPU costs. The VM chargeback computes monthly cost per tenant based on allocated VM resources.
+
+**Cost formula per VM:**
+```
+Hourly cost = (vCPU × vCPU_rate) + (RAM_GB × RAM_rate) + (Disk_GB × Disk_rate)
+Monthly cost = Hourly cost × hours_in_month
+```
+
+**Default rates (configurable per cluster in FinOps → VM Rates):**
+
+| Resource | Default rate | Description |
+|----------|-------------|-------------|
+| vCPU | $0.02/h | Per virtual CPU per hour |
+| RAM | $0.005/GB/h | Per GB of RAM per hour |
+| Disk | $0.001/GB/h | Per GB of disk per hour |
+
+**GPU passthrough:** If a VM has GPU passthrough devices, the GPU cost is added: `gpu_count × rate_per_gpu_hour × hours_in_month`. Both costs appear on the same line.
+
+**Generating a VM chargeback report:**
+
+Via the agent:
+```
+Generate a VM chargeback report for August 2026
+```
+
+Via API:
+```
+POST /api/v1/finops/vm-chargeback/2026/8/generate
+```
+
+**Retrieving a report:**
+```
+GET /api/v1/finops/vm-chargeback/2026/8
+```
+
+The report includes: VM count, total vCPU-hours, total RAM-GB-hours, internal cost, customer cost (after markup), and a per-VM breakdown.
+
+### VM Pricing Overrides (reseller)
+
+For reseller orgs, VM pricing can be customized per customer via **Settings → Customers → select customer → Add Override**.
+
+The override form includes both GPU and VM fields:
+
+| Field | Description |
+|-------|-------------|
+| **Discount %** | GPU discount off standard markup |
+| **Custom GPU price** | Fixed $/GPU/h for this customer |
+| **vCPU $/h** | Custom vCPU rate (overrides cluster default) |
+| **RAM $/GB/h** | Custom RAM rate |
+| **Disk $/GB/h** | Custom disk rate |
+
+This allows a reseller to give specific customers different VM rates — e.g., a volume discount on vCPU for a large customer.
 
 ---
 
