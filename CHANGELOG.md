@@ -9,6 +9,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.37.0] — 2026-08-30
+
+### Added
+- **8 VM ops tools** — waste detection, per-VM metrics, backup compliance across Proxmox, vSphere, XCP-ng
+- **VM chargeback** — `POST /finops/vm-chargeback/{year}/{month}/generate`, `GET` per month, `GET` list; cost model: vCPU/h + RAM/h + disk/h; reseller markup applied; GPU passthrough cost included
+- **VM pricing overrides** — per-customer vCPU/RAM/disk rates in reseller overrides (backend + console UI)
+- **Demo videos** — "Code to GPU" (1m52) and "Agent FinOps" (1m33), English, Playwright-recorded
+- **One-pagers** — Sopra Steria, Cheops Technology, Oreus (corporate white theme, PDF-ready)
+- **Workshop Oreus** — 90-min agenda with 16 tested prompts
+- **User guide** — 5 new sections: VM Management (§19), Python SDK (§24), Cloud Providers (§25), Terraform (§26), Docker Build & CI (§27); Admin section: Customers (reseller), Security (SSO/LDAP/SIEM)
+
+### Changed
+- Action count: 258 → **266** (8 new VM tools)
+- API routes: 198 → **201** (3 VM chargeback endpoints)
+- Console: reseller Customers tab visibility fix (`x-show` vs `x-if`)
+- Docker compose: LLM_PROVIDER/MODEL/API_KEY/BASE_URL env vars on agent service
+- Pre-commit: fix ruff fallback via `python3 -m`
+- Install repo: updated to v0.36.0 → v0.37.0, hypervisor setup guide in QUICKSTART
+
+### Fixed
+- SDK: 6 audit passes — 11 CRITICALs + 12 HIGHs fixed (API paths, field names, response envelopes, dry-run safety)
+- VmCostSnapshot model: duplicate `__table_args__`, wrong `__repr__`
+- Seed script: `DEMO_ORG_ID` env var support for correct org_id matching
+
+---
+
 ## [0.36.0] — 2026-08-18
 
 ### Added

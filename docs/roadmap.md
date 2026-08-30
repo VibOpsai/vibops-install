@@ -1,6 +1,6 @@
 # VibOps — Technical Roadmap
 
-_Last updated: 2026-08-18 · v0.36.0_
+_Last updated: 2026-08-30 · v0.37.0_
 
 ## Principles
 
