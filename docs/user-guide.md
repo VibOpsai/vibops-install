@@ -2177,7 +2177,86 @@ Each pipeline response includes per-step status (`pending` / `running` / `succes
 
 ---
 
-## 19. FinOps tab
+## 19. VM Management (Proxmox, vSphere, XCP-ng)
+
+VibOps manages virtual machines across three hypervisors from a single interface. All operations are available via natural language through the agent.
+
+### Supported hypervisors
+
+| Hypervisor | Connector | VM lifecycle | Snapshots | Migration | Metrics | Waste detection | Backup compliance |
+|-----------|-----------|-------------|-----------|-----------|---------|----------------|-------------------|
+| **Proxmox VE** | `proxmox_*` | start, stop, restart, delete, resize, clone | create, list, restore, delete | live-migrate | per-VM CPU/RAM | yes | yes |
+| **VMware vSphere** | `vsphere_*` | start, stop, restart, delete, resize, clone | create, list, restore, delete | vMotion | per-VM CPU/RAM (quickStats) | yes | yes |
+| **XCP-ng (Xen Orchestra)** | `xo_*` | start, stop, restart, delete, resize, clone | create, list, restore, delete | live-migrate | host-level (per-VM limited) | yes | yes |
+
+### Connecting a hypervisor
+
+Configure the gateway environment variables (see [QUICKSTART → Connect to a hypervisor](QUICKSTART.md#connect-to-a-hypervisor-vsphere--proxmox--xcp-ng)). After restart, the gateway auto-discovers all VMs and reports them to VibOps.
+
+### VM lifecycle operations
+
+```
+List all VMs on the Proxmox cluster
+Start VM dev-sandbox on pve-node2
+Stop VM old-bench-vm on pve-gpu-3
+Migrate VM web-server to host pve-node-2
+Create a snapshot of VM delta-trading-01 before maintenance
+Resize VM beta-erp-staging to 16 vCPU and 64 GB RAM
+```
+
+All destructive operations (stop, delete, restore snapshot) require `confirmed=true` — the agent shows a dry-run preview first.
+
+### VM metrics
+
+```
+Get CPU and memory metrics for VM delta-trading-01 on pve-node-1
+```
+
+Returns: CPU utilization %, vCPU count, RAM used/total, uptime. Available on Proxmox and vSphere. On XCP-ng, per-VM CPU requires host-level metrics.
+
+### VM waste detection
+
+```
+Scan all Proxmox VMs for waste — stopped VMs and low CPU
+Run a VM waste scan across all hypervisors — Proxmox, vSphere, and XCP-ng
+```
+
+Detects:
+- **Stopped VMs** — allocated resources but not running (severity: HIGH if large VM)
+- **Low CPU VMs** — running but CPU below threshold (default: 10%)
+- **Over-provisioned VMs** — large allocation with minimal usage
+
+The cross-hypervisor scan runs all three hypervisors in parallel and returns a unified report.
+
+### VM backup compliance
+
+```
+Check backup compliance on the Proxmox cluster — which VMs have no recent snapshot?
+```
+
+Flags:
+- VMs with **no snapshot** — HIGH severity if running
+- VMs with **stale snapshots** — older than threshold (default: 7 days)
+
+Essential for MCO/MCS — ensures every production VM has a recovery point.
+
+### GPU passthrough VMs
+
+VibOps detects PCIe GPU passthrough on VMs and correlates them with Kubernetes nodes:
+
+```
+VM delta-trading-01: 16 vCPU, 64 GB RAM, 2x A100-80GB (passthrough)
+  K8s node: delta-trading-01 (Ready)
+  VM cost:  $23.60/month
+  GPU cost: $3,650/month
+  Total:    $3,673.60/month
+```
+
+This unified view (VM + GPU on the same asset) is unique to VibOps — most tools see one or the other, not both.
+
+---
+
+## 20. FinOps tab
 
 **What is it for?** The FinOps tab gives you a centralized view of what your GPUs and VMs cost, where the money goes, and how to control it. Sub-tabs: **Waste**, **Budget**, **Chargeback** (GPU + VM), **Alerts** (history of overruns), **Workloads** (live per-workload GPU utilisation), **VM Usage** (live per-VM cost attribution).
 
@@ -2519,7 +2598,7 @@ The history of all budget overruns: when the soft cap or hard cap was reached, w
 
 ---
 
-## 20. LLM Inference Proxy — Agent Infrastructure Control Plane
+## 21. LLM Inference Proxy — Agent Infrastructure Control Plane
 
 VibOps includes a transparent OpenAI-compatible proxy (port 8004) that sits between AI agents and LLM inference servers. It captures every inference with per-agent attribution for FinOps, budget enforcement, model policy, and anomaly detection.
 
@@ -2635,7 +2714,7 @@ curl http://SERVER_IP:8004/v1/models
 
 ---
 
-## 21. Dataset & RLHF
+## 22. Dataset & RLHF
 
 VibOps builds an operational dataset from real production actions — the foundation for fine-tuning specialized GPU models.
 
@@ -2671,7 +2750,7 @@ GET /api/v1/training/export?format=alpaca
 
 ---
 
-## 22. MCP Server
+## 23. MCP Server
 
 VibOps exposes its tools via the **Model Context Protocol** (MCP) — allowing any MCP client (Claude Desktop, Cursor, IDE) to operate GPU infrastructure directly from its own context.
 
@@ -2708,7 +2787,139 @@ See the [`vibops-mcp`](https://github.com/VibOpsai/vibops-mcp) repository for th
 
 ---
 
-## 23. Quick reference
+## 24. Python SDK
+
+The VibOps Python SDK provides typed async access to the full VibOps API.
+
+### Installation
+
+```bash
+pip install vibops
+```
+
+### Quick start
+
+```python
+from vibops import VibOps
+
+with VibOps(url="https://vibops.internal:8000", token="vib_...") as v:
+    # List GPU clusters
+    clusters = v.clusters.list()
+
+    # Deploy a model
+    job = v.models.deploy("llama3", "gpu-prod", replicas=2)
+
+    # Check FinOps budget
+    budget = v.finops.budget()
+
+    # VM chargeback
+    report = v.finops.chargeback(year=2026, month=8)
+```
+
+### Async usage
+
+```python
+import asyncio
+from vibops import AsyncVibOps
+
+async def main():
+    async with AsyncVibOps(url="https://vibops.internal:8000", token="vib_...") as v:
+        clusters = await v.clusters.list()
+        waste = await v.finops.waste()
+
+asyncio.run(main())
+```
+
+**27 resource namespaces** — clusters, jobs, models, gateways, finops, agents, security, compliance, insights, auth, audit, anomalies, alerts, secrets, pipelines, tokens, notifications, policy, identities, orgs, metrics, triggers, eval, workloads, webhooks, gpu_health, reselling.
+
+Source: [github.com/VibOpsai/vibops-sdk](https://github.com/VibOpsai/vibops-sdk)
+
+---
+
+## 25. Cloud Provider Connectors
+
+VibOps connects to managed GPU cloud services for hybrid and multi-cloud operations.
+
+### Supported providers
+
+| Provider | Connector | Actions | Description |
+|----------|-----------|---------|-------------|
+| **Scaleway** | `scaleway_*` | 15 | Kapsule K8s clusters, GPU instances (H100, L40S, GH200), node pools, billing |
+| **Outscale (3DS)** | `outscale_*` | 15 | OKS clusters, Flexible GPUs, node pools, quotas, billing |
+| **DGX Cloud** | `dgxcloud_*` | 16 | NGC jobs, workspaces, datasets, GPU quota, billing, cluster health |
+| **HPE Private Cloud AI** | `hpe_*` | 17 | PCAI clusters, workloads, node pools, GPU utilization, storage, tenant quotas |
+| **AWS EKS** | `awseks_*` | 6 | EKS clusters, node groups, kubeconfig |
+| **GKE** | `gke_*` | 3 | GKE clusters, kubeconfig |
+| **AKS** | `aks_*` | 3 | AKS clusters, kubeconfig |
+
+### Example prompts
+
+```
+List all Scaleway GPU instances
+Scale the inference node pool to 4 nodes on Scaleway
+What's our DGX Cloud GPU quota and billing?
+List workloads on HPE Private Cloud AI
+```
+
+---
+
+## 26. Terraform Integration
+
+VibOps can manage infrastructure-as-code via Terraform.
+
+| Action | Description |
+|--------|-------------|
+| `terraform_init` | Initialize a workspace and download providers |
+| `terraform_plan` | Generate an execution plan |
+| `terraform_apply` | Apply the plan — create/update infrastructure |
+| `terraform_destroy` | Destroy all resources (admin only, requires confirmation) |
+| `terraform_output` | Read output values |
+| `terraform_state` | List tracked resources |
+
+### Example
+
+```
+Initialize the Terraform workspace in /infra/gpu-cluster
+Plan the GPU cluster deployment
+Apply the Terraform plan — confirm
+```
+
+---
+
+## 27. Docker Build & CI Integration
+
+VibOps handles the full container build pipeline: build, tag, push, deploy.
+
+### Build actions
+
+| Action | Description |
+|--------|-------------|
+| `docker_build` | Build a Docker image from a Dockerfile |
+| `docker_tag` | Re-tag an existing image |
+| `docker_push` | Push to a registry (GHCR, Docker Hub, GitLab, self-hosted) |
+| `docker_build_push` | Build + push in one operation |
+
+### CI actions
+
+| Action | Description |
+|--------|-------------|
+| `ci_trigger` | Trigger a GitHub Actions workflow or GitLab CI pipeline |
+| `ci_status` | Check CI run status |
+| `ci_wait` | Poll until CI completes |
+
+### Full pipeline example
+
+```
+Clone github.com/acme/llama-serving
+Build a Docker image and push to ghcr.io/acme/llama-serving:latest
+Deploy it on the GPU cluster with 2 GPUs
+```
+
+The agent chains `git_clone` → `docker_build_push` → `helm_upgrade` automatically.
+
+---
+
+## 28. Quick reference
 
 ### Keyboard shortcuts
 
