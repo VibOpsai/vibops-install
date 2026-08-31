@@ -260,18 +260,12 @@ services:
       - connect
 
   # ─── Observabilité — Prometheus + Grafana (toujours actifs) ─────────────
-  # Prometheus scrape core:8000/metrics, agent:8001/metrics, gpu-simulator:9400/metrics
+  # Prometheus scrape core:8000/metrics, agent:8001/metrics
   # Grafana disponible sur http://localhost:3000 (admin / ${GRAFANA_PASSWORD:-vibops})
   # Pour désactiver en prod légère : docker compose --profile no-observability up (futur)
 
-  gpu-simulator:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.0
-    container_name: vibops_gpu_simulator
-    restart: unless-stopped
-    ports:
-      - "9400:9400"
-    networks:
-      - vibops_net
+  # gpu-simulator is a separate project — not included in production deployments.
+  # For development/demo, see: https://github.com/VibOpsai/vibops-gpu-simulator
 
   prometheus:
     image: prom/prometheus:latest
