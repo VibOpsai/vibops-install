@@ -49,17 +49,36 @@
     - [Audit](#audit)
     - [Memories](#memories)
     - [License](#license)
+    - [Customers (reseller orgs only)](#customers-reseller-orgs-only)
+    - [Security tab](#security-tab)
+    - [LLM Provider (Settings → Operations)](#llm-provider-settings--operations)
+    - [VMs admin (Settings → Infrastructure)](#vms-admin-settings--infrastructure)
 18. [Connect Gateway](#18-connect-gateway)
-19. [FinOps tab](#19-finops-tab)
+19. [VM Management (Proxmox, vSphere, XCP-ng)](#19-vm-management-proxmox-vsphere-xcp-ng)
+    - [Supported hypervisors](#supported-hypervisors)
+    - [Connecting a hypervisor](#connecting-a-hypervisor)
+    - [VM lifecycle operations](#vm-lifecycle-operations)
+    - [VM metrics](#vm-metrics)
+    - [VM waste detection](#vm-waste-detection)
+    - [VM backup compliance](#vm-backup-compliance)
+    - [GPU passthrough VMs](#gpu-passthrough-vms)
+20. [FinOps tab](#20-finops-tab)
     - [Waste — GPU waste detection](#waste-sub-tab--gpu-waste-detection)
     - [Budget](#budget-sub-tab)
     - [Chargeback](#chargeback-sub-tab)
+    - [VM Chargeback](#vm-chargeback)
+    - [VM Waste Detection](#vm-waste-detection-finops)
     - [Alerts](#alerts-sub-tab)
     - [Workloads — per-workload GPU metrics](#workloads-sub-tab--per-workload-gpu-metrics)
-20. [LLM Inference Proxy — Agent Infrastructure Control Plane](#20-llm-inference-proxy--agent-infrastructure-control-plane)
-21. [Dataset & RLHF](#21-dataset--rlhf)
-22. [MCP Server](#22-mcp-server)
-23. [Quick reference](#23-quick-reference)
+    - [Scheduled Triggers](#scheduled-triggers)
+21. [LLM Inference Proxy — Agent Infrastructure Control Plane](#21-llm-inference-proxy--agent-infrastructure-control-plane)
+22. [Dataset & RLHF](#22-dataset--rlhf)
+23. [MCP Server](#23-mcp-server)
+24. [Python SDK](#24-python-sdk)
+25. [Cloud Provider Connectors](#25-cloud-provider-connectors)
+26. [Terraform Integration](#26-terraform-integration)
+27. [Docker Build & CI Integration](#27-docker-build--ci-integration)
+28. [Quick reference](#28-quick-reference)
 - [Compliance Verification](#compliance-verification)
 - [Security Scans](#security-scans)
 
@@ -1981,6 +2000,140 @@ To renew or upgrade to a higher plan: contact **`david@vibops.ai`** or your VibO
 
 ---
 
+### Customers (reseller orgs only)
+
+The **Customers** sub-tab is visible only to organizations with a reseller license (Tier 2 or Tier 3). It lets you create and manage sub-organizations (your end customers) and configure per-customer pricing.
+
+**Customer list:** displays all sub-organizations with their usage (GPU-hours, active clusters, spend this month).
+
+**Create a customer:**
+1. Admin → **Customers** → **+ New customer**
+2. Fill in: organization name, admin email, initial password, GPU quota
+3. Click **Create** — a new isolated sub-org is provisioned instantly
+
+**Pricing rules:** configure the rates that drive VM and GPU chargeback for each customer:
+
+| Rule | Description |
+|------|-------------|
+| **Vendor** | GPU vendor (NVIDIA, AMD) to which this rule applies |
+| **Accelerator** | Specific GPU model (e.g. H100, A100) — leave empty for all |
+| **Markup %** | Margin added on top of your infrastructure cost |
+| **Tier** | `on_demand` / `reserved_1y` / `reserved_3y` |
+
+**Customer pricing overrides:** apply per-customer discounts or custom prices:
+
+- **GPU override**: discount percentage or custom USD/GPU/hour price
+- **VM override**: custom rates for vCPU ($/vCPU/hr), RAM ($/GB/hr), disk ($/GB/hr)
+
+Configure in **Admin → Customers → [customer name] → Pricing**.
+
+**White-label config:** set a custom domain and brand name for each customer's console access. See the [White-label console](#white-label-console-for-csp-resellers) section.
+
+---
+
+### Security tab
+
+The **Security** sub-tab (Admin → Security) consolidates enterprise authentication and audit export settings.
+
+#### SSO / OIDC
+
+Configure your organization to authenticate via a corporate identity provider:
+
+| Provider | Notes |
+|----------|-------|
+| Azure Active Directory | Set tenant ID in the issuer URL |
+| Okta | Use your Okta org URL as the issuer |
+| Google Workspace | Standard Google OIDC endpoint |
+| Custom OIDC | Any compliant provider — supply issuer URL manually |
+
+1. Admin → **Security → SSO**
+2. Select provider, paste Client ID and Client Secret
+3. Enable **JIT provisioning** to create accounts automatically on first login
+4. Toggle **SSO enabled**
+
+Full OIDC flow and API reference: see [SSO / OIDC Integration](#sso--oidc-integration-issue-9).
+
+#### LDAP / Active Directory
+
+Authenticate users against your corporate directory without an external IdP:
+
+1. Admin → **Security → LDAP**
+2. Fill in: server URL (`ldaps://`), bind DN, bind password, search base, search filter
+3. Toggle **LDAP enabled**
+
+Full LDAP configuration guide: see [LDAP / Active Directory authentication](#ldap--active-directory-authentication).
+
+#### SIEM export
+
+Push audit logs to your SIEM on demand or on a schedule:
+
+| Provider | Config needed |
+|----------|---------------|
+| Splunk | HEC endpoint URL + HEC token |
+| Datadog | Datadog API key + site |
+
+1. Admin → **Security → SIEM**
+2. Select provider, fill in endpoint and token
+3. Click **Push now** to test, or set a scheduled push interval
+
+Full SIEM setup: see [SIEM push export](#siem-push-export).
+
+---
+
+### LLM Provider (Settings → Operations)
+
+Configure which LLM the VibOps agent uses for all conversations and automated tasks.
+
+**Access:** Settings → **Operations → LLM Provider**
+
+**Supported providers:**
+
+| Provider | Notes |
+|----------|-------|
+| Claude (Anthropic) | Default — `ANTHROPIC_API_KEY` or custom key |
+| OpenAI-compatible | Any vLLM, Groq, Together AI, or custom endpoint |
+| Ollama | Local Ollama instance — no API key required |
+
+**Configuration fields:**
+
+| Field | Description |
+|-------|-------------|
+| **Provider** | Select from dropdown |
+| **Model** | Model name (e.g. `claude-opus-4-6`, `llama-3.1-70b-instruct`) |
+| **API key** | Stored encrypted in the VibOps Vault |
+| **Base URL** | Required for OpenAI-compatible and Ollama providers |
+
+**Workflow:**
+1. Fill in the fields
+2. Click **Test connection** — sends a short probe request to verify the credentials and model are reachable
+3. Click **Save** — the new LLM is active immediately for all new conversations
+
+Changes are recorded in the audit log. The previous LLM is not stored — if the new connection fails, restore the previous values manually.
+
+---
+
+### VMs admin (Settings → Infrastructure)
+
+The **VMs** panel in Settings → Infrastructure shows all hypervisors connected to your VibOps instance.
+
+**Access:** Settings → **Infrastructure → VMs**
+
+**What you see:**
+
+| Column | Description |
+|--------|-------------|
+| **Hypervisor** | Name and type (Proxmox, vSphere, XCP-ng) |
+| **Gateway** | Which VibOps gateway handles this hypervisor connection |
+| **Clusters managed** | Number of hypervisor clusters or data centers |
+| **Discovered services** | VMs, hosts, and resource pools found at last sync |
+| **Status** | Connected / Unreachable / Degraded |
+
+**Connect Hypervisor button:** opens the connection wizard. Select the hypervisor type and fill in the connection details (URL, credentials). Credentials are stored in the VibOps Vault.
+
+**Resync:** click the refresh icon on any hypervisor row to trigger a full rediscovery of VMs and hosts.
+
+---
+
 ## 18. Connect Gateway
 
 The Connect Gateway allows connecting remote clusters (on-premise, multi-cloud, isolated environments) to your central VibOps instance, via a secure outbound connection — without opening any inbound port on your infrastructure.
@@ -2056,6 +2209,92 @@ In Admin → Gateways, each gateway displays:
 - **GPUs** — total GPUs declared by the worker
 
 A gateway disconnected for more than 5 minutes switches to `degraded` state and generates an alert.
+
+---
+
+## 19. VM Management (Proxmox, vSphere, XCP-ng)
+
+VibOps manages virtual machine infrastructure across the three major hypervisor platforms — alongside Kubernetes and Slurm — giving you a single conversation interface for your entire AI infrastructure.
+
+### Supported hypervisors
+
+| Hypervisor | Lifecycle | Snapshots | Migration | Metrics | Waste detection | Backup compliance |
+|------------|-----------|-----------|-----------|---------|-----------------|-------------------|
+| Proxmox VE | start, stop, migrate, snapshot, list | ✓ | ✓ | CPU/RAM per VM | ✓ | ✓ |
+| VMware vSphere | start, stop, restart, migrate, snapshot, list | ✓ | ✓ | CPU/RAM per VM | ✓ | ✓ |
+| XCP-ng (Xen Orchestra) | start, stop, migrate, snapshot, list | ✓ | ✓ | — | ✓ | ✓ |
+
+### Connecting a hypervisor
+
+Hypervisor connections are managed from **Settings → Infrastructure → Connect Hypervisor**. See the [QUICKSTART](../QUICKSTART.md) for the full setup guide. At a minimum you need:
+
+- **Proxmox**: API URL + API token (`user@realm!tokenid=secret`)
+- **vSphere**: vCenter URL + username + password
+- **XCP-ng**: Xen Orchestra URL + credentials
+
+Credentials are stored in the VibOps Vault and never exposed in chat or logs.
+
+### VM lifecycle operations
+
+```
+List all VMs on the Proxmox cluster
+Start VM gpu-worker-01 on vsphere-prod
+Stop VM test-node-3 on proxmox-lab
+Migrate VM llm-runner-02 from host esxi-01 to esxi-02
+Take a snapshot of VM api-gateway before the upgrade
+```
+
+The agent shows a dry-run preview before any destructive operation (stop, migrate). Confirmation is required.
+
+### VM metrics
+
+Per-VM CPU and RAM metrics are available for Proxmox and vSphere:
+
+```
+Show me CPU and memory usage for all VMs on vsphere-prod
+Which VM is consuming the most RAM on the Proxmox cluster?
+```
+
+### VM waste detection
+
+VibOps identifies three types of VM waste:
+
+| Type | Description |
+|------|-------------|
+| **Stopped** | VM is powered off but still consuming disk/reservation cost |
+| **Low CPU** | VM running but CPU utilization below 5% over 24 hours |
+| **Over-provisioned** | VM allocated 4+ vCPUs but averaging under 10% utilization |
+
+```
+Scan for wasted VMs on proxmox-lab
+Find over-provisioned VMs across all hypervisors
+Which stopped VMs have been idle for more than 7 days?
+```
+
+### VM backup compliance
+
+VibOps checks snapshot freshness against your backup policy:
+
+| Finding | Condition |
+|---------|-----------|
+| **No snapshot** | VM has never been snapshotted |
+| **Stale snapshot** | Most recent snapshot older than 7 days (configurable) |
+
+```
+Check backup compliance for all production VMs on vsphere-prod
+```
+
+The agent lists non-compliant VMs and optionally creates snapshots for them immediately.
+
+### GPU passthrough VMs
+
+For VMs with GPU passthrough (common in Proxmox and vSphere deployments), VibOps combines VM cost (vCPU + RAM + disk) with the GPU cost from the underlying host to produce a unified cost view:
+
+```
+Show me the total cost of our GPU passthrough VMs including the GPU allocation
+```
+
+This is especially useful for teams billing GPU compute to internal teams via VMs rather than Kubernetes pods.
 
 ---
 
@@ -2177,7 +2416,7 @@ Each pipeline response includes per-step status (`pending` / `running` / `succes
 
 ---
 
-## 19. FinOps tab
+## 20. FinOps tab
 
 **What is it for?** The FinOps tab gives you a centralized view of what your GPUs cost, where the money goes, and how to control it. Five sub-tabs: **Waste**, **Budget**, **Chargeback**, **Alerts** (history of overruns), **Workloads** (live per-workload GPU utilisation).
 
@@ -2431,7 +2670,83 @@ The history of all budget overruns: when the soft cap or hard cap was reached, w
 
 ---
 
-## 20. LLM Inference Proxy — Agent Infrastructure Control Plane
+### VM Chargeback
+
+VM chargeback extends GPU chargeback to cover the full VM infrastructure cost.
+
+**Cost formula:**
+
+```
+VM cost = (vCPU × vcpu_rate + RAM_GB × ram_rate + disk_GB × disk_rate) × hours
+```
+
+**Default rates** (configurable per cluster or per customer):
+
+| Resource | Default rate |
+|----------|-------------|
+| vCPU | $0.04 / vCPU / hour |
+| RAM | $0.005 / GB / hour |
+| Disk | $0.0001 / GB / hour |
+
+For GPU passthrough VMs, the GPU cost (from the cluster GPU rate) is added on top of the VM resource cost.
+
+**Generate a VM chargeback report:**
+```
+Generate the VM chargeback report for October 2026
+Show me VM costs broken down by team on vsphere-prod
+```
+
+Via API: `POST /api/v1/finops/chargeback/{year}/{month}/generate?include_vms=true`
+
+**VM pricing overrides** — resellers can set per-customer rates that override the defaults. Configure in **Admin → Customers → Pricing rules**.
+
+---
+
+### VM Waste Detection (FinOps)
+
+The FinOps waste view includes VM waste alongside GPU waste. Three types are detected (same as in §19):
+
+| Type | Agent prompt |
+|------|-------------|
+| Stopped VMs | `Find all stopped VMs that are still incurring cost` |
+| Low CPU VMs | `List VMs with CPU utilization under 5% on proxmox-lab` |
+| Over-provisioned | `Which VMs are over-provisioned across all hypervisors?` |
+
+The waste estimate includes disk reservation cost for stopped VMs and wasted vCPU allocation for low-utilization VMs.
+
+---
+
+### Scheduled Triggers
+
+Triggers in VibOps support **cron expressions** — allowing waste scans, compliance checks, and any agent action to run automatically on a schedule.
+
+**Cron format:** standard 5-field cron (`minute hour day month weekday`).
+
+| Expression | Meaning |
+|------------|---------|
+| `0 8 * * 1` | Every Monday at 8:00 AM |
+| `0 0 1 * *` | First day of each month at midnight |
+| `0 */6 * * *` | Every 6 hours |
+
+**Example — weekly VM waste report every Monday at 8am:**
+```
+Set up a trigger: every Monday at 8am, scan for wasted VMs on all hypervisors
+and send the report to Slack
+```
+
+This creates a trigger with cron `0 8 * * 1`, action `vm_waste_scan`, and your configured Slack channel as the notification target.
+
+**Example — nightly backup compliance check:**
+```
+Run a backup compliance check every night at midnight and alert on Slack
+if any VMs have stale snapshots
+```
+
+Scheduled triggers are visible and editable in **Automations → Triggers**.
+
+---
+
+## 21. LLM Inference Proxy — Agent Infrastructure Control Plane
 
 VibOps includes a transparent OpenAI-compatible proxy (port 8004) that sits between AI agents and LLM inference servers. It captures every inference with per-agent attribution for FinOps, budget enforcement, model policy, and anomaly detection.
 
@@ -2547,7 +2862,7 @@ curl http://SERVER_IP:8004/v1/models
 
 ---
 
-## 21. Dataset & RLHF
+## 22. Dataset & RLHF
 
 VibOps builds an operational dataset from real production actions — the foundation for fine-tuning specialized GPU models.
 
@@ -2583,7 +2898,7 @@ GET /api/v1/training/export?format=alpaca
 
 ---
 
-## 22. MCP Server
+## 23. MCP Server
 
 VibOps exposes its tools via the **Model Context Protocol** (MCP) — allowing any MCP client (Claude Desktop, Cursor, IDE) to operate GPU infrastructure directly from its own context.
 
@@ -2620,7 +2935,149 @@ See the [`vibops-mcp`](https://github.com/VibOpsai/vibops-mcp) repository for th
 
 ---
 
-## 23. Quick reference
+## 24. Python SDK
+
+The VibOps Python SDK provides typed sync and async access to all VibOps APIs — suitable for scripts, CI pipelines, and data pipelines.
+
+### Installation
+
+```bash
+pip install vibops
+```
+
+### Quick start — synchronous
+
+```python
+from vibops import VibOpsClient
+
+client = VibOpsClient(
+    base_url="https://vibops.yourcompany.com",
+    api_key="vbops_xxxxxxxx"
+)
+
+clusters = client.clusters.list()
+for c in clusters:
+    print(c.name, c.gpu_total)
+```
+
+### Quick start — async
+
+```python
+import asyncio
+from vibops import AsyncVibOpsClient
+
+async def main():
+    async with AsyncVibOpsClient(
+        base_url="https://vibops.yourcompany.com",
+        api_key="vbops_xxxxxxxx"
+    ) as client:
+        waste = await client.finops.get_waste_analysis(cluster="gpu-prod")
+        print(waste)
+
+asyncio.run(main())
+```
+
+### Resource namespaces (27 total)
+
+The client exposes 27 resource namespaces covering clusters, deployments, GPU metrics, jobs, pipelines, finops, compliance, audit, agents, secrets, policies, VMs, and more. See the full list at [github.com/VibOpsai/vibops-sdk](https://github.com/VibOpsai/vibops-sdk).
+
+---
+
+## 25. Cloud Provider Connectors
+
+VibOps includes connectors for sovereign and hyperscale cloud providers, enabling full lifecycle management from the agent.
+
+### Supported providers
+
+| Provider | Tools | Notes |
+|----------|-------|-------|
+| Scaleway | 15 | Instances, GPU instances, Kubernetes Kapsule, Object Storage |
+| Outscale | 15 | VMs, snapshots, security groups, load balancers |
+| DGX Cloud | 16 | NVIDIA DGX SuperPOD clusters, GPU reservations, job submission |
+| HPE PCAI | 17 | HPE Private Cloud AI — clusters, workloads, model catalog |
+| AWS EKS | 6 | Cluster discovery, node groups, scaling, kubeconfig generation |
+| GKE | 3 | Cluster discovery, node pool scaling, workload identity |
+| AKS | 3 | Cluster discovery, node pool scaling, managed identity |
+
+### Example prompts
+
+```
+List all GPU instances on our Scaleway account
+Scale the DGX Cloud reservation from 4 to 8 H100s
+What is the current node count on our EKS cluster in us-east-1?
+Show me the workloads running on HPE PCAI
+Deploy a GKE node pool with 4 L4 GPUs in europe-west4
+```
+
+Credentials for each provider are stored in the VibOps Vault. Configure them in **Admin → Integrations** or via `POST /api/v1/secrets`.
+
+---
+
+## 26. Terraform Integration
+
+VibOps can run Terraform operations directly from the agent — enabling infrastructure-as-code management without leaving the conversation.
+
+### Supported actions
+
+| Action | Description |
+|--------|-------------|
+| `terraform_init` | Initialize a Terraform working directory |
+| `terraform_plan` | Generate and display an execution plan |
+| `terraform_apply` | Apply the plan (requires confirmation) |
+| `terraform_destroy` | Destroy managed infrastructure (requires confirmation) |
+| `terraform_output` | Read output values from state |
+| `terraform_state` | Inspect or manipulate the Terraform state |
+
+### Example
+
+```
+Clone the infra repo, run terraform plan on the gpu-cluster module,
+show me what would change, then apply if it looks correct.
+```
+
+The agent chains `git_clone` → `terraform_init` → `terraform_plan`, shows the diff, and waits for confirmation before `terraform_apply`. Destructive operations always require explicit confirmation.
+
+Store Terraform backend credentials (AWS keys, GCP SA JSON, etc.) in the VibOps Vault and reference them via `@secret:` in your prompt.
+
+---
+
+## 27. Docker Build & CI Integration
+
+VibOps provides a full set of container build and CI pipeline actions, enabling end-to-end automation from code to deployment.
+
+### Build actions
+
+| Action | Description |
+|--------|-------------|
+| `docker_build` | Build a Docker image from a local or cloned repo |
+| `docker_tag` | Tag an image with a new name or version |
+| `docker_push` | Push an image to a container registry |
+| `docker_build_push` | Build and push in a single step (most common) |
+
+### CI actions
+
+| Action | Description |
+|--------|-------------|
+| `ci_trigger` | Trigger a GitHub Actions workflow or GitLab CI pipeline |
+| `ci_status` | Check the current status of a pipeline run |
+| `ci_wait` | Block until a pipeline completes (success or failure) |
+
+### Full pipeline example
+
+```
+Deploy the latest commit of acme/api-server to staging:
+1. Clone the repo
+2. Build and push the image to ghcr.io/acme/api-server:latest using token=@secret:ghcr_token
+3. Trigger the integration-tests workflow on main
+4. Wait for the tests to pass
+5. Helm upgrade the staging release with the new image
+```
+
+The agent chains `git_clone` → `docker_build_push` → `ci_trigger` → `ci_wait` → `helm_upgrade`, aborting at any step on failure and reporting the exact error. The Helm upgrade requires confirmation before executing.
+
+---
+
+## 28. Quick reference
 
 ### Keyboard shortcuts
 
