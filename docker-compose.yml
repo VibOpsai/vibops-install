@@ -42,9 +42,7 @@ services:
   # ─── Execution Engine (core/) ─────────────────────────────────────────────
 
   core:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/vibopsai/vibops-core:v0.38.0
     container_name: vibops_core
     restart: unless-stopped
     command: ["api"]
@@ -72,9 +70,7 @@ services:
       - kind  # Accessible by VibOps Connect pods running in kind clusters
 
   worker:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/vibopsai/vibops-core:v0.38.0
     container_name: vibops_worker
     restart: unless-stopped
     command: ["worker"]
@@ -102,9 +98,7 @@ services:
 
   # Celery Beat — planificateur de tâches (évalue les triggers toutes les 60s)
   beat:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/vibopsai/vibops-core:v0.38.0
     container_name: vibops_beat
     restart: unless-stopped
     command: ["beat"]
@@ -155,9 +149,7 @@ services:
   # ─── Agent Claude (agent/) ────────────────────────────────────────────────
 
   agent:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
+    image: ghcr.io/vibopsai/vibops-agent:v0.38.0
     container_name: vibops_agent
     restart: unless-stopped
     env_file: .env
@@ -180,9 +172,7 @@ services:
   # ─── Console web (console/) ──────────────────────────────────────────────
 
   console:
-    build:
-      context: .
-      dockerfile: console/Dockerfile
+    image: ghcr.io/vibopsai/vibops-console:v0.38.0
     container_name: vibops_console
     restart: unless-stopped
     env_file: .env
@@ -232,8 +222,7 @@ services:
   # Transparent OpenAI-compatible proxy that captures inference metrics
   # per agent for FinOps attribution. Agents point here instead of vLLM/Ollama.
   llm-proxy:
-    build:
-      context: llm-proxy
+    image: ghcr.io/vibopsai/vibops-llm-proxy:v0.38.0
     container_name: vibops_llm_proxy
     restart: unless-stopped
     environment:
@@ -253,9 +242,7 @@ services:
   # Utiliser plutôt : docker build -f connect/Dockerfile -t vibops/connect .
   # et déployer sur le serveur du CSP avec les variables ci-dessous.
   connect:
-    build:
-      context: .
-      dockerfile: connect/Dockerfile
+    image: ghcr.io/vibopsai/vibops-connect:v0.38.0
     container_name: vibops_connect
     environment:
       VIBOPS_CORE_URL: http://core:8000
@@ -278,9 +265,7 @@ services:
   # Pour désactiver en prod légère : docker compose --profile no-observability up (futur)
 
   gpu-simulator:
-    build:
-      context: .
-      dockerfile: tools/gpu-simulator/Dockerfile
+    image: ghcr.io/vibopsai/vibops-core:v0.38.0
     container_name: vibops_gpu_simulator
     restart: unless-stopped
     ports:
@@ -330,9 +315,7 @@ services:
   # ─── Gateway OpenAI-compatible (gateway/) ────────────────────────────────
 
   gateway:
-    build:
-      context: .
-      dockerfile: gateway/Dockerfile
+    image: ghcr.io/vibopsai/vibops-gateway:v0.38.0
     container_name: vibops_gateway
     environment:
       AGENT_API_URL: http://agent:8001

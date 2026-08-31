@@ -776,4 +776,33 @@ Variables marked **auto-generated** are set by `make quickstart` and do not need
 | `CONNECT_GATEWAY_ID` | Gateway ID — generated in the console under Connect → Register gateway |
 | `CONNECT_TOKEN` | Gateway auth token — generated alongside `CONNECT_GATEWAY_ID` |
 
+### Connect to a hypervisor (vSphere / Proxmox / XCP-ng)
+
+Set the appropriate environment variables on the gateway to enable VM operations.
+
+**VMware vSphere / ESXi:**
+
+| Variable | Example | Description |
+|---|---|---|
+| `VSPHERE_HOST` | `vcenter.internal.com` | vCenter hostname or IP |
+| `VSPHERE_USERNAME` | `administrator@vsphere.local` | vCenter admin user |
+| `VSPHERE_PASSWORD` | `secret` | vCenter password |
+| `VSPHERE_VERIFY_SSL` | `false` | Set `true` for production with valid certs |
+
+**Proxmox VE:**
+
+| Variable | Example | Description |
+|---|---|---|
+| `PROXMOX_URL` | `https://proxmox.internal:8006` | Proxmox web UI URL |
+| `PROXMOX_USER` | `root@pam` | Proxmox user |
+| `PROXMOX_TOKEN_ID` | `vibops-api` | API token name |
+| `PROXMOX_TOKEN` | `a1b2c3d4-...` | API token value |
+
+**XCP-ng / Xen Orchestra:**
+
+| Variable | Example | Description |
+|---|---|---|
+| `XO_URL` | `https://xoa.internal` | Xen Orchestra URL |
+| `XO_TOKEN` | `abc123...` | XO auth token |
+
 > For the full variable reference including Helm values, see [`docs/installation.md`](docs/installation.md).
