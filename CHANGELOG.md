@@ -9,6 +9,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.38.0] — 2026-08-31
+
+### Added
+- **Scheduled triggers (cron)** — cron expressions in trigger rules, evaluated every 60s via croniter
+- **LLM Provider config UI** — Settings → Operations → switch Claude/OpenAI-compatible/Ollama with test connection
+- **VMs admin sub-tab** — Settings → Infrastructure → connected hypervisors, cluster status, discovered services
+- **Dynamic action autocomplete** — trigger form searches 266 actions live
+- **Fleet → VMs empty state** — Connect Hypervisor CTA when no VMs connected
+- **Network discovery toast** — real-time notifications when gateway discovers Proxmox/vSphere/K8s
+- **LLM tab in nav** — Ollama + NIM management exposed in main navigation
+- **VM Chargeback UI** — FinOps section with generate button and per-VM breakdown table
+- **45 console UI tests** — template + JS module coverage for all new features
+- **11 API tests** — scheduled triggers + VM chargeback endpoints
+- **`require_org_admin`** dependency in agent auth module
+
+### Changed
+- Landing page restructured — 40% shorter, VMs included, 3 clear segments (Cloud Providers, Integrators, Enterprises)
+- Automations tab exposed in main nav (was orphaned)
+- Network Discovery panel visible when any gateway connected (not only when services found)
+- Trigger list shows cron expression for scheduled rules
+- "Datadog metric" label → "Metric query" in triggers form (en + fr)
+- Agent Tools button removed from Settings Governance (Tool Policy covers it)
+- Console `</body>` tag added (was missing)
+
+### Fixed
+- **CRITICAL: Trigger jobs missing org_id** — tenant isolation restored for trigger-created jobs
+- **CRITICAL: Agent config privilege escalation** — PUT/POST now require org_admin (was any user)
+- **HIGH: IDOR via is_org_admin bypass** — removed from triggers, jobs, pipelines (6 locations)
+- **HIGH: SSRF on prometheus_url** — block 169.254.*/metadata IPs
+- **MEDIUM: Race condition in test_config** — asyncio lock prevents concurrent env var mutation
+- LLM tab: `loadOllama()` → `loadLlm()` (was broken)
+- Escape handler: dead `showAdminPanel` ref → proper activeTab check
+- Fleet state variables: 6 missing Alpine.js reactive vars added to init.js
+- i18n: settings_close/settings_title defaults, agents drawer French → t() calls
+- i18n: LDAP login + setup form strings internationalized
+- Duplicate fleetSearch/kubeContexts declarations removed
+- Gateway registration: error toast on failure (was empty catch)
+- Console auth: "Token invalide" → "Invalid token"
+- KPI bar grid layout in Fleet → VMs restored (x-if instead of x-show)
+
+### Security
+- Backend audit: 2 CRITICAL + 3 HIGH + 2 MEDIUM findings fixed
+- Front-end audit: 3 CRITICAL + 3 HIGH + 4 MEDIUM findings fixed
+- XSS protection verified (DOMPurify on all x-html)
+- CSRF token handling verified
+- Cookie security verified (httpOnly, secure, sameSite)
+
+---
+
 ## [0.37.0] — 2026-08-30
 
 ### Added
