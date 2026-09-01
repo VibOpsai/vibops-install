@@ -42,7 +42,7 @@ services:
   # ─── Execution Engine (core/) ─────────────────────────────────────────────
 
   core:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.0
+    image: ghcr.io/vibopsai/vibops-core:v0.38.1
     container_name: vibops_core
     restart: unless-stopped
     command: ["api"]
@@ -70,7 +70,7 @@ services:
       - vibops_net
 
   worker:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.0
+    image: ghcr.io/vibopsai/vibops-core:v0.38.1
     container_name: vibops_worker
     restart: unless-stopped
     command: ["worker"]
@@ -99,7 +99,7 @@ services:
 
   # Celery Beat — planificateur de tâches (évalue les triggers toutes les 60s)
   beat:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.0
+    image: ghcr.io/vibopsai/vibops-core:v0.38.1
     container_name: vibops_beat
     restart: unless-stopped
     command: ["beat"]
@@ -150,7 +150,7 @@ services:
   # ─── Agent Claude (agent/) ────────────────────────────────────────────────
 
   agent:
-    image: ghcr.io/vibopsai/vibops-agent:v0.38.0
+    image: ghcr.io/vibopsai/vibops-agent:v0.38.1
     container_name: vibops_agent
     restart: unless-stopped
     env_file: .env
@@ -173,7 +173,7 @@ services:
   # ─── Console web (console/) ──────────────────────────────────────────────
 
   console:
-    image: ghcr.io/vibopsai/vibops-console:v0.38.0
+    image: ghcr.io/vibopsai/vibops-console:v0.38.1
     container_name: vibops_console
     restart: unless-stopped
     env_file: .env
@@ -223,7 +223,7 @@ services:
   # Transparent OpenAI-compatible proxy that captures inference metrics
   # per agent for FinOps attribution. Agents point here instead of vLLM/Ollama.
   llm-proxy:
-    image: ghcr.io/vibopsai/vibops-llm-proxy:v0.38.0
+    image: ghcr.io/vibopsai/vibops-llm-proxy:v0.38.1
     container_name: vibops_llm_proxy
     restart: unless-stopped
     environment:
@@ -243,7 +243,7 @@ services:
   # Utiliser plutôt : docker build -f connect/Dockerfile -t vibops/connect .
   # et déployer sur le serveur du CSP avec les variables ci-dessous.
   connect:
-    image: ghcr.io/vibopsai/vibops-connect:v0.38.0
+    image: ghcr.io/vibopsai/vibops-connect:v0.38.1
     container_name: vibops_connect
     environment:
       VIBOPS_CORE_URL: http://core:8000
@@ -311,7 +311,7 @@ services:
   # ─── Gateway OpenAI-compatible (gateway/) ────────────────────────────────
 
   gateway:
-    image: ghcr.io/vibopsai/vibops-gateway:v0.38.0
+    image: ghcr.io/vibopsai/vibops-gateway:v0.38.1
     container_name: vibops_gateway
     environment:
       AGENT_API_URL: http://agent:8001
