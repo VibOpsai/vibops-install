@@ -426,7 +426,7 @@ A summary of what was configured is shown. Click **Start using VibOps** to enter
 
 ## 6. Connect your first GPU cluster
 
-> **Quick Start:** See [connect-quickstart.md](connect-quickstart.md) for the standalone 5-minute guide with platform-specific examples (Proxmox, vSphere, Slurm, K8s).
+> **Quick Start:** See [Connect Quick Start](./connect-quickstart.md) for the standalone 5-minute guide with platform-specific examples (Proxmox, vSphere, Slurm, K8s).
 
 If you skipped the wizard or need to add more clusters, use one of these methods:
 
