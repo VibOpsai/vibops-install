@@ -42,7 +42,9 @@ services:
   # ─── Execution Engine (core/) ─────────────────────────────────────────────
 
   core:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.1
+    build:
+      context: .
+      dockerfile: core/Dockerfile
     container_name: vibops_core
     restart: unless-stopped
     command: ["api"]
@@ -68,9 +70,31 @@ services:
       start_period: 15s
     networks:
       - vibops_net
+      - kind  # Accessible by VibOps Connect pods running in kind clusters
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.2
+    container_name: vibops_docker_proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 0
+      VOLUMES: 0
+      POST: 1        # required for docker build
+      BUILD: 1
+      EXEC: 0
+      SWARM: 0
+      NODES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - vibops_net
 
   worker:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.1
+    build:
+      context: .
+      dockerfile: core/Dockerfile
     container_name: vibops_worker
     restart: unless-stopped
     command: ["worker"]
@@ -84,11 +108,11 @@ services:
       DATADOG_SITE: ${DATADOG_SITE:-datadoghq.com}
       SLURM_DEMO_MODE: ${SLURM_DEMO_MODE:-true}
       KUBECONFIG: /home/vibops/.kube/config
+      DOCKER_HOST: tcp://docker-proxy:2375
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # SECURITY: host root-equiv — required for docker build ops. Use socket proxy in production.
       - ${HOME}/.kube:/home/vibops/.kube         # kubeconfig host — setup_kubeconfig écrit ici
     ports:
-      - "8080:8080"   # kubectl port-forward (ex: open-webui)
+      - "127.0.0.1:8080:8080"   # kubectl port-forward (ex: open-webui)
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,7 +123,9 @@ services:
 
   # Celery Beat — planificateur de tâches (évalue les triggers toutes les 60s)
   beat:
-    image: ghcr.io/vibopsai/vibops-core:v0.38.1
+    build:
+      context: .
+      dockerfile: core/Dockerfile
     container_name: vibops_beat
     restart: unless-stopped
     command: ["beat"]
@@ -150,7 +176,9 @@ services:
   # ─── Agent Claude (agent/) ────────────────────────────────────────────────
 
   agent:
-    image: ghcr.io/vibopsai/vibops-agent:v0.38.1
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
     container_name: vibops_agent
     restart: unless-stopped
     env_file: .env
@@ -173,7 +201,9 @@ services:
   # ─── Console web (console/) ──────────────────────────────────────────────
 
   console:
-    image: ghcr.io/vibopsai/vibops-console:v0.38.1
+    build:
+      context: .
+      dockerfile: console/Dockerfile
     container_name: vibops_console
     restart: unless-stopped
     env_file: .env
@@ -202,13 +232,13 @@ services:
   # ─── Ollama — runtime LLM local ──────────────────────────────────────────
   # GPU : décommenter le bloc "deploy" si tu as une carte NVIDIA
   ollama:
-    image: ollama/ollama
+    image: ollama/ollama:0.9.0
     container_name: vibops_ollama
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     # deploy:
     #   resources:
     #     reservations:
@@ -223,7 +253,8 @@ services:
   # Transparent OpenAI-compatible proxy that captures inference metrics
   # per agent for FinOps attribution. Agents point here instead of vLLM/Ollama.
   llm-proxy:
-    image: ghcr.io/vibopsai/vibops-llm-proxy:v0.38.1
+    build:
+      context: llm-proxy
     container_name: vibops_llm_proxy
     restart: unless-stopped
     environment:
@@ -231,7 +262,7 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       DEFAULT_BACKEND_URL: http://ollama:11434
     ports:
-      - "8004:8004"
+      - "127.0.0.1:8004:8004"
     depends_on:
       core:
         condition: service_healthy
@@ -243,8 +274,11 @@ services:
   # Utiliser plutôt : docker build -f connect/Dockerfile -t vibops/connect .
   # et déployer sur le serveur du CSP avec les variables ci-dessous.
   connect:
-    image: ghcr.io/vibopsai/vibops-connect:v0.38.1
+    build:
+      context: .
+      dockerfile: connect/Dockerfile
     container_name: vibops_connect
+    restart: unless-stopped
     environment:
       VIBOPS_CORE_URL: http://core:8000
       VIBOPS_GATEWAY_ID: ${CONNECT_GATEWAY_ID:-}
@@ -262,15 +296,23 @@ services:
       - connect
 
   # ─── Observabilité — Prometheus + Grafana (toujours actifs) ─────────────
-  # Prometheus scrape core:8000/metrics, agent:8001/metrics
+  # Prometheus scrape core:8000/metrics, agent:8001/metrics, gpu-simulator:9400/metrics
   # Grafana disponible sur http://localhost:3000 (admin / ${GRAFANA_PASSWORD:-vibops})
   # Pour désactiver en prod légère : docker compose --profile no-observability up (futur)
 
-  # gpu-simulator is a separate project — not included in production deployments.
-  # For development/demo, see: https://github.com/VibOpsai/vibops-gpu-simulator
+  gpu-simulator:
+    build:
+      context: .
+      dockerfile: tools/gpu-simulator/Dockerfile
+    container_name: vibops_gpu_simulator
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9400:9400"
+    networks:
+      - vibops_net
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.4.0
     container_name: vibops_prometheus
     restart: unless-stopped
     volumes:
@@ -282,19 +324,19 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     networks:
       - vibops_net
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.6.0
     container_name: vibops_grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-vibops}
       GF_SECURITY_ALLOW_EMBEDDING: "true"
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"  # dev only — disable in production (Helm chart does not expose this)
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_FEATURE_TOGGLES_ENABLE: publicDashboards
     volumes:
@@ -302,7 +344,7 @@ services:
       - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
     networks:
@@ -311,8 +353,11 @@ services:
   # ─── Gateway OpenAI-compatible (gateway/) ────────────────────────────────
 
   gateway:
-    image: ghcr.io/vibopsai/vibops-gateway:v0.38.1
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     container_name: vibops_gateway
+    restart: unless-stopped
     environment:
       AGENT_API_URL: http://agent:8001
     ports:
@@ -337,3 +382,5 @@ volumes:
 networks:
   vibops_net:
     driver: bridge
+  kind:
+    external: true

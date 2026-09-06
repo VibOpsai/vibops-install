@@ -346,7 +346,7 @@ See section [4 — The Morning Brief](#4-the-morning-brief) for details.
 - **Git** — GitOps status of the selected application: commit history, branch, rollback, inline repo linking
 - **Cluster** — CPU / RAM / GPU resources of the active cluster
 - **LLM / NIM** — inference workload management
-- **Automations** — trigger rules and pipelines
+- **Automations** — triggers, agents (grouped triggers with start/stop lifecycle), and webhooks
 - **FinOps** — waste, budget, chargeback
 - **⚙ Admin** — administration panel (visible to `org_admin` only)
 - **Language selector** — FR / EN / ES / DE / IT / PT / JA / ZH
@@ -905,11 +905,36 @@ The agent queries all four sources in parallel (`asyncio.gather`) and produces a
 
 When a Prometheus alert arrives via webhook, the agent receives it automatically, launches the diagnosis pipeline, and posts an analysis in the active chat (or opens a new conversation) without any action on your part.
 
-### Auto-healing: creating a trigger
+### Automations: Triggers and Agents
+
+VibOps automations have three concepts: **triggers**, **agents**, and **chaining**.
+
+#### Triggers
+
+Individual rules that fire an action on a schedule or when a metric condition is met. Create them in the **Triggers** tab:
+
+1. **Pick an action** — the smart action picker shows 24 recommended actions. Selecting one auto-fills the metric, condition, and threshold so you never write raw PromQL.
+2. **Set a schedule** — the visual schedule builder lets you choose a frequency (Every X minutes / Hourly / Daily / Weekdays / Weekly / Monthly), a time (hour and minute), and optionally a day. No cron syntax is exposed.
+3. **Set a cooldown** to prevent re-triggering too quickly.
+
+To edit an existing trigger, click it in the list to expand the inline editor — change any field and save (`PATCH /api/v1/triggers/{id}`).
+
+#### Agents
+
+Named groups of triggers with a start/stop lifecycle. Create an agent in the **Agents** tab by selecting existing triggers and assigning a step order (1, 2, 3...). Triggers can belong to multiple agents.
+
+Use the **up/down arrows** to reorder steps. Click an agent to edit its trigger list and order. Start or stop the agent as a unit from the UI or via the API (`POST /api/v1/agents/{name}/start`, `POST /api/v1/agents/{name}/stop`).
+
+Example: an "auto-scaler" agent with two triggers — step 1 scales up when GPU > 90%, step 2 scales down when GPU < 20%.
+
+#### Chaining
+
+Triggers can launch pipelines (`trigger_pipeline`) or enable/disable other triggers (`enable_trigger` / `disable_trigger`). This lets you build multi-step autonomous workflows without code.
 
 ```
-Set up a rule: if a pod has more than 3 restarts in 10 minutes,
-automatically restart the deployment and notify on Slack.
+Set up an agent that scales my inference deployment when GPU
+utilization exceeds 90%, and scales it back down when it drops
+below 20%. Name it auto-scaler.
 ```
 
 For destructive actions (rollback, scale-down), the trigger will pause and ask for confirmation — the same guardrail as for manual actions.

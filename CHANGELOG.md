@@ -9,6 +9,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.39.0] — 2026-09-02
+
+### Security
+- Fix cross-org data leak in discovery endpoint — org_id filter always applied
+- Add rate limiting on LDAP login (10/min) and OIDC callback (10/min)
+- Replace Docker socket direct mount with Tecnativa socket proxy
+- Remove hardcoded PostgreSQL password in core/docker-compose.yml
+- Add Redis authentication in core/docker-compose.yml
+- Reject default JWT secret for all non-development environments
+- Add kubectl verb allowlist in MCP layer (blocks exec, delete, apply, cp, etc.)
+- Add kubeconfig content validation — reject internal/metadata IPs
+- Invalidate refresh tokens on password change (phash fingerprint)
+- Fix X-Forwarded-For trust to use RFC 1918 ipaddress.is_private
+- Fix notification channels query to scope by org_id (cross-tenant leak)
+- Fix SSO/LDAP re-login to load actual roles/teams from DB
+- Replace blanket is_org_admin on service JWTs with service_account claim
+- Sanitize i18n HTML strings through DOMPurify
+- Move cursor span inside DOMPurify.sanitize() in chat panel
+- Add auth (Depends(verify_token)) to gateway /v1/models endpoint
+- Add Slurm script content validation (block curl|sh, rm -rf, etc.)
+- Validate LLM proxy backend URLs against configured allowlist
+- Fix path traversal in export_dataset via org_id sanitization
+- Remove os.environ writes for API keys in agent config endpoint
+- Add 10MB body size limit on LLM proxy inference endpoints
+- Pin Docker images: Prometheus v3.4.0, Grafana 11.6.0, Ollama 0.9.0
+- Bind internal ports to 127.0.0.1 (llm-proxy, prometheus, grafana, gpu-sim, ollama, worker)
+- Add kubectl_exec to SHELL_SENSITIVE_TOOLS guardrails
+- Refactor Fernet helpers to shared _get_fernet() (SSO, LDAP, SIEM)
+- Fix kubeconfig temp file permissions to 0o600
+
+### Changed
+- Service-to-service JWTs use `service_account: true` instead of `is_org_admin: true`
+- LLMClient accepts override_settings parameter for isolated testing
+- Gateway heartbeat temp file moved from /tmp to /var/lib/vibops
+- Network discovery uses configurable SSL context (respects VERIFY_SSL)
+- MCP tool count comments updated to match actual registrations
+
+### Fixed
+- Budget endpoints use db.commit() instead of db.flush() (data persistence)
+- Audit export uses output_format parameter (no longer shadows format builtin)
+- Alert correlation SQL uses parameterized interval (no string interpolation)
+- asyncio.get_running_loop() replaces deprecated get_event_loop()
+- Empty kubectl command returns error instead of sending to API
+- LLMClient._thinking_params uses self._settings (not global singleton)
+- Agent test_config endpoint correctly imports settings instance
+- MCP push_to_siem sends filter params as JSON body (not query string)
+- MCP version aligned between __init__.py (0.25.0) and pyproject.toml
+
+### Removed
+- 14,600 lines of dead code: stale static/index.html, vibops.js.bak
+- 31 unregistered MCP ghost functions moved to _unreleased.py
+- Hardcoded login_alert_email default removed
+- Unused os import in agent config endpoint
+
+---
+
 ## [0.38.0] — 2026-08-31
 
 ### Added
