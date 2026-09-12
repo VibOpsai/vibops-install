@@ -424,11 +424,13 @@ A summary of what was configured is shown. Click **Start using VibOps** to enter
 
 ---
 
-## 6. Connect your first GPU cluster
+## 6. Connect your infrastructure
 
-> **Quick Start:** See [Connect Quick Start](./connect-quickstart.md) for the standalone 5-minute guide with platform-specific examples (Proxmox, vSphere, Slurm, K8s).
+Without this step, the console is empty. VibOps Connect is the bridge between your infrastructure and the console — it discovers your VMs, GPUs, clusters, and starts reporting metrics automatically.
 
-If you skipped the wizard or need to add more clusters, use one of these methods:
+> **Full guide:** [Connect Quick Start](./connect-quickstart.md) — 5 minutes, covers all platforms (K8s, Proxmox, vSphere, XCP-ng, Slurm).
+
+If you skipped the wizard or need to add more sites, use one of these methods:
 
 ### Method A — Via the console (recommended)
 

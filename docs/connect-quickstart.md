@@ -1,6 +1,33 @@
 # VibOps Connect — Quick Start Guide
 
-Deploy a VibOps Connect gateway on a provider site in under 5 minutes. The gateway runs as a lightweight container inside the provider's network and communicates with VibOps Core via **outbound HTTPS only** — no inbound ports, no VPN, no firewall changes.
+## Why you need this
+
+Without VibOps Connect, the console is empty — no clusters, no VMs, no GPU metrics, nothing to manage. VibOps Connect is the bridge between your infrastructure and the VibOps console.
+
+## How it works
+
+VibOps Connect is a lightweight container you install inside each infrastructure site. Once running, it automatically:
+
+1. **Discovers** your local infrastructure (K8s API, Proxmox, vSphere, Prometheus)
+2. **Collects** metrics every 30 seconds (VMs, GPUs, pods, CPU/RAM, workloads)
+3. **Sends** a heartbeat to VibOps Core via outbound HTTPS (port 443)
+4. **Appears** in the console within 30 seconds — ready to manage
+
+The provider doesn't configure anything in the UI. The gateway auto-registers, discovers the infrastructure, and starts reporting. No inbound ports, no VPN, no firewall changes.
+
+```
+Your infrastructure (sovereign network)
+│
+│  VibOps Connect (container)
+│    ├── detects K8s API       → pods, deployments, GPU count
+│    ├── detects Proxmox       → VMs, CPU, RAM, disk, GPU passthrough
+│    ├── detects vSphere       → VMs, hosts, resource pools
+│    ├── detects Prometheus    → GPU utilization, node metrics
+│    │
+│    └── HTTPS OUT (port 443) ──→ VibOps Core ──→ Console
+│
+│  Nothing comes IN. Everything goes OUT.
+```
 
 ## Prerequisites
 
