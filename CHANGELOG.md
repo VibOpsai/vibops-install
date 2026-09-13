@@ -9,6 +9,162 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.41.4] — 2026-09-13
+
+### Fixed
+- **Agent unusable with generation-5 models** — `_thinking_params()` only switched to
+  adaptive thinking for fable/mythos; every other model got the removed
+  `{"type": "enabled", "budget_tokens": N}` form and the API answered
+  `400 thinking.type.enabled is not supported`. Adaptive is now the default;
+  `budget_tokens` is reserved for Haiku 4.5 and pre-4.6 generations
+- Six CVEs in `httpx2` / `httpcore2` (PYSEC-2026-3844 … 3849) — the `anyio==4.7.0` pin
+  forced the resolver down to `httpx2 2.6.0`; `anyio` raised to 4.15.1 and
+  `httpx2==2.12.0` pinned explicitly
+- Five hardcoded versions in Python code, including the FastAPI `version=` that feeds
+  `docs/openapi.json` — the published contract announced 0.25.0
+- `sync-mcp` and `publish-install` targeted `github.repository_owner` instead of the
+  `VibOpsai` org; `sync-mcp` additionally had `actions/checkout` credentials overriding
+  the push token. Both public repos had been stale since 06–08/09, `publish-install`
+  silently green while publishing to the wrong target
+- Orphan `landing` gitlink (mode 160000, no `.gitmodules`, unreachable commit) breaking
+  every `git submodule` call
+- `anthropic` imported by `core/app/workers/eval_task.py` but never declared — the worker
+  raised `ImportError` when used with `provider=claude`
+
+### Added
+- `THINKING_EFFORT` (`low` → `max`) exposing `output_config.effort`, the replacement for
+  the now-inert `thinking_budget_tokens`
+- `scripts/bump-version.sh` — updates the 18 version locations in one command;
+  `--check` enforces consistency and gates the CI `lint` job
+- CHANGELOG entries for 0.40.0 → 0.41.3, previously undocumented (177 commits)
+
+### Changed
+- `anthropic` SDK 0.49.0 → 1.5.0 (HTTP layer moved to `httpx2`)
+- Vendor-neutral naming outside the provider layer — audit actor `claude-agent` →
+  `vibops-agent` (rows written earlier keep the old value; the console filter accepts
+  both), API defaults aligned on the database (`provider="vibops"`), 22 comments reworded
+- Default model `claude-sonnet-4-6` → `claude-sonnet-5` (current generation, and cheaper)
+
+---
+
+## [0.41.3] — 2026-09-12
+
+### Added
+- HPE VME (Morpheus) connector — inventory, lifecycle, snapshots, migration, waste
+  (20 agent tools, 13 MCP tools)
+- Xen Orchestra connector enriched — V2V migration, backup/restore, storage, tasks, rolling update
+- Full hypervisor context in the agent — V2V migration, XO backup, VME conversion, tool routing
+- Multi-framework compliance — 19 regulatory frameworks, `seed_compliance_controls` tool,
+  agent rule 22 (auto-seed when a framework has 0 items)
+- VibOps Connect job relay — poll, claim, execute, report
+- Cold install — install script and production compose, Caddy reverse proxy
+  (only ports 80/443 exposed)
+- ADR 0035 (Compliance Agent), 0036 (Connect standalone Go binary),
+  0037 (Connect security hardening: whitelist, mTLS, token rotation, rate limit)
+- `scripts/bump-version.sh` — updates all 13 version locations in one command;
+  `--check` enforces consistency (wired into CI)
+- Network architecture docs (3 deployment modes: Cloud / Hybrid / Sovereign)
+  and Tersedia POC dossier
+
+### Changed
+- Counts updated: 36 connectors, 304 agent tools, 117 MCP tools, 242 API routes
+- Versions aligned on 0.41.3 across the monorepo — Python packages still declared
+  0.25.0 / 0.31.0 / 0.1.0 while images shipped as 0.41.x
+- `connectors/build/` is no longer tracked (setuptools output)
+- Connect heartbeat uses `httpx.Client` for mTLS certificate support
+
+### Fixed
+- `console_data` volume — conversations persist across restarts
+- Install wizard: email channel with recipients only, Alpine variable names,
+  Next/Skip button state, webhook subscription path
+- Secrets written as upsert — no more duplicate key error on wizard retry
+- `install.sh` generates `AUTH_PASSWORD_HASH`, `AUTH_USERNAME`, `GITHUB_WEBHOOK_SECRET`
+  and `GRAFANA_WEBHOOK_SECRET`
+- Caddyfile mounted instead of runtime env var interpolation
+- `COMPOSE_URL` points to vibops.ai instead of the private GitHub repo
+- VME and XO V2V tool functions lost during a merge, restored
+- AI Act update endpoint corrected to `/compliance/ai-act/{id}`
+
+---
+
+## [0.41.2] — 2026-09-08
+
+### Fixed
+- `crypto.randomUUID` fallback for non-HTTPS contexts (HTTP deployments)
+
+---
+
+## [0.41.1] — 2026-09-08
+
+### Added
+- Agent rule 21 POST-DEPLOY — suggests the service URL after a successful deployment
+- `gateway` and `beat` images added to the release-images workflow
+
+### Fixed
+- Agent scoped token must carry the admin role for destructive actions
+- 409 confirmation handled in `run_job`; `deploy_webapp` added to TOOL_CATALOG
+- `get_live_workload_cost` always tried first for workload queries
+- K8s gateway excluded from `prometheus_url` — prevents false workload termination
+
+---
+
+## [0.41.0] — 2026-09-06 — Harness Runtime complete
+
+### Added
+- Harness Runtime — trigger chaining and agent lifecycle
+- Sequential agent execution — steps run in order and stop on failure
+- Schedule builder — dropdowns replace raw cron input, existing cron parsed back into the form
+- Smart action picker — 24 recommended actions with auto-fill
+- Inline trigger editing, step reordering (▲▼), agent creation from the Agents tab
+- Harness Integrity CI job — tool parity and i18n checks on every push
+
+### Changed
+- OpenAPI spec regenerated (205 routes)
+- GHCR push uses `GITHUB_TOKEN` instead of `VIBOPSAI_PAT`
+
+### Fixed
+- `/triggers/agents` routes moved before `/triggers/{rule_id}` — fixes 405/404
+- Agent routes are `/agents`, not `/triggers/agents` — Core mounts without prefix
+- Triggers with null `org_id` honoured in dev mode (list/start/stop, assign)
+- The same trigger may now belong to several agents
+- Numerous Automations UI fixes — dropdown width and opacity, form layout, tab order
+
+---
+
+## [0.40.0] — 2026-09-06 — Harness OpContract Phase 1
+
+### Added
+- Harness OpContract Phase 1 — cross-surface operational integrity (ADR 0032),
+  rules 7–10 (output, permission, i18n, gateway version) and agent rule 16
+  PERMISSION DENIED (explicit 403 messaging)
+- `scripts/seed-dev.sh` — populates the full demo dataset in one command
+- `validate-seed.sh` — 12 coherence checks across fleet, finops and alerts
+- `check-gateway-compat.sh` — N-1 heartbeat payload replay test
+- Endpoint audit — exercises all 254 OpenAPI routes looking for 500s, run on version tags
+- E2E pipeline tests — 76 tests across 7 stages
+- FinOps infra tools for the agent; budget forecast now includes waste
+- CloudSigma demo seed, VibOps Connect guides, *Infrastructure as Agents* product vision
+- Automatic `mcp/` → VibOpsai/vibops-mcp sync on version tags
+
+### Changed
+- ADRs renumbered — 0032 Harness OpContract, 0033 Topology Graph, 0034 Agentic Graph
+  (duplicate 0021/0022 resolved)
+- Switched to 30s polling, informers deferred to Level 2b (ADR 0021)
+- `core/docker-compose.yml` renamed to `docker-compose.test.yml` — removes compose context confusion
+- Nightly Playwright E2E paused; E2E pipeline restricted to version tags
+
+### Fixed
+- Budget data coherence — live GPU + VM spend, pro-rated MTD, idempotent seed
+- VM spend uses `vm_cost_usd` instead of `customer_cost_usd` — prevents GPU double counting
+- Waste computed per cluster via ClusterRate, recommendations generated per idle GPU
+- Workload sync keys off `collection_succeeded` instead of a snapshot count
+- Migration rewritten for clean installs — idempotent creation, CI drift resolved
+- Login accepts username **or** email
+- Dev mode counts as an enterprise licence — no GPU/cluster limits
+- `vm-usage` crash when `gpu_passthrough` is a bool instead of a list
+
+---
+
 ## [0.39.0] — 2026-09-02
 
 ### Security

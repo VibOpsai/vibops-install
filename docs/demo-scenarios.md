@@ -228,7 +228,7 @@ docker exec vibops_worker kubectl --context apalacha delete namespace chatbot --
 **Tools triggered:** `list_jobs`
 
 **What the agent produces:**
-Full chronological log of all operations — who triggered them (`api` / `claude-agent`), what action ran, success/failure, duration, and error detail for failures.
+Full chronological log of all operations — who triggered them (`api` / `vibops-agent`), what action ran, success/failure, duration, and error detail for failures.
 
 **Talking points:**
 - *"Every action VibOps takes is logged — who triggered it, what ran, success or failure, duration, error detail. Immutable audit trail out of the box."*

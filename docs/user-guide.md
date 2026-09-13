@@ -1907,7 +1907,7 @@ The audit log is the **complete and immutable** history of everything that happe
 | Column | Description |
 |---------|-------------|
 | **Date** | Precise timestamp of the action |
-| **User** | Who triggered the action (`claude-agent` = the AI, `github-webhook` = a GitHub trigger, or your username) |
+| **User** | Who triggered the action (`vibops-agent` = the AI — `claude-agent` on rows written before v0.41.4 —, `github-webhook` = a GitHub trigger, or your username) |
 | **Action** | Technical name of the action (e.g. `scale_cluster`, `deploy_model`) |
 | **Parameters** | What was passed to the action (cluster, namespace, number of replicas…) |
 | **Status** | `success` (green), `failed` (red), `pending` (grey) |
@@ -1916,7 +1916,7 @@ The audit log is the **complete and immutable** history of everything that happe
 **Filter logs:**
 - **By action**: type `scale_cluster` to see only scaling actions
 - **By status**: filter on `failed` to see only errors
-- **By user**: type `claude-agent` to see AI actions, or your username for your own actions
+- **By user**: type `vibops-agent` to see AI actions (`claude-agent` for rows written before v0.41.4), or your username for your own actions
 
 **Typical use cases:**
 
@@ -1927,7 +1927,7 @@ _"Someone scaled the prod cluster to 0 replicas, who was it?"_
 → Filter by action `scale_cluster`, look at the **User** column
 
 _"The agent took an action I didn't request"_
-→ Filter by user `claude-agent`, check the **Parameters** column to see exactly what it did
+→ Filter by user `vibops-agent`, check the **Parameters** column to see exactly what it did
 
 > **Pagination**: the `←` and `→` buttons load in batches of 100 entries. The most recent appear first.
 
@@ -2124,7 +2124,7 @@ Configure which LLM the VibOps agent uses for all conversations and automated ta
 | Field | Description |
 |-------|-------------|
 | **Provider** | Select from dropdown |
-| **Model** | Model name (e.g. `claude-opus-4-6`, `llama-3.1-70b-instruct`) |
+| **Model** | Model name (e.g. `claude-opus-5`, `llama-3.1-70b-instruct`) |
 | **API key** | Stored encrypted in the VibOps Vault |
 | **Base URL** | Required for OpenAI-compatible and Ollama providers |
 
@@ -2361,7 +2361,7 @@ Deploy VibOps v0.21.0 on context prod-k8s
 | `namespace` | `vibops` | Target namespace |
 | `chart_ref` | `./helm/vibops` | Helm chart path or OCI ref |
 | `jwt_secret_key` | `""` | JWT secret (set for initial deploy) |
-| `llm_api_key` | `""` | Anthropic API key (set for initial deploy) |
+| `llm_api_key` | `""` | LLM provider API key (set for initial deploy) |
 | `values_file` | `""` | Path to extra values file |
 
 **API:**
@@ -3370,8 +3370,8 @@ POST /api/v1/agents/dependencies
   "from_agent_id": "orchestrator-v2",
   "from_agent_name": "VibOps Orchestrator",
   "edge_type": "uses_model",
-  "to_node_id": "claude-opus-4-6",
-  "to_node_name": "Claude Opus 4.6",
+  "to_node_id": "claude-opus-5",
+  "to_node_name": "Claude Opus 5",
   "to_node_type": "model"
 }
 ```
@@ -3891,7 +3891,7 @@ DELETE /api/v1/webhooks/subscriptions/{id}?confirmed=true
 
 This applies to tokens, webhook subscriptions, notification channels, teams, invites, team members, alert rules, providers, eval rubrics, memories, and the org policy.
 
-The agent handles this automatically — when Claude needs to delete a resource, it calls the preview first and includes the details in its response before executing.
+The agent handles this automatically — when the agent needs to delete a resource, it calls the preview first and includes the details in its response before executing.
 
 ### SIEM audit export
 
