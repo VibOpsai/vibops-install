@@ -9,6 +9,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.41.5] — 2026-09-13
+
+### Fixed
+- **Morning briefing failed every day at 07:00 UTC** — `briefing_task.py` issued its
+  service token with `"teams": ["ops"]`, a list of strings, while the decoder builds a
+  `TeamInfo` per entry and reads `t["id"]`. Every call answered 500 with
+  `TypeError: string indices must be integers`. It was the last issuer left on the old
+  format; d3ae927 had fixed the console and agent ones
+- Release images were pushed without the `v` prefix (`vibops-core:0.41.4`) while
+  `install/docker-compose.yml` and `install.sh` reference `${VIBOPS_VERSION:-vX.Y.Z}` —
+  a fresh install could not resolve its images
+- Release notes advertised `docker pull ghcr.io/vibopsai/vibops-*`, a namespace that
+  does not exist
+
+### Added
+- `vibops.ai` is now published automatically. The site is served by GitHub Pages from
+  `VibOpsai/vibopsai.github.io` and no workflow fed it: on 13/09 it still served v0.41.3,
+  three days after the images shipped, so every fresh install deployed a stale version
+
+### Changed
+- CI spend cut from roughly 2200 to 800 minutes per week: `linux/arm64` dropped from
+  release builds (nobody pulled those images — local development on Apple Silicon
+  compiles natively), a `concurrency` group added to `ci.yml` (pull requests only, so
+  every commit landing on main is still verified), and `deploy.yml` restricted to tags
+  (it published `:main` and `:sha-` images that nothing consumes)
+
+---
+
 ## [0.41.4] — 2026-09-13
 
 ### Fixed
