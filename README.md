@@ -31,7 +31,7 @@ Full step-by-step instructions with screenshots: **[QUICKSTART.md](QUICKSTART.md
 **What you need:** Docker Desktop · An LLM API key (or Ollama for local AI)
 
 ```bash
-git clone https://github.com/vibops/vibops-install.git
+git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
 make quickstart
 ```
@@ -48,7 +48,7 @@ Open **http://localhost:8003** — your VibOps console is ready.
 
 ```bash
 # On your server
-git clone https://github.com/vibops/vibops-install.git
+git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
 make quickstart
 ```
@@ -67,7 +67,7 @@ GPU clusters connect via outbound polling — no inbound ports needed on the clu
 
 ```bash
 # On your server
-git clone https://github.com/vibops/vibops-install.git
+git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
 make quickstart
 ```

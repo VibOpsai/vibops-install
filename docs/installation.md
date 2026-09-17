@@ -11,8 +11,9 @@ GPU cluster and a working agent conversation.
 2. [Prerequisites](#2-prerequisites)
 3. [Get a licence](#3-get-a-licence)
 4. [Choose your deployment mode](#4-choose-your-deployment-mode)
-   - [Option A — Docker Compose (POC / pilot)](#option-a--docker-compose-poc--pilot)
-   - [Option B — Helm (production)](#option-b--helm-production)
+   - [Option A — One-line install (`install.sh`)](#option-a--one-line-install-installsh)
+   - [Option B — Docker Compose (POC / pilot)](#option-b--docker-compose-poc--pilot)
+   - [Option C — Helm (production)](#option-c--helm-production)
 5. [First login & onboarding wizard](#5-first-login--onboarding-wizard)
 6. [Connect your first GPU cluster](#6-connect-your-first-gpu-cluster)
 7. [First conversation with the agent](#7-first-conversation-with-the-agent)
@@ -126,7 +127,65 @@ A countdown banner appears in the header as the trial or licence approaches expi
 
 ## 4. Choose your deployment mode
 
-### Option A — Docker Compose (dev / POC)
+### Option A — One-line install (`install.sh`)
+
+Fastest path on a fresh Linux VM (Ubuntu 22.04+ / Debian 12+). Installs Docker if
+needed, generates secrets, pulls the images and starts the stack.
+
+```bash
+curl -fsSL https://vibops.ai/install.sh | bash
+```
+
+For anything beyond the defaults, download it first and pass options:
+
+```bash
+curl -fsSL https://vibops.ai/install.sh -o install.sh
+bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
+```
+
+#### Options
+
+| Option | Default | Purpose |
+|---|---|---|
+| `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.41.5` |
+| `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
+| `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
+| `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
+| `--admin-email` | `admin@vibops.local` | Console administrator account |
+| `--admin-password` | *(generated)* | Random and printed at the end if omitted |
+| `--dir` | `/opt/vibops` | Installation directory |
+
+Every option also reads its environment variable of the same name
+(`VIBOPS_DOMAIN`, `LLM_API_KEY`…), which is what you want for unattended installs.
+
+#### HTTPS
+
+**With `--domain`**, Caddy obtains a Let's Encrypt certificate on first start and
+redirects HTTP to HTTPS. Nothing else to configure. Two prerequisites:
+
+- the DNS record for that domain points to this machine;
+- ports 80 and 443 are reachable from the internet (Let's Encrypt validates over
+  port 80).
+
+**Without `--domain`**, the install falls back to plain HTTP on port 80 and says so.
+That is acceptable behind a TLS-terminating proxy such as Cloudflare, or on a private
+network — but **passwords and session tokens travel unencrypted** otherwise. Let's
+Encrypt cannot issue certificates for bare IP addresses, which is why a domain is
+required.
+
+To switch an existing install to HTTPS, replace `:80` with the domain on the first
+line of `/opt/vibops/Caddyfile`, then `docker compose restart caddy`.
+
+#### Ports
+
+Only Caddy publishes ports — 80 and 443. Core, agent, console, Grafana and Prometheus
+stay on the internal Docker network and are reached through the proxy. Nothing else
+needs to be opened in your firewall.
+
+---
+
+### Option B — Docker Compose (dev / POC)
 
 Recommended for: local development, demos, POC with a client.
 Everything runs in Docker on a single machine. No Kubernetes required.
@@ -230,7 +289,7 @@ Log in at **http://localhost:8003** (or **http://SERVER_IP:8003** on a remote se
 
 ---
 
-### Option B — Helm (production)
+### Option C — Helm (production)
 
 Recommended for: CSP client deployments, enterprise on-prem, any production workload.
 

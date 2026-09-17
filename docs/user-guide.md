@@ -78,7 +78,8 @@
 25. [Cloud Provider Connectors](#25-cloud-provider-connectors)
 26. [Terraform Integration](#26-terraform-integration)
 27. [Docker Build & CI Integration](#27-docker-build--ci-integration)
-28. [Quick reference](#28-quick-reference)
+28. [Bare metal servers](#28-bare-metal-servers)
+29. [Quick reference](#29-quick-reference)
 - [Compliance Verification](#compliance-verification)
 - [Security Scans](#security-scans)
 
@@ -3102,7 +3103,89 @@ The agent chains `git_clone` → `docker_build_push` → `ci_trigger` → `ci_wa
 
 ---
 
-## 28. Quick reference
+## 28. Bare metal servers
+
+**What is it for?** VibOps reads your physical servers through their BMC — the small
+management controller soldered onto the motherboard, which answers even when the
+machine is powered off. Dell calls it iDRAC, HPE calls it iLO, Lenovo calls it XCC.
+All of them speak the same protocol, Redfish.
+
+**Who should use it:** anyone installing GPU capacity. The settings that decide
+whether that hardware performs — Above 4G decoding, Resizable BAR, SR-IOV, IOMMU,
+C-states — live in the BIOS, and they drift. One wrong setting across forty nodes
+costs a third of your throughput with no error anywhere.
+
+**What VibOps does today: reads. It writes nothing to your hardware.** Inventory,
+firmware versions, BIOS settings, power state and health. No power control, no BIOS
+changes, no firmware updates.
+
+### Connecting servers
+
+Two ways, and the first is the one to use.
+
+**Scan the network.** Deploy a VibOps Connect gateway that can reach your management
+VLAN, then open **Fleet → Bare Metal** and click **Scan the network**. Every gateway
+that is online probes its declared subnet and reports the BMCs it finds. Forty
+servers appear at once.
+
+**Declare a server.** For a machine a scan cannot reach — a different subnet, a
+non-standard port, no gateway on that VLAN — use **+ Add server**, or the
+**+ Connect Infrastructure** wizard. You give it a name, the BMC address, a
+username, and the name of a secret from the vault.
+
+### Confirming what VibOps may talk to
+
+A discovered server does **not** become managed on its own. It lands in
+**awaiting confirmation** and VibOps will not contact it until you click **Manage**.
+
+This is deliberate. Reaching a management network means being able to power off a
+building, so a machine appearing on that network must not fall under management
+because nobody objected. **Unmanage** reverses it at any time, and a later scan will
+never re-arm a server you deliberately left alone.
+
+### Credentials
+
+You never type a BMC password into VibOps. Create a secret in **Settings → Secrets**,
+then select it by name on the server. The value is read from the vault immediately
+before a command runs, and it never appears in chat, in a job result, or in a log.
+
+If you leave the secret blank, the connector falls back to a `REDFISH_PASSWORD`
+environment variable on the worker — workable for a fleet sharing one service
+account, but a per-server secret is better.
+
+### TLS
+
+BMCs ship with self-signed certificates. VibOps verifies certificates by default and
+expects a site CA bundle. A server can be marked **unverified** if your fleet cannot
+present a trusted certificate yet; the fleet table shows that as a badge, because a
+fleet running without verification should be visible without opening a config file.
+
+### What you can ask the agent
+
+```
+Show me the servers in the bare-metal inventory
+What firmware is installed on rack4-node01?
+Show me the BIOS settings of rack4-node01
+Which servers are unreachable?
+```
+
+The agent names a machine by its inventory id. It never sees a BMC address or a
+credential.
+
+### What is not there yet
+
+**Bulk import.** Pasting a list, uploading a CSV, or importing from OpenManage
+Enterprise, OneView, XClarity or Intersight — which already hold your inventory.
+Until then a scan is the only way to add many servers at once.
+
+**Writing to hardware.** Changing a BIOS setting, power cycling, updating firmware.
+These are planned and deliberately later: a BIOS write applies at the next reboot,
+which on a GPU node carrying a training run is a scheduled operation rather than a
+button. See [ADR 0040](../core/docs/adr/0040-bare-metal-redfish.md).
+
+---
+
+## 29. Quick reference
 
 ### Keyboard shortcuts
 
@@ -3977,4 +4060,4 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ### Chat Panel
 
-The chat panel (right sidebar) is available from any tab. It provides natural language access to all 205 tools via the VibOps agent. Click the chat icon in the header to open/close.
+The chat panel (right sidebar) is available from any tab. It provides natural language access to all 308 tools via the VibOps agent. Click the chat icon in the header to open/close.

@@ -79,7 +79,7 @@ A terminal is the window where you type commands.
 In your terminal, type these two commands one at a time (press Enter after each):
 
 ```
-git clone https://github.com/vibops/vibops-install.git
+git clone https://github.com/VibOpsai/vibops-install.git
 ```
 
 ```
@@ -423,8 +423,8 @@ sudo apt-get update && sudo apt-get install -y make git
 ### Step 3 — Download and start VibOps
 
 ```
-git clone https://github.com/vibops/vibops-install.git
-cd vibops
+git clone https://github.com/VibOpsai/vibops-install.git
+cd vibops-install
 make quickstart
 ```
 
@@ -585,8 +585,8 @@ sudo apt-get update && sudo apt-get install -y make git
 ### Step 3 — Download and start VibOps
 
 ```
-git clone https://github.com/vibops/vibops-install.git
-cd vibops
+git clone https://github.com/VibOpsai/vibops-install.git
+cd vibops-install
 make quickstart
 ```
 

@@ -174,7 +174,7 @@ _Last updated: 2026-08-31 · v0.38.0_
 - [x] 3 config tools — set cluster rate, register/delete gateway
 - [x] 22 governance tools — anomalies, AI Act, compliance reports, audit chain, policy, agent identities, dependency graph, LLM-as-judge
 - [x] 4 FinOps tools — budget, chargeback, spend trend, waste analysis
-- [x] **68 tools total** — published on PyPI (`vibops-mcp`) + GitHub
+- [x] **117 tools total** — published on PyPI (`vibops-mcp`) + GitHub
 
 ### Security
 - [x] CVE scanning — `pip-audit` on all `requirements.txt` + Trivy filesystem scan, blocking on HIGH/CRITICAL, runs on every push and PR
@@ -331,6 +331,214 @@ _Last updated: 2026-08-31 · v0.38.0_
 
 ## P1 — Backlog (prioritized)
 
+### Technical debt & hardening (architecture review, 12–14 Sept 2026)
+
+Findings from a full-repository review. Ordered by what they cost if ignored, not by
+difficulty. Full rationale and evidence: the review document and the commits cited.
+
+- [x] **Decompose `agent_service.py`** — was 6,505 lines at 1 test / 135 lines, the
+  lowest test density in the repo. Now 987, and 96.6% covered. Split into
+  `tools_catalog`, `tool_routes`, `core_calls`, `vm_operations`, `incident_operations`,
+  `job_operations`, `gateway_operations`, `prometheus_queries`. `_execute_tool` went
+  from 963 lines to 110 and is a dispatcher again; `chat_stream` went from 1% to 100%
+  covered. Characterization tests came first at every step and caught eleven defects,
+  each fixed in its own commit. Remaining: extracting the loop itself — optional, the
+  file is no longer a liability. (14 Sept 2026)
+
+- [ ] **Enforce post-action verification in the agent loop** — the highest-value gap in
+  the execution loop, and the one that touches correctness rather than cost. Today the
+  agent reports success on a tool's return code: a 200 proves the API accepted the
+  manifest, not that a pod started or a GPU was reserved. The system prompt asks for
+  verification (rule 2, "VERIFY VIA TOOLS, NEVER FROM MEMORY") but **line 34
+  contradicts it** — "when all tools have returned status=success, the task is done,
+  NEVER rerun ... on grounds of verifying". Nothing enforces it either way.
+
+  This would be the third mechanism of the same family as the policy engine and the
+  JWT-anchored isolation: a guarantee that fails loudly instead of relying on the
+  model's goodwill. The policy engine says *no*; the token says *on whose behalf*;
+  verification would say *it is actually done*. Commercially, it is the one of the
+  three a CIO will ask you to prove.
+
+  Scope — 71 actions are declared `destructive` across connectors, but they share
+  proofs; roughly ten cover the bulk of the risk (deploy_model, helm_upgrade,
+  deploy_webapp, nim_deploy, scale, delete):
+  - declare a verification spec beside each destructive action, the way
+    `supports_dry_run` already sits in `ToolSpec` (~2 days)
+  - implement the proofs that matter: pods Running and Ready, rollout converged, GPU
+    allocated, and for inference an actual request returning a response — the only
+    check that crosses the whole stack (~3–4 days)
+  - enforce it in the loop: no exit after a destructive action without proof. The
+    delicate part — a rollout takes minutes, so each action needs its own timeout
+    (~3 days)
+  - fix the prompt contradiction on line 34 (~1 hour, but nothing applies without it)
+  - on failure, pod logs and events go back into the context, not a status code
+
+  ~8–12 days. Specification and rationale:
+  [`docs/agent-execution-loop.html`](agent-execution-loop.html), which states the thesis
+  as "200 does not mean deployed", and ADR 0038 for the mechanism.
+
+  **Step 1 landed (14 Sept 2026).** `VerificationSpec` sits in `ToolSpec` beside
+  `supports_dry_run`; six actions declare a proof; the field is carried through the
+  core catalogue so it reaches the agent. A CI invariant makes the declaration
+  mandatory: of 74 destructive actions, 6 are proven and 68 are listed in
+  `VERIFICATION_PENDING`, a list that may shrink and never grow — a new destructive
+  action arrives with its proof or CI stops it. Two are blocked rather than pending:
+  `delete_deployment` has no collection read exposed to the agent (a failing
+  single-object read cannot tell "deleted" from "blind"), and `helm_rollback` needs a
+  `revision_matches` predicate.
+
+  **Step 2 landed (15 Sept 2026).** The three predicates are implemented in
+  `agent/app/services/verification.py`, at 100% branch coverage, with a
+  cross-package invariant asserting that what connectors may declare and what the
+  agent can evaluate are the same set. Verdicts are three, not two: `UNKNOWN` — the
+  evidence could not be obtained — is never reported as proof, since a check that
+  passes while blind is worse than no check. Writing the predicates surfaced that
+  `get_deployment_status`, the proof tool for four of the six declarations, returned
+  a pending job instead of the deployment state; fixed first.
+
+  **Step 3 landed (15 Sept 2026).** Enforcement sits in `_execute_tool`, wrapping
+  the dispatch, so both chat paths are covered without duplicating the loop. The
+  lookup keys on the effective action — `create_job` and `confirm_action` carry the
+  real one in their payload — and the verdict rides on the result the model
+  receives, with an instruction for each of the three cases. Rule 5 of the system
+  prompt no longer contradicts rule 2: it forbids repeating work, not checking it,
+  and tells the model the harness has already done the checking. 31 enforcement
+  tests, 100% on the three methods touched.
+
+  **Step 4 landed (15 Sept 2026), completing the mechanism.** On a `disproven`
+  verdict the harness reads the evidence — events, then container logs — and
+  attaches it to the same tool result, so the agent explains the failure instead of
+  reporting it. Which evidence is declared beside the proof, not inferred: the four
+  Kubernetes declarations carry one, the two `absent` ones do not, because a Helm
+  release still listed has no pod to inspect. Each piece is capped on its own so the
+  verdict survives beside it.
+
+  **Verified against a real cluster (15 Sept 2026).** kind + the full stack, a
+  deployment with an image that does not exist. The verdict was right first time —
+  `disproven`, "only 0/2 replicas ready" — with `ImagePullBackOff`, the pod name and
+  the offending image in 2 551 characters. Three defects on the way there, none
+  visible from a unit test because each lives at a seam the tests mock: the proof
+  tool was refused by the PolicyEngine, the events that explain a failure are on the
+  Pod and not the Deployment, and the readable summary was being discarded in favour
+  of the job envelope.
+
+  **What remains is declarations, not mechanism.** 70 of 82 destructive actions are
+  in `VERIFICATION_PENDING`; the ratchet makes the count visible. Blocked rather than
+  pending: `delete_deployment` needs `list_deployments` exposed to the agent,
+  `helm_rollback` a `revision_matches` predicate, `create_ingress` a read tool for
+  Ingress objects, and `configure_gpu_timeslicing` a predicate that should not be
+  written before seeing the real output of `get_gpu_timeslicing` on a GPU node.
+
+- [ ] **Twenty agent tools the PolicyEngine refuses** — found by the run above and
+  now guarded by `connectors/tests/test_agent_tools_are_known.py`. Ten were
+  dispatched by a connector with no `TOOL_CATALOG` entry and are fixed. Ten remain
+  dead: their action no longer exists under that name (`get_dcgm_metrics`,
+  `get_gpu_operator_status` → `accelerator_*`; `get_gke_credentials`,
+  `get_aks_credentials` → `update_kubeconfig_*`), plus node-pool scaling that GKE and
+  AKS never implemented, and `scale_deployment`, which the MCP exposes too and is
+  equally broken there.
+
+  Three of the ten are already fixed: `get_mig_status`, `configure_mig` and
+  `disable_mig` are back on `NvidiaConnector`. MIG is the term the market asks for,
+  and the base class allows vendor connectors to carry their own tools beside the
+  portable ones — `AmdConnector` already did. Sprint 5 had rewired only the two
+  writes into `accelerator_partition_device` and left `_query_mig_state` with no
+  caller at all, so MIG could be partitioned and never inspected. Restoring the read
+  also gives the two writes their proof: `partitioning_enabled` /
+  `partitioning_disabled`, which takes them out of `VERIFICATION_PENDING`. Untested
+  on real NVIDIA hardware — the predicates are written against the exact shape
+  `_query_mig_state` returns, but no A100 has confirmed the node labels behave as
+  the connector assumes. Each is to be implemented under its current name or removed
+  from the agent's catalogue — they are advertised on every turn, cost tokens in
+  every request, and burn a turn when the model calls one. The system prompt already
+  forbids `get_gpu_operator_status` by name while the tool is still offered. ~1 day.
+
+- [ ] **Filter the tool catalogue per task** — `tools=self._effective_tools` sends all
+  304 definitions on every turn, at three call sites in `agent_service.py`. A cost and
+  accuracy problem, not a correctness one: tokens spent every turn, and selection
+  degrades as the catalogue grows.
+
+  **Watch the vendor-agnosticism tension**: the natural mechanism — `defer_loading` and
+  a tool-search tool — is Anthropic-specific and would tie the agent to one provider,
+  exactly what the architecture avoids elsewhere. The right layer is `llm_client`,
+  which already abstracts providers: filter the catalogue before the call, whichever
+  model sits behind. ~3–5 days.
+
+- [ ] *(not planned)* **Mid-loop resume after a crash** — listed on the execution-loop
+  diagram, deliberately left out. The diagram contradicts itself here: it asks for
+  resume while noting "no replay: an upgrade is not idempotent". A `helm_upgrade`
+  interrupted midway is not resumable, it is to be diagnosed. The honest version of
+  that box is the journal, which the HMAC-chained `audit_log` already largely provides.
+
+- [ ] **Typed contracts between agents, before any event bus** — ADR 0034's first
+  stated need is *typed contracts*, which is a schema problem, not a transport one.
+  Pydantic models over the existing tables deliver most of the value with nothing
+  deployed. Measure whether the pain persists before committing to the ~15-day bus.
+
+  Decided and written into ADR 0034 on 15/09/2026; the ADR had been left at
+  "Draft (research needed)" while its conclusion lived only here, so a reader of the
+  ADR would have concluded the opposite of what was decided.
+
+  Scope, measured rather than recalled. Three shared models, **14 touchpoints across
+  12 distinct modules** — the model definitions themselves are not touchpoints:
+
+  | Model | Modules | Touchpoints |
+  |---|---|---|
+  | `AnomalyEvent` | 8 | 7 — written by `anomaly_task`, `agent_anomaly_task`, `vm_anomaly_task`, `gpu_health_task`; read by `proactive_agent_task`, `compliance_checker`, `api/v1/anomaly` |
+  | `ProactiveInsight` | 6 | 5 — `proactive_agent_task`, `compliance_check_task`, `security_scan_task`, `compliance_checker`, `api/v1/insights` |
+  | `BudgetAlert` | 3 | 2 — `budget_service`, `api/v1/finops` |
+
+  `compliance_checker` and `proactive_agent_task` each read two of the three: the
+  cross-domain consumers, where the missing contract costs most.
+
+  Two earlier figures in this entry were wrong. "14 modules and 4 producers" for
+  `anomaly_events` conflated the table name with the model and named
+  `k8s_anomaly_task`, which does not write it. The ~2–3 day estimate was anchored on
+  that one model; the real scope is three. **~3–4 days.**
+
+- [ ] **Encrypt the Cloudflare → origin leg** — the firewall (13/09) closed direct
+  access to the origin, which was the bulk of the risk. Traffic between the edge and
+  Helsinki still crosses transit providers in clear, session tokens included. A
+  Cloudflare Origin CA certificate (free, 15 years, no renewal to watch) plus SSL mode
+  *Full (strict)*. Cloudflare itself flags Flexible mode as insecure. ~1 hour.
+
+- [ ] **Enable Redis persistence before routing events through it** — production runs
+  `appendonly no` with only spaced RDB snapshots (up to one hour). Harmless today
+  (Redis is a Celery broker, data lives in PostgreSQL), material the day anomalies and
+  budget alerts transit through it. Decide alongside the event bus, not after. ~15 min.
+
+- [ ] **Extend `--check` to product figures** — `bump-version.sh --check` guards the 18
+  version locations and works. The same drift hit the documented counts: 26, 31 and 36
+  connectors were claimed for 33 real, 59 to 130 tools for 117. Corrected by hand on
+  13/09; nothing prevents the next drift. A counting script plus a CI step. ~1 day.
+
+- [ ] **Delete `deploy.yml`** — restricted to tags on 13/09 but wholly redundant. Its
+  Helm job stops for want of a `KUBECONFIG` secret (no remote deploy has ever run); its
+  build job produces three images `release-images.yml` rebuilds on the same tags, plus
+  five more. Confirm no Helm deployment is planned, then remove. ~30 min.
+
+- [ ] **Decide on the leaked admin password** — removed from all five scripts (#34 and
+  `b4067a8`), but it remains readable in git history via `git log -p`, for anyone who
+  has or had repository access. If it opens anything beyond the seed fixtures, it must
+  be **changed**, not merely erased. History rewriting is possible but invalidates every
+  clone; rotation is simpler. Decision, not development.
+
+- [ ] **Reconcile the figures in `docs/commercial/`** — the RFI responses and the
+  valuation document claim 130, 83 and 70 tools and 26 connectors, and contradict each
+  other between the FR and EN versions of the same dossier. Left untouched during the
+  audit because those documents may already have been sent: correcting the archive
+  would diverge from what was transmitted. To settle before the next client sendout.
+
+- [ ] **Choose between `STATUS.md` and `CHANGELOG.md`** — two parallel histories in
+  different formats. `CHANGELOG.md` was brought up to date on 13/09 (177 commits);
+  `STATUS.md` still stops at 09/09. Whichever is authoritative, the other will drift
+  unnoticed — exactly how the counts above went wrong.
+
+- [ ] **`beat` and `gateway` image tags** — `release-images.yml` publishes 8 tags from
+  6 Dockerfiles; no compose references those two, and `worker`/`beat` duplicate the
+  `core` image. Two builds paid per release for nothing.
+
+
 ### FinOps maturity
 - [ ] **Reseller FinOps dashboard** — aggregate FinOps views for reseller orgs (~27h total):
   - API: `GET /resellers/me/finops/summary` — per-customer spend MTD, top spenders, total (4h)
@@ -481,7 +689,13 @@ _Last updated: 2026-08-31 · v0.38.0_
 - [ ] Onboarding Assistant — conversational wizard for new clients (replaces HTML wizard with AI-guided setup)
 
 **Infrastructure:**
-- [ ] Agent graph dispatcher — custom state machine in DB (`agent_tasks` table) + Celery routing. No LangGraph/CrewAI dependency. ADR 0032.
+- [ ] Agent graph dispatcher — **research done 2026-09-13** (ADR 0034). Redis Streams
+  consumer groups retained: at-least-once, pending-entry tracking, replay, and Redis 7
+  is already deployed — zero new infrastructure. Temporal ruled out (dedicated server +
+  database for 8 agents), Prefect/Dagster ruled out (acyclic by construction, cannot
+  express `anomaly → insight → action → anomaly`), LangGraph ruled out (built for LLM
+  agents; ours are deterministic domain services). **Do the typed contracts first** —
+  see below — and only build the bus if the pain persists. ~15 days if pursued.
 - [ ] Agent fleet dashboard — console panel showing all agents, status, last run, findings count
 - [ ] Inter-agent communication protocol — agents trigger each other via DB tasks (security → ops, compliance → security)
 

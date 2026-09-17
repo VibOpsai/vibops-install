@@ -1,0 +1,1176 @@
+# VibOps — API Reference
+
+_Last updated: 2026-09-16 · v0.41.5_
+
+This document covers the **key endpoints** for integration and technical qualification. It is
+organized by functional domain, with curl examples for each operation.
+
+**Interactive reference (Swagger UI):** `https://<host>/docs`  
+**Machine-readable spec:** `docs/openapi.json` (OpenAPI 3.1 — 213 paths, 269 operations, auto-generated)  
+**Full redoc:** `https://<host>/redoc`
+
+---
+
+## Authentication
+
+All protected endpoints require `Authorization: Bearer <token>` in the request header.
+The token is a JWT enriched with `org_id`, `teams`, `role`, and `scope`.
+
+### `POST /api/v1/auth/login`
+
+Authenticates a user and returns an access token + refresh token.
+
+```bash
+curl -s -X POST https://<host>/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "secret"}' | jq .
+```
+
+Response:
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "token_type": "bearer"
+}
+```
+
+### `POST /api/v1/auth/refresh`
+
+Exchanges a refresh token (7-day validity) for a new access token.
+
+```bash
+curl -s -X POST https://<host>/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "eyJ..."}'
+```
+
+### `GET /api/v1/auth/me`
+
+Returns the `UserContext` associated with the current token (org_id, role, teams, scope).
+
+```bash
+curl -s https://<host>/api/v1/auth/me \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### `PATCH /api/v1/me/password`
+
+Allows the authenticated user to change their own password.
+
+```bash
+curl -s -X PATCH https://<host>/api/v1/me/password \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "old", "new_password": "new"}'
+```
+
+---
+
+## Health
+
+### `GET /api/v1/health/live`
+
+Liveness probe — no I/O, always 200 if the process is up. Used by Kubernetes.
+
+```bash
+curl -s https://<host>/api/v1/health/live
+```
+
+### `GET /api/v1/health`
+
+Deep health — checks DB and Redis. Returns 200 if all dependencies are up, 503 otherwise.
+
+```bash
+curl -s https://<host>/api/v1/health | jq .
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "db": "ok",
+  "redis": "ok"
+}
+```
+
+---
+
+## Jobs
+
+Jobs are the **core execution primitive**. Every infrastructure action (scale, deploy, delete…)
+creates a job. All jobs are org-scoped, audited, and policy-checked.
+
+**Job lifecycle:** `pending` → `running` → `success` | `failed` | `cancelled`
+
+### `POST /api/v1/jobs`
+
+Creates a job. Passes through 4 guards: auth, rate limiter, PolicyEngine, GPU quota.
+
+Destructive actions (`scale_cluster`, `delete_deployment`, `helm_uninstall`…) return 409 with a
+dry-run preview unless `confirmed: true` is present. The `confirmed` flag can only be injected
+by the `confirm_action` agent tool — it is stripped from direct API calls.
+
+```bash
+# Non-destructive: list cluster deployments
+curl -s -X POST https://<host>/api/v1/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "get_cluster_deployments",
+    "payload": {"cluster_name": "prod-cluster"},
+    "gateway_id": "gw-abc123"
+  }' | jq .
+```
+
+```bash
+# Destructive: dry-run preview (confirmed omitted → 409)
+curl -s -X POST https://<host>/api/v1/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "scale_cluster",
+    "payload": {"cluster_name": "prod-cluster", "node_group": "gpu-pool", "desired_count": 0},
+    "gateway_id": "gw-abc123"
+  }'
+# → 409: {requires_confirmation: true, preview: "...", reversibility: "reversible", resolved_params: {...}}
+```
+
+Response `201`:
+```json
+{
+  "id": "3fa8e1b2-...",
+  "action": "get_cluster_deployments",
+  "status": "pending",
+  "org_id": "org-xyz",
+  "triggered_by": "user:admin",
+  "created_at": "2026-05-01T10:00:00Z"
+}
+```
+
+### `GET /api/v1/jobs`
+
+Lists jobs for the current org. Filterable by `status`, `action`, `triggered_by`, `gateway_id`.
+
+```bash
+curl -s "https://<host>/api/v1/jobs?status=failed&limit=20" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### `GET /api/v1/jobs/{job_id}`
+
+Returns a job by full UUID or short ID (first 8 chars). Includes `result` once completed.
+
+```bash
+curl -s https://<host>/api/v1/jobs/3fa8e1b2 \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response (completed):
+```json
+{
+  "id": "3fa8e1b2-...",
+  "status": "success",
+  "result": {
+    "returncode": 0,
+    "stdout": "...",
+    "execution_time_ms": 342
+  }
+}
+```
+
+### `GET /api/v1/jobs/{job_id}/logs/stream`
+
+SSE stream of job logs in real time. Terminates when the job reaches a terminal state.
+
+```bash
+curl -s -N https://<host>/api/v1/jobs/3fa8e1b2/logs/stream \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### `POST /api/v1/jobs/{job_id}/cancel`
+
+Cancels a `pending` or `running` job. The worker finishes its current iteration then stops.
+
+```bash
+curl -s -X POST https://<host>/api/v1/jobs/3fa8e1b2/cancel \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Pipelines
+
+Pipelines are ordered sequences of jobs. Steps execute sequentially — if one fails, the pipeline
+stops. Each step is policy-checked at creation time; at execution time only `unknown_action` is
+re-checked (system jobs are pre-authorized).
+
+### `POST /api/v1/pipelines`
+
+Creates and queues a pipeline.
+
+```bash
+curl -s -X POST https://<host>/api/v1/pipelines \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "deploy-llama3-prod",
+    "steps": [
+      {"action": "helm_upgrade", "payload": {"release": "llama3", "namespace": "staging"}, "gateway_id": "gw-abc123"},
+      {"action": "get_cluster_deployments", "payload": {"cluster_name": "prod-cluster"}, "gateway_id": "gw-abc123"},
+      {"action": "helm_upgrade", "payload": {"release": "llama3", "namespace": "prod"}, "gateway_id": "gw-abc123"}
+    ],
+    "on_failure": "rollback"
+  }' | jq .
+```
+
+`on_failure` values: `stop` (default) | `rollback` | `continue`
+
+### `GET /api/v1/pipelines`
+
+Lists pipelines for the current org (paginated).
+
+```bash
+curl -s "https://<host>/api/v1/pipelines?limit=10" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### `GET /api/v1/pipelines/{pipeline_id}`
+
+Returns a pipeline with its step results.
+
+### `POST /api/v1/pipelines/{pipeline_id}/trigger`
+
+Triggers an existing pipeline immediately. Returns `202 Accepted`.
+
+```bash
+curl -s -X POST https://<host>/api/v1/pipelines/uuid-here/trigger \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Gateways
+
+Gateways (VibOps Connect) are edge agents deployed in the customer's infrastructure. They bridge
+Core to local Kubernetes clusters, cloud APIs, and AI connectors.
+
+### `GET /api/v1/gateways`
+
+Lists registered gateways and their last ping timestamp.
+
+```bash
+curl -s https://<host>/api/v1/gateways \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response:
+```json
+[
+  {
+    "id": "gw-abc123",
+    "name": "prod-vpc",
+    "status": "online",
+    "last_ping": "2026-05-01T09:58:00Z",
+    "version": "0.13.0"
+  }
+]
+```
+
+### `POST /api/v1/gateways`
+
+Registers a new gateway. Returns the bearer token (shown **once** — store it immediately).
+
+`gateway_type` values: `kubernetes` (default) | `slurm` | `hybrid`
+
+`slurm_config` is required when `gateway_type` is `slurm` or `hybrid`.
+
+```bash
+curl -s -X POST https://<host>/api/v1/gateways \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "prod-hpc",
+    "description": "Production HPC gateway",
+    "gateway_type": "slurm",
+    "slurm_config": {
+      "host": "gpu.hpc.acme.com",
+      "ssh_user": "slurm",
+      "ssh_port": 22,
+      "rest_url": "http://gpu.hpc.acme.com:6820",
+      "ssh_key_secret": "slurm_ssh_key"
+    }
+  }' | jq .
+```
+
+Response:
+```json
+{
+  "id": "gw-abc123",
+  "name": "prod-hpc",
+  "gateway_type": "slurm",
+  "slurm_config": {
+    "host": "gpu.hpc.acme.com",
+    "ssh_user": "slurm",
+    "ssh_port": 22,
+    "rest_url": "http://gpu.hpc.acme.com:6820",
+    "ssh_key_secret": "***"
+  },
+  "token": "gw-tk-xxxxxxxxxxxxxxxx"
+}
+```
+
+### `DELETE /api/v1/gateways/{gateway_id}`
+
+Revokes a gateway token. The gateway will no longer be able to poll for jobs.
+
+---
+
+## Workloads
+
+The workloads API provides access to the persistent GPU workload tracking table (`workloads`), populated every 60 seconds by `KubernetesWorkloadCollector` (DCGM/ROCm-SMI via Prometheus) and `SlurmWorkloadCollector` (squeue + sacct). Available since v0.17.3.
+
+### `GET /api/v1/clusters/{cluster_name}/workloads/{namespace}/{workload_id}/gpu-metrics`
+
+Returns GPU metrics (utilisation, memory, power, accumulated GPU-seconds) for a specific workload.
+
+Query params: none required.
+
+```bash
+curl -s "https://<host>/api/v1/clusters/prod-hpc/workloads/ml-team/job-4829/gpu-metrics" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response:
+```json
+{
+  "workload_id": "job-4829",
+  "workload_type": "slurm_job",
+  "namespace": "ml-team",
+  "status": "running",
+  "gpu_util_pct": 87.4,
+  "gpu_memory_mb": 40960,
+  "power_w": 312.5,
+  "gpu_seconds": 14400,
+  "started_at": "2026-05-12T08:00:00Z",
+  "ended_at": null
+}
+```
+
+`workload_type`: `k8s_pod` | `slurm_job`
+
+### `GET /api/v1/clusters/{cluster_name}/namespaces/{namespace}/gpu-metrics`
+
+Returns aggregated GPU metrics for all workloads in a namespace (or Slurm partition).
+
+Query params:
+- `status` — filter by workload status: `running` | `completed` | `terminated` (optional)
+- `limit` — max results (default: 50)
+
+```bash
+curl -s "https://<host>/api/v1/clusters/prod-gpu/namespaces/ml-team/gpu-metrics?status=running" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response:
+```json
+{
+  "namespace": "ml-team",
+  "workload_count": 12,
+  "total_gpu_util_pct": 73.2,
+  "total_gpu_memory_mb": 491520,
+  "total_power_w": 3750,
+  "workloads": [...]
+}
+```
+
+### `GET /api/v1/clusters/{cluster_name}/gpu-metrics/top`
+
+Returns the top N workloads by GPU utilisation across all namespaces in a cluster.
+
+Query params:
+- `limit` — number of results (default: 10, max: 100)
+- `workload_type` — filter by `k8s_pod` or `slurm_job` (optional)
+
+```bash
+curl -s "https://<host>/api/v1/clusters/prod-gpu/gpu-metrics/top?limit=10" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response:
+```json
+[
+  {
+    "workload_id": "llm-inference-7b-6d4f9",
+    "workload_type": "k8s_pod",
+    "namespace": "prod",
+    "gpu_util_pct": 94.1,
+    "gpu_memory_mb": 32768,
+    "gpu_seconds": 86400
+  }
+]
+```
+
+---
+
+## Cloud Pricing
+
+Fetches real-time GPU instance prices from cloud provider APIs and syncs them into cluster cost rates.
+
+### `GET /api/v1/cloud-pricing/lookup`
+
+Preview the hourly price for any (provider, instance type, region, pricing tier) without saving anything.
+
+**Query parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `provider` | ✓ | `aws` · `azure` · `gcp` |
+| `instance_type` | ✓ | e.g. `p5.48xlarge`, `Standard_ND96isr_H100_v5`, `a3-highgpu-8g` |
+| `region` | ✓ | e.g. `us-east-1`, `eastus`, `us-central1` |
+| `pricing_tier` | — | `on_demand` (default) · `spot` · `reserved_1y` · `reserved_3y` |
+
+```bash
+curl -s "https://<host>/api/v1/cloud-pricing/lookup?provider=aws&instance_type=p5.48xlarge&region=us-east-1&pricing_tier=on_demand" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response:
+```json
+{
+  "provider": "aws",
+  "instance_type": "p5.48xlarge",
+  "region": "us-east-1",
+  "pricing_tier": "on_demand",
+  "instance_hourly_rate_usd": 98.32,
+  "accelerators_per_instance": 8,
+  "rate_per_gpu_hour_usd": 12.29,
+  "source": "api",
+  "currency": "USD"
+}
+```
+
+`source`: `"api"` (live from provider) or `"static"` (GCP cached table).
+
+### `POST /api/v1/clusters/{cluster_name}/rate/sync` _(org admin)_
+
+Fetches the live price and saves it as the cluster GPU rate in one call.
+
+```bash
+curl -s -X POST "https://<host>/api/v1/clusters/h100-prod/rate/sync" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "aws",
+    "instance_type": "p5.48xlarge",
+    "region": "us-east-1",
+    "pricing_tier": "on_demand",
+    "markup_pct": 20
+  }' | jq .
+```
+
+Body fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `provider` | ✓ | `aws` · `azure` · `gcp` |
+| `instance_type` | ✓ | Instance type (must be in the supported catalogue) |
+| `region` | ✓ | Cloud region |
+| `pricing_tier` | — | Defaults to `on_demand` |
+| `markup_pct` | — | Chargeback markup % (0 = pass-through). Keeps existing value if omitted. |
+
+Response:
+```json
+{
+  "cluster_name": "h100-prod",
+  "provider": "aws",
+  "instance_type": "p5.48xlarge",
+  "region": "us-east-1",
+  "pricing_tier": "on_demand",
+  "instance_hourly_rate_usd": 98.32,
+  "accelerators_per_instance": 8,
+  "rate_per_gpu_hour_usd": 12.29,
+  "markup_pct": 20.0,
+  "source": "api",
+  "synced_at": "2026-06-14T03:00:00Z"
+}
+```
+
+After sync, `GET /clusters/{name}/rate` returns the updated `rate_per_gpu_hour`.
+
+**Daily auto-refresh** — Celery Beat re-syncs all clusters that have `formula_type="cloud"` at 03:00 UTC automatically. No manual action required once configured.
+
+**Supported instance types (selection)**
+
+| Provider | Instance | GPUs | GPU model |
+|----------|----------|------|-----------|
+| AWS | `p5.48xlarge` | 8 | H100 80GB |
+| AWS | `p4d.24xlarge` | 8 | A100 40GB |
+| AWS | `p4de.24xlarge` | 8 | A100 80GB |
+| AWS | `g5.48xlarge` | 8 | A10G |
+| Azure | `Standard_ND96isr_H100_v5` | 8 | H100 80GB |
+| Azure | `Standard_ND96asr_v4` | 8 | A100 40GB |
+| Azure | `Standard_NC96ads_A100_v4` | 4 | A100 80GB |
+| GCP | `a3-highgpu-8g` | 8 | H100 80GB |
+| GCP | `a2-highgpu-8g` | 8 | A100 40GB |
+| GCP | `a2-ultragpu-8g` | 8 | A100 80GB |
+
+Full list: `GET /cloud-pricing/lookup` returns `422` with all known types on unknown input.
+
+---
+
+## Webhooks
+
+Webhook endpoints receive external events and translate them into VibOps jobs.
+
+### `POST /api/v1/webhooks/github`
+
+Receives a GitHub push or release event. If a subscription matches `repo + branch`, creates a job.
+Authenticated via HMAC-SHA256 (`X-Hub-Signature-256` header).
+
+```bash
+# GitHub sends this automatically — configure in repo Settings → Webhooks
+# URL: https://<host>/api/v1/webhooks/github
+# Content-Type: application/json
+# Secret: value of GITHUB_WEBHOOK_SECRET env var
+```
+
+### `POST /api/v1/webhooks/grafana`
+
+Receives a Grafana Alertmanager alert payload. For each firing alert with a known action, creates
+a VibOps job. Authenticated via `Authorization: Bearer <GRAFANA_WEBHOOK_SECRET>`.
+
+```bash
+# Configure in Grafana: Alerting → Contact points → Webhook
+# URL: https://<host>/api/v1/webhooks/grafana
+# Authorization header: Bearer <secret>
+```
+
+### `GET /api/v1/webhooks/subscriptions`
+
+Lists the current org's GitHub webhook subscriptions.
+
+### `POST /api/v1/webhooks/subscriptions`
+
+Registers a repo → action subscription.
+
+```bash
+curl -s -X POST https://<host>/api/v1/webhooks/subscriptions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo": "acme/ml-models",
+    "branch": "main",
+    "event": "push",
+    "action": "helm_upgrade",
+    "payload": {"release": "llama3", "namespace": "prod"},
+    "gateway_id": "gw-abc123"
+  }'
+```
+
+### `DELETE /api/v1/webhooks/subscriptions/{sub_id}`
+
+Deletes a subscription.
+
+---
+
+## Triggers
+
+Triggers are persistent rules that fire jobs on a schedule (cron) or on metric threshold events.
+
+### `POST /api/v1/triggers`
+
+Creates a trigger rule.
+
+```bash
+# Cron-based: scale down GPUs every night at 22:00
+curl -s -X POST https://<host>/api/v1/triggers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "nightly-scale-down",
+    "type": "cron",
+    "schedule": "0 22 * * *",
+    "action": "scale_cluster",
+    "payload": {"cluster_name": "prod-cluster", "node_group": "gpu-pool", "desired_count": 0},
+    "gateway_id": "gw-abc123"
+  }'
+```
+
+### `GET /api/v1/triggers`
+
+Lists triggers. Use `?enabled_only=true` to filter.
+
+### `POST /api/v1/triggers/{rule_id}/enable` / `/disable`
+
+Enables or disables a rule without deleting it.
+
+### `DELETE /api/v1/triggers/{rule_id}`
+
+Permanently deletes a trigger rule.
+
+---
+
+## Memories
+
+The agent's persistent memory store. Used across conversations to retain cluster-specific facts,
+preferences, and operational context. Scoped to the organization.
+
+### `POST /api/v1/memories`
+
+Creates or updates a memory (upsert by `org_id + key`).
+
+```bash
+curl -s -X POST https://<host>/api/v1/memories \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "prod_cluster_owner",
+    "value": "infra-team",
+    "type": "fact",
+    "description": "Primary responsible team for the prod cluster"
+  }'
+```
+
+`type` values: `app` | `preference` | `fact` | `action`
+
+### `GET /api/v1/memories`
+
+Lists the org's memories. Filter by type: `?type=fact`
+
+### `GET /api/v1/memories/search?q=<query>`
+
+Full-text search over memory keys and descriptions.
+
+```bash
+curl -s "https://<host>/api/v1/memories/search?q=gpu+quota" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### `GET /api/v1/memories/{key}`
+
+Retrieves a memory by exact key.
+
+### `DELETE /api/v1/memories/{key}`
+
+Permanently deletes a memory.
+
+---
+
+## Secrets (Vault)
+
+Secrets are encrypted at rest with Fernet (`SECRET_KEY`). Values are never returned on list
+operations — only via explicit `GET /api/v1/secrets/{name}`.
+
+### `POST /api/v1/secrets`
+
+Encrypts and stores a secret.
+
+```bash
+curl -s -X POST https://<host>/api/v1/secrets \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "prod_kubeconfig", "value": "base64-encoded-kubeconfig"}'
+```
+
+### `GET /api/v1/secrets`
+
+Lists secret names (no values exposed).
+
+### `GET /api/v1/secrets/{name}`
+
+Returns a secret with its decrypted value. Checks org vault first, then global vault.
+
+### `DELETE /api/v1/secrets/{name}`
+
+Deletes a secret from the org vault.
+
+---
+
+## Discovery
+
+Discovery scans the connected infrastructure and builds a resource inventory.
+
+### `POST /api/v1/discovery/run`
+
+Launches a background scan. Returns immediately with a `job_id`.
+
+```bash
+curl -s -X POST https://<host>/api/v1/discovery/run \
+  -H "Authorization: Bearer $TOKEN" | jq .
+# → {"job_id": "3fa8e1b2-..."}
+# Poll GET /api/v1/jobs/3fa8e1b2 to track progress
+```
+
+### `GET /api/v1/discovery/last`
+
+Returns the result of the last successfully completed discovery — cluster topology, deployments,
+GPU counts, Prometheus presence.
+
+---
+
+## Bare Metal Inventory
+
+Servers managed over the DMTF Redfish API through their BMC — iDRAC, iLO, XCC.
+See [ADR 0040](../core/docs/adr/0040-bare-metal-redfish.md).
+
+The inventory is **declared**: a network scan proposes what it finds, an operator
+confirms what VibOps may talk to. A node stays `managed: false` until someone says
+otherwise, and a rescan never changes that flag. Reaching a management network means
+being able to power off a building, so the confirmation is deliberate rather than
+implied.
+
+Credentials are never carried by this API. A node holds the **name** of a vault
+secret; the value is resolved immediately before execution.
+
+### `GET /api/v1/bare-metal/nodes`
+
+```bash
+# The whole inventory
+curl -s https://<host>/api/v1/bare-metal/nodes -H "Authorization: Bearer $TOKEN"
+
+# Only what a scan proposed and nobody has confirmed
+curl -s "https://<host>/api/v1/bare-metal/nodes?managed=false" -H "Authorization: Bearer $TOKEN"
+# → {"items": [{"node_id": "rack4-node01", "address": "10.20.0.11",
+#               "manufacturer": "Dell Inc.", "model": "PowerEdge R760xa",
+#               "managed": true, "source": "discovery", "insecure": false, ...}],
+#    "total": 1}
+```
+
+### `POST /api/v1/bare-metal/nodes`
+
+Declare a server by hand — for one a scan cannot reach. Requires `org_admin`.
+
+```bash
+curl -s -X POST https://<host>/api/v1/bare-metal/nodes \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"node_id": "rack4-node01", "address": "10.20.0.11",
+       "username": "vibops", "password_secret": "bmc_fleet_password"}'
+# → 201 with the created node
+# → 409 if node_id already exists in this organisation
+```
+
+### `PATCH /api/v1/bare-metal/nodes/{id}`
+
+Confirm a node, or stop managing it. Requires `org_admin`.
+
+```bash
+# Confirm — VibOps may now talk to this BMC
+curl -s -X PATCH https://<host>/api/v1/bare-metal/nodes/$ID \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"managed": true}'
+
+# An explicit null clears a field; an omitted field is left alone
+curl -s -X PATCH https://<host>/api/v1/bare-metal/nodes/$ID \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"ca_bundle": null}'
+```
+
+### `DELETE /api/v1/bare-metal/nodes/{id}`
+
+Removes it from the inventory. A later scan may propose it again. Requires `org_admin`.
+
+### `POST /api/v1/bare-metal/nodes/discovered`
+
+Record what a scan found. **Proposes only** — every node lands unmanaged, and an
+existing node's `managed` flag is the one field this endpoint will not touch.
+
+```bash
+curl -s -X POST https://<host>/api/v1/bare-metal/nodes/discovered \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"nodes": [{"node_id": "10.20.0.21", "address": "10.20.0.21",
+                  "manufacturer": "Dell Inc."}]}'
+# → {"created": 1, "refreshed": 0, "awaiting_confirmation": 1}
+```
+
+A gateway does not normally call this: its heartbeat already carries
+`discovered_services`, and core extracts the Redfish entries from it.
+
+### Reading a server
+
+The four read actions are connector tools, reached through `POST /api/v1/jobs`
+like any other action — `redfish_list_nodes`, `redfish_get_node`,
+`redfish_get_firmware`, `redfish_get_bios`. Core injects the confirmed inventory
+into the payload, so the caller names a machine by its `node_id` and never by its
+address.
+
+```bash
+curl -s -X POST https://<host>/api/v1/jobs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"action": "redfish_get_firmware", "payload": {"id": "rack4-node01"}}'
+```
+
+---
+
+## Audit
+
+The audit log records every job (success and denied), the matched policy rule, and the outcome.
+
+### `GET /api/v1/audit`
+
+Lists the audit log for the current org (paginated, filterable).
+
+```bash
+curl -s "https://<host>/api/v1/audit?limit=50&action=scale_cluster" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Fields per entry: `job_id`, `action`, `outcome` (`allowed`|`denied`), `matched_rule`, `reason`,
+`triggered_by`, `org_id`, `created_at`.
+
+### `GET /api/v1/audit/export` _(org admin only)_
+
+Exports audit events in bulk for ingestion into a SIEM (Splunk, QRadar, ArcSight, Elastic).
+
+**Query parameters**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `format` | `json` | `json` · `cef` (ArcSight/Splunk) · `leef` (IBM QRadar) |
+| `limit` | `10000` | Max events to export (ceiling: 50 000) |
+| `since` | — | ISO 8601 datetime — export events after this timestamp |
+| `until` | — | ISO 8601 datetime — export events before this timestamp |
+| `action` | — | Filter by action name |
+
+**JSON export** (default)
+
+```bash
+curl -s "https://<host>/api/v1/audit/export?format=json&limit=5000" \
+  -H "Authorization: Bearer $TOKEN" > audit_export.json
+```
+
+Response includes a signed manifest:
+```json
+{
+  "exported_at": "2026-06-14T09:00:00Z",
+  "count": 4832,
+  "format": "json",
+  "events": [...],
+  "manifest": {
+    "count": 4832,
+    "exported_at": "2026-06-14T09:00:00Z",
+    "sha256": "a3f1..."
+  },
+  "manifest_signature": "hmac-sha256:9c2e..."
+}
+```
+
+Verify integrity with the `manifest_signature` (HMAC-SHA256 keyed with `SECRET_KEY`).
+
+**CEF export** (ArcSight / Splunk)
+
+```bash
+curl -s "https://<host>/api/v1/audit/export?format=cef&since=2026-06-01T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN" > audit.cef
+```
+
+Each line follows the ArcSight CEF standard:
+```
+CEF:0|VibOps|VibOps|1.0|deploy_model|deploy_model|5|rt=1718352000000 suser=alice@acme.com ...
+```
+
+**LEEF export** (IBM QRadar)
+
+```bash
+curl -s "https://<host>/api/v1/audit/export?format=leef" \
+  -H "Authorization: Bearer $TOKEN" > audit.leef
+```
+
+Each line follows the LEEF 2.0 format:
+```
+LEEF:2.0|VibOps|VibOps|1.0|deploy_model|	usrName=alice	sev=5	devTime=...
+```
+
+**Automation example** — nightly cron to Splunk HEC:
+
+```bash
+#!/bin/bash
+SINCE=$(date -u -d "yesterday" +%Y-%m-%dT00:00:00Z)
+UNTIL=$(date -u -d "today" +%Y-%m-%dT00:00:00Z)
+curl -s "https://$VIBOPS_HOST/api/v1/audit/export?format=cef&since=$SINCE&until=$UNTIL" \
+  -H "Authorization: Bearer $VIBOPS_TOKEN" | \
+curl -s -X POST "https://$SPLUNK_HEC_URL/services/collector/raw" \
+  -H "Authorization: Splunk $SPLUNK_HEC_TOKEN" \
+  --data-binary @-
+```
+
+---
+
+## Destructive operations — dry-run confirmation
+
+All `DELETE` endpoints in VibOps follow a **two-step confirmation pattern** to prevent accidental data loss.
+
+**Step 1 — dry-run preview** (default, no `?confirmed=true`)
+
+```bash
+curl -s -X DELETE "https://<host>/api/v1/tokens/abc123" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "action": "delete_token",
+  "token": {"id": "abc123", "name": "ci-deploy"},
+  "confirmed": false,
+  "warning": "This API token will be permanently revoked. Add ?confirmed=true to execute."
+}
+```
+
+**Step 2 — execute** (add `?confirmed=true`)
+
+```bash
+curl -s -X DELETE "https://<host>/api/v1/tokens/abc123?confirmed=true" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{"deleted": true, "id": "abc123"}
+```
+
+This pattern applies to: `DELETE /tokens/{id}`, `DELETE /webhooks/subscriptions/{id}`,
+`DELETE /notifications/channels/{id}`, `DELETE /orgs/{id}/teams/{id}`,
+`DELETE /orgs/{id}/invites/{id}`, `DELETE /orgs/{id}/teams/{id}/members/{user_id}`,
+`DELETE /alert-rules/{id}`, `DELETE /providers/{id}`, `DELETE /eval/rubrics/{id}`,
+`DELETE /memories/{key}`, `DELETE /policy`.
+
+---
+
+## Licence
+
+### `GET /api/v1/licence`
+
+Returns the current licence status: plan, expiry, usage vs limits.
+
+```bash
+curl -s https://<host>/api/v1/licence \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Response:
+```json
+{
+  "plan": "enterprise",
+  "valid": true,
+  "expires_at": "2027-04-22",
+  "days_remaining": 365,
+  "limits": {
+    "users_max": 50,
+    "clusters_max": 10,
+    "gpu_max": 128
+  },
+  "usage": {
+    "users_current": 12,
+    "clusters_current": 3,
+    "gpu_current": 32
+  }
+}
+```
+
+### `POST /api/v1/licence`
+
+Applies a new licence key (RS256 JWT signed by VibOps vendor key).
+
+```bash
+curl -s -X POST https://<host>/api/v1/licence \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"licence_key": "eyJ..."}'
+```
+
+---
+
+## Observability
+
+### `GET /api/v1/metrics/gpu`
+
+Returns live GPU metrics (utilisation, memory, temperature, error counts) aggregated across
+all connected gateways.
+
+```bash
+curl -s https://<host>/api/v1/metrics/gpu \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### `GET /api/v1/metrics/workload`
+
+Returns workload metrics (request rate, latency, replica counts per deployment).
+
+### `GET /api/v1/metrics/cost`
+
+Returns cost metrics (estimated hourly/daily GPU spend per cluster).
+
+### `GET /api/v1/metrics/mttr`
+
+Returns mean time to recovery metrics from the incident history.
+
+---
+
+## Agent Catalog
+
+### `GET /api/v1/catalog`
+
+Returns all registered actions across all connectors, merged with any per-org policy overrides.  
+Access: any authenticated user (viewer+).
+
+```bash
+curl -s https://<host>/api/v1/catalog \
+  -H "Authorization: Bearer <token>" | jq .
+```
+
+Response:
+```json
+{
+  "total": 162,
+  "tools": [
+    {
+      "action": "accelerator_get_metrics",
+      "connector": "Nvidia",
+      "description": "Collect live GPU utilization, memory, temperature and power from DCGM.",
+      "required_role": "viewer",
+      "destructive": false,
+      "requires_confirmation": false,
+      "requires_external_approval": false,
+      "overridden": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "node": { "type": "string", "description": "Filter by node name (optional)" }
+        }
+      }
+    }
+  ]
+}
+```
+
+`overridden: true` means your org has an active policy override on this action.
+
+---
+
+### `PATCH /api/v1/catalog/{action}`
+
+Create or update the per-org policy override for a specific action.  
+Access: `org_admin` only. Passing `null` for a flag removes that override (reverts to connector default).
+
+```bash
+# Force confirmation before helm_upgrade for this org
+curl -s -X PATCH https://<host>/api/v1/catalog/helm_upgrade \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"requires_confirmation": true}' | jq .
+
+# Remove the confirmation override (revert to connector default)
+curl -s -X PATCH https://<host>/api/v1/catalog/helm_upgrade \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"requires_confirmation": null}' | jq .
+```
+
+Body fields (all optional):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requires_confirmation` | `boolean \| null` | Override confirmation flag; `null` removes the override |
+| `requires_external_approval` | `boolean \| null` | Override approval flag; `null` removes the override |
+
+Returns the full `ToolEntry` object with updated values and `"overridden": true`.
+
+---
+
+## Admin — Org, Teams, Users, Tokens
+
+These endpoints require `admin` role or `org_admin` scope.
+
+### Organisation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/admin/org` | Create an organisation |
+| `GET`  | `/api/v1/admin/org` | Get the current org details |
+
+### Teams
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/api/v1/admin/teams` | List teams |
+| `POST` | `/api/v1/admin/teams` | Create a team (with optional scope: namespaces, clusters, actions) |
+| `PATCH`| `/api/v1/admin/teams/{team_id}/scope` | Update a team's scope |
+| `DELETE`| `/api/v1/admin/teams/{team_id}` | Delete a team |
+| `POST` | `/api/v1/admin/teams/{team_id}/members` | Add a member |
+| `DELETE`| `/api/v1/admin/teams/{team_id}/members/{user_id}` | Remove a member |
+
+### Users
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/api/v1/admin/users` | List org users |
+| `POST` | `/api/v1/admin/users` | Create a user (enforces `users_max` licence limit) |
+| `PATCH`| `/api/v1/admin/users/{user_id}` | Update user role or status |
+
+### Cluster Role Assignments
+
+Per-cluster role overrides — grant a different role to a user on a specific cluster, independent of their team membership. Requires `org_admin`.
+
+Resolution order: explicit cluster assignment → team-level role.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`    | `/api/v1/orgs/{org_id}/cluster-roles` | List all cluster role assignments in the org |
+| `GET`    | `/api/v1/orgs/{org_id}/users/{user_id}/cluster-roles` | List assignments for a specific user |
+| `PUT`    | `/api/v1/orgs/{org_id}/users/{user_id}/cluster-roles/{cluster_name}` | Create or update assignment (idempotent) |
+| `DELETE` | `/api/v1/orgs/{org_id}/users/{user_id}/cluster-roles/{cluster_name}` | Remove assignment (user reverts to team role) |
+
+**Body for `PUT`:** `{"role": "readonly" | "developer" | "admin"}`
+
+**Example — readonly on prod, developer on dev:**
+```bash
+# Lock alice to readonly on prod
+PUT /api/v1/orgs/{org_id}/users/{alice_id}/cluster-roles/prod
+{"role": "readonly"}
+
+# Give alice developer access on dev
+PUT /api/v1/orgs/{org_id}/users/{alice_id}/cluster-roles/dev
+{"role": "developer"}
+```
+
+### API Tokens
+
+Service accounts for the agent and external integrations.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/api/v1/admin/tokens` | List API tokens |
+| `POST` | `/api/v1/admin/tokens` | Create a token (returns the token value once) |
+| `DELETE`| `/api/v1/admin/tokens/{token_id}` | Revoke a token |
+
+---
+
+## Error codes
+
+| Code | Meaning |
+|------|---------|
+| `400` | Validation error — check request body |
+| `401` | Missing or invalid JWT |
+| `403` | Action not in `TOOL_CATALOG`, or insufficient role |
+| `404` | Resource not found (or not owned by this org) |
+| `409` | Destructive action requires confirmation — response includes `preview` and `resolved_params` |
+| `429` | Rate limit exceeded (60 requests / 60 seconds / org) |
+| `503` | Core dependency down (DB or Redis) — see `GET /api/v1/health` |
+
+---
+
+## Rate limiting
+
+60 requests per 60-second sliding window per organisation. Tracked in Redis (ZSET + Lua script).
+The limit applies per org, not per user — a single user cannot exhaust another org's quota.
+
+---
+
+## Related documents
+
+| Document | Purpose |
+|----------|---------|
+| `docs/openapi.json` | Full OpenAPI 3.1 spec (machine-readable, 132 endpoints) |
+| `https://<host>/docs` | Swagger UI — interactive, testable |
+| `docs/technical-architecture.md` | Customer-facing architecture document (DAT) |
+| `docs/architecture/security.md` | Auth layers, PolicyEngine, threat model |
+| `docs/architecture/overview.md` | System diagram, action flows, trust boundaries |
