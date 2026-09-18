@@ -89,13 +89,15 @@ Le username généré suit le pattern `{slug}-admin`. Transmettre au client :
 Dans la console → onglet **Fleet** → sous-onglet **Gateways** → **New Gateway** (ou **⚙ Admin → Gateways → New Gateway**) :
 
 1. Nommer le gateway (ex: `acme-gpu-cluster-1`)
-2. Copier le token généré
+2. Copier **les deux** valeurs rendues : l'`id` de la passerelle et le token
+   (affiché une seule fois). `connect` s'authentifie comme une passerelle
+   déjà créée et sort sans son id.
 3. Sur le cluster GPU du client, déployer `vibops-connect` :
 
 ```bash
 helm upgrade --install vibops-connect vibops/vibops-connect \
   --namespace vibops-connect --create-namespace \
-  --set gateway.name="acme-gpu-cluster-1" \
+  --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="http://<vibops-host>:8000" \
   --set vibops.token="<token-depuis-console>"
 ```

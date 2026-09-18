@@ -530,13 +530,15 @@ kubectl create secret generic vibops-connect-token \
   -n vibops-connect \
   --from-literal=token="<token-from-console>"
 
-# 2. Deploy the Connect worker
+# 2. Deploy the Connect worker.
+# GATEWAY_ID : l'UUID rendu avec le token a la creation de la passerelle.
+# Prometheus et le noeud Slurm se saisissent sur la passerelle dans la
+# console, pas ici — le chart ne les rend dans aucun template.
 helm upgrade --install vibops-connect vibops/vibops-connect \
   --namespace vibops-connect \
-  --set gateway.name="prod-gpu-cluster" \
+  --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="https://vibops.mycompany.com" \
   --set vibops.existingSecret="vibops-connect-token" \
-  --set prometheus.url="http://prometheus-operated.monitoring.svc.cluster.local:9090" \
   --wait
 ```
 

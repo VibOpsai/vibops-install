@@ -88,6 +88,15 @@ services:
       NODES: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      # Le proxy repond a /_ping, autorise par defaut. Sans lui, `worker`
+      # demarrait parfois avant que haproxy accepte les connexions et son
+      # premier docker_build echouait sur un refus de connexion.
+      test: ["CMD-SHELL", "wget -q -O/dev/null http://127.0.0.1:2375/_ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - vibops_net
 
@@ -118,6 +127,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # « Pret » pour un worker Celery, c'est repondre au broker — pas avoir un
+      # processus. `inspect ping` fait l'aller-retour complet par Redis, donc il
+      # echoue aussi quand le broker est injoignable, ce qui est exactement
+      # l'etat ou le worker ne sert a rien.
+      #
+      # Le module est `app.workers.celery_app`. `app.celery_app` n'existe pas —
+      # c'est le chemin que portait tests/e2e/test_00_install.py, ou il faisait
+      # sauter le test a chaque execution.
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout 5 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
     networks:
       - vibops_net
 
@@ -139,6 +162,20 @@ services:
     depends_on:
       - redis
       - worker
+    healthcheck:
+      # beat n'a ni port ni `inspect`. Ce qui se verifie est qu'il *bat* :
+      # le planificateur persistant reecrit son fichier toutes les trois
+      # minutes environ (mesure : 13:29:02 puis 13:32). Dix minutes laissent la
+      # marge, et distinguent un beat fige d'un beat vivant — ce qu'un simple
+      # « le processus existe » ne fait pas.
+      #
+      # `| grep -q .` parce que `find` rend 0 meme sans resultat : sans lui la
+      # sonde reussirait sur un fichier vieux d'un mois.
+      test: ["CMD-SHELL", "find /app/celerybeat-schedule -mmin -10 | grep -q . || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - vibops_net
 
@@ -170,6 +207,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      # « Pret » pour une boucle de sauvegarde, c'est avoir produit une
+      # sauvegarde. Le conteneur dort 24 h entre deux dumps : deux jours de
+      # tolerance couvrent un redemarrage sans masquer une boucle cassee — un
+      # mot de passe errone laisse le processus vivant et /backups vide, etat
+      # que « Up » ne distingue pas d'un fonctionnement normal.
+      test: ["CMD-SHELL", "find /backups -name 'vibops_*.sql.gz' -mtime -2 | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     networks:
       - vibops_net
 
@@ -195,6 +243,15 @@ services:
     depends_on:
       core:
         condition: service_healthy
+    healthcheck:
+      # `/` rend 46 octets d'identification du service — deja present, rien a
+      # ajouter cote application. start_period genereux : l'agent charge son
+      # catalogue d'outils dynamique au demarrage.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - vibops_net
 
@@ -221,6 +278,24 @@ services:
       - console_data:/data
     ports:
       - "8003:8003"
+    # Sans healthcheck, console etait declare « Up » des que le processus
+    # existait — bien avant qu'uvicorn serve. `docker compose up -d` rendait
+    # donc la main sur une console qui repondait par une reponse vide (curl
+    # exit 52), et tout script qui enchainait dessus echouait par intermittence.
+    #
+    # `/api/health` existe depuis longtemps — sonde de liveness deja publique,
+    # 361 octets, contre 765 Ko pour `/`. Rien a ajouter cote application :
+    # il manquait seulement que le compose le demande.
+    # Meme forme que celui de core : urllib plutot que curl, absent de l'image.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/api/health')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # La console attend core (service_healthy) avant de demarrer, donc son
+      # propre demarrage est court — mais elle initialise une base SQLite et
+      # tronque son WAL au passage.
+      start_period: 15s
     depends_on:
       core:
         condition: service_healthy
@@ -271,6 +346,12 @@ services:
     depends_on:
       core:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - vibops_net
 
@@ -330,6 +411,12 @@ services:
       - "--web.enable-lifecycle"
     ports:
       - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O/dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - vibops_net
 
@@ -352,6 +439,12 @@ services:
       - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O/dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - vibops_net
 

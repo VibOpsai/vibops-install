@@ -160,13 +160,15 @@ Deploy VibOps v0.21.0 on context prod-k8s
 
 ### Option B — Cluster distant (CLI)
 
-Sur le **cluster GPU client**, déployer le gateway VibOps Connect :
+Sur le **cluster GPU client**, déployer le gateway VibOps Connect. Créer
+d'abord la passerelle dans la console : elle rend un `id` et un token, les
+deux étant nécessaires ci-dessous.
 
 ```bash
 helm upgrade --install vibops-connect ./charts/vibops-connect \
-  --set vibops.url=https://vibops.yourcompany.com \
-  --set vibops.apiKey=<api-key-généré-dans-admin> \
-  --set gateway.name=gpu-prod \
+  --set vibops.coreUrl=https://vibops.yourcompany.com \
+  --set vibops.token=<token-rendu-a-la-creation-de-la-passerelle> \
+  --set gateway.id="$GATEWAY_ID" \
   -n vibops-connect --create-namespace
 ```
 

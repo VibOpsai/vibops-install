@@ -3,23 +3,31 @@
 # Helm chart for the VibOps Connect gateway deployed on client infrastructure.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Convention Helm : le nom du release sert de base aux noms de ressources.
+nameOverride: ""
+fullnameOverride: ""
+
 global:
   imageRegistry: ""
   imagePullSecrets: []
 
 image:
   repository: ghcr.io/davidmacamara-boop/vibops-connect
-  tag: "0.30.0"
+  # Vide = la version du chart (Chart.yaml appVersion), pour que les deux ne
+  # divergent pas silencieusement.
+  tag: ""
   pullPolicy: IfNotPresent
 
 # ── Gateway identity ──────────────────────────────────────────────────────────
 gateway:
-  # Unique name (displayed in VibOps console, e.g. "client-acme-prod")
-  name: ""
-  # Associated cluster name (e.g. "gpu-cluster-west")
-  cluster: ""
-  # Organization ID (provided by VibOps)
-  orgId: ""
+  # UUID of the gateway, created in the VibOps console before installing this
+  # chart. Connect does not register itself: it authenticates as an existing
+  # gateway and exits at once without this.
+  id: ""
+  # Name under which the hypervisor appears, if one is configured below. This
+  # is the key alert rules and pricing target, so it must be stable and chosen
+  # deliberately. Defaults to the hypervisor type.
+  hypervisorName: ""
 
 # ── Connection to VibOps Core API ─────────────────────────────────────────────
 vibops:
@@ -39,58 +47,80 @@ kubeconfig:
 
 # ── Platform type ─────────────────────────────────────────────────────────────
 # "kubernetes" (default), "hypervisor", "slurm", "hybrid"
-platformType: ""
+# ── Network discovery ─────────────────────────────────────────────────────────
+networkScan:
+  # Scanning a customer's network is opt-out, and turning it off must need no
+  # other configuration.
+  enabled: true
+  # The subnet the BMCs and hypervisors sit on, e.g. "10.20.0.0/24". Leave
+  # empty only if the pod's own network is the one to scan — inside Kubernetes
+  # it usually is not, and the scan would find nothing.
+  #
+  # Reaching that subnet is a separate matter: naming it does not create a
+  # route. Use hostNetwork, or have the pod network routed to the VLAN.
+  subnet: ""
+  # Millisecondes par sonde de port. A monter sur un reseau lent ou un /16 :
+  # un BMC qui repond en 800 ms est invisible avec la valeur par defaut.
+  timeoutMs: 500
 
-# ── Hypervisor config (platformType=hypervisor or hybrid) ─────────────────────
-# Proxmox VE
+# Seconds between two polls for assigned jobs.
+pollInterval: 15
+
+# ── Plusieurs hyperviseurs sur une passerelle ─────────────────────────────────
+# Laisser vide pour n'en declarer qu'un, avec les blocs proxmox/xenOrchestra/
+# vsphere ci-dessous. Avec une liste, chaque entree doit porter un nom distinct :
+# c'est la cle que visent les regles d'alerte et la tarification.
+#
+# hypervisors:
+#   - type: proxmox
+#     name: pve-paris
+#     url: https://pve.paris.local:8006
+#     user: root@pam
+#     token_id: vibops
+#     token: ""
+#   - type: vsphere
+#     name: vc-lyon
+#     url: vcenter.lyon.local
+#     user: svc@vsphere.local
+#     token: ""
+hypervisors: []
+
+# ── vSphere (un seul) ─────────────────────────────────────────────────────────
+# ── vSphere / vCenter (un seul) ───────────────────────────────────────────────
+# Ce bloc etait declare DEUX FOIS dans ce fichier, avec des cles differentes.
+# En YAML la seconde declaration gagne, et c'est celle qui portait `url` — or
+# templates/deployment.yaml lit `vsphere.host`. Le bloc vSphere du deploiement
+# ne rendait donc jamais : la collecte vCenter etait injoignable depuis le
+# chart, sans que rien ne le signale.
+vsphere:
+  host: ""          # vcenter.example.com, sans https://
+  username: ""
+  password: ""
+  port: 443
+
+# ── Proxmox VE (un seul) ──────────────────────────────────────────────────────
+# Detecte par la presence d'une URL : il n'y a pas de `platformType` a poser.
 proxmox:
   url: ""          # https://proxmox.example.com:8006
   user: "root@pam"
   tokenId: ""
   token: ""
 
-# Xen Orchestra (Vates / XCP-ng)
+# ── Xen Orchestra (Vates / XCP-ng, un seul) ───────────────────────────────────
 xenOrchestra:
   url: ""          # https://xo.example.com
   token: ""
 
-# VMware vSphere (via pyVmomi — requires gateway image with pyVmomi)
-vsphere:
-  url: ""          # https://vcenter.example.com
-  user: ""
-  password: ""
-  verifySsl: "false"
+# Slurm, Prometheus et mTLS ne sont PAS configures ici.
+#
+# Ils l'ont ete — trois blocs complets, documentes, que ce chart rendait dans
+# aucun template et que connect ne lit nulle part. Un operateur pouvait poser
+# `slurm.host` ou `mtls.enabled`, helm l'acceptait, et rien ne se passait.
+#
+# Le noeud Slurm et l'URL Prometheus sont des proprietes de la passerelle, pas
+# du deploiement : ils se saisissent dans la console, sur la passerelle, et
+# core les transmet. C'est aussi ce qui permet de les changer sans redeployer.
 
-# ── Slurm config (platformType=slurm or hybrid) ──────────────────────────────
-slurm:
-  host: ""           # Slurm head node hostname
-  sshUser: "root"
-  sshPort: 22
-  sshKeySecret: ""   # K8s Secret name containing SSH private key
-  restUrl: ""        # Optional slurmrestd URL
-
-# ── Prometheus local ──────────────────────────────────────────────────────────
-prometheus:
-  url: "http://prometheus-operated:9090"
-
-# ── Network Discovery ────────────────────────────────────────────────────────
-networkScan:
-  # Scan the local subnet at boot for infrastructure services
-  enabled: true
-  # Subnet to scan (auto-detected from gateway IP if empty)
-  subnet: ""
-  # Timeout per port probe in milliseconds
-  timeoutMs: 500
-
-# ── mTLS (mutual TLS) ────────────────────────────────────────────────────────
-mtls:
-  enabled: false
-  # K8s Secret containing tls.crt and tls.key for client certificate auth
-  clientCertSecret: ""
-  # K8s Secret containing ca.crt for verifying core's server certificate
-  caSecret: ""
-
-# ── Resources ─────────────────────────────────────────────────────────────────
 replicaCount: 1
 
 resources:

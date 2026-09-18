@@ -249,10 +249,13 @@ VibOps manages GPU clusters through a small connector called a **Gateway**.
 helm repo add vibops https://charts.vibops.io
 helm repo update
 
-# Deploy the gateway
+# Deploy the gateway.
+# GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
+# dans la console : connect ne s'enregistre pas, il s'authentifie comme une
+# passerelle deja creee et sort sans son id.
 helm upgrade --install vibops-connect vibops/vibops-connect \
   --namespace vibops-connect --create-namespace \
-  --set gateway.name="my-gpu-cluster" \
+  --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="http://YOUR_MACHINE_IP:8000" \
   --set vibops.token="PASTE_YOUR_TOKEN_HERE"
 ```
@@ -496,10 +499,13 @@ For each GPU cluster:
 helm repo add vibops https://charts.vibops.io
 helm repo update
 
-# Deploy the gateway
+# Deploy the gateway.
+# GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
+# dans la console : connect ne s'enregistre pas, il s'authentifie comme une
+# passerelle deja creee et sort sans son id.
 helm upgrade --install vibops-connect vibops/vibops-connect \
   --namespace vibops-connect --create-namespace \
-  --set gateway.name="my-gpu-cluster" \
+  --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="http://INTERNAL_SERVER_IP:8000" \
   --set vibops.token="PASTE_YOUR_TOKEN_HERE"
 ```
@@ -670,10 +676,13 @@ For each GPU cluster:
 helm repo add vibops https://charts.vibops.io
 helm repo update
 
-# Deploy the gateway
+# Deploy the gateway.
+# GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
+# dans la console : connect ne s'enregistre pas, il s'authentifie comme une
+# passerelle deja creee et sort sans son id.
 helm upgrade --install vibops-connect vibops/vibops-connect \
   --namespace vibops-connect --create-namespace \
-  --set gateway.name="my-gpu-cluster" \
+  --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="https://your-domain.com" \
   --set vibops.token="PASTE_YOUR_TOKEN_HERE"
 ```

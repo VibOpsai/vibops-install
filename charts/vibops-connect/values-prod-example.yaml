@@ -9,10 +9,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Identité du connecteur ─────────────────────────────────────────────────────
+#
+# Créer la passerelle dans la console AVANT le helm install : elle rend un UUID
+# et un jeton, ce dernier une seule fois. Connect ne s'enregistre pas lui-même.
 gateway:
-  name: "client-acme-gpu-west"     # identifiant unique dans VibOps
-  cluster: "gpu-cluster-west"       # nom affiché dans la console
-  orgId: "org_xxxxxxxxxxxx"         # fourni par VibOps lors de l'onboarding
+  id: "00000000-0000-0000-0000-000000000000"   # UUID rendu par la console
+  hypervisorName: ""                            # si un hyperviseur est configuré plus bas
+
+# ── Découverte réseau ─────────────────────────────────────────────────────────
+#
+# Le sous-réseau où vivent les BMC et les hyperviseurs. Sans lui, connect déduit
+# celui du pod — le réseau du cluster, où il n'y a aucun BMC.
+#
+# Le nommer ne suffit pas : le pod doit pouvoir l'atteindre. Soit hostNetwork,
+# soit un réseau de pods routé vers ce VLAN.
+networkScan:
+  enabled: true
+  subnet: "10.20.0.0/24"
 
 # ── Connexion VibOps centrale ─────────────────────────────────────────────────
 #

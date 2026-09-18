@@ -83,13 +83,15 @@ Share **http://YOUR_PUBLIC_IP:8003** with your team — accessible from anywhere
 Once VibOps is running, connect your GPU clusters via the **VibOps Connect** gateway:
 
 1. Console → **Settings → Gateways → New Gateway**
-2. Copy the token (shown once only)
+2. Copy **both** values it returns: the gateway `id` and the token (the token
+   is shown once only). Connect authenticates as that gateway and exits
+   without its id — it does not register itself.
 3. On your GPU cluster:
 
 ```bash
 helm upgrade --install vibops-connect charts/vibops-connect \
   --namespace vibops-connect --create-namespace \
-  --set gateway.name="my-gpu-cluster" \
+  --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="http://YOUR_VIBOPS_IP:8000" \
   --set vibops.token="PASTE_YOUR_TOKEN_HERE"
 ```

@@ -32,17 +32,57 @@ spec:
                 secretKeyRef:
                   name: {{ include "vibops-connect.secretName" . }}
                   key: token
-            - name: GATEWAY_NAME
-              value: {{ .Values.gateway.name | required "gateway.name is required" | quote }}
-            - name: GATEWAY_CLUSTER
-              value: {{ .Values.gateway.cluster | quote }}
-            - name: GATEWAY_ORG_ID
-              value: {{ .Values.gateway.orgId | quote }}
-            - name: PROMETHEUS_URL
-              value: {{ .Values.prometheus.url | quote }}
-            {{- if .Values.platformType }}
-            - name: PLATFORM_TYPE
-              value: {{ .Values.platformType | quote }}
+            # L'identifiant de la passerelle, exige au demarrage. Le chart
+            # passait GATEWAY_NAME / GATEWAY_CLUSTER / GATEWAY_ORG_ID, que
+            # l'ancien relais lisait pour s'auto-enregistrer. connect ne
+            # s'enregistre pas : il attend un id deja cree dans la console, et
+            # sort immediatement s'il ne l'a pas.
+            - name: VIBOPS_GATEWAY_ID
+              value: {{ .Values.gateway.id | required "gateway.id is required — create the gateway in the console first" | quote }}
+            {{- if .Values.networkScan.enabled }}
+            {{- if .Values.networkScan.subnet }}
+            # Sans sous-reseau, connect deduit le sien : dans un pod, le reseau
+            # du cluster, ou il n'y a aucun BMC. Le scan tournerait et ne
+            # trouverait rien, ce qui se lit « pas de bare metal » et veut dire
+            # « je n'ai pas pu regarder ».
+            - name: VIBOPS_NETWORK_SCAN_SUBNET
+              value: {{ .Values.networkScan.subnet | quote }}
+            {{- end }}
+            {{- if .Values.networkScan.timeoutMs }}
+            - name: VIBOPS_NETWORK_SCAN_TIMEOUT
+              value: {{ .Values.networkScan.timeoutMs | quote }}
+            {{- end }}
+            {{- else }}
+            - name: VIBOPS_NETWORK_SCAN
+              value: "false"
+            {{- end }}
+            {{- if .Values.pollInterval }}
+            - name: VIBOPS_POLL_INTERVAL
+              value: {{ .Values.pollInterval | quote }}
+            {{- end }}
+            {{- if .Values.gateway.hypervisorName }}
+            - name: VIBOPS_HYPERVISOR_NAME
+              value: {{ .Values.gateway.hypervisorName | quote }}
+            {{- end }}
+            {{- if .Values.hypervisors }}
+            # Plusieurs hyperviseurs sur une passerelle. Chaque entree porte son
+            # nom, qui est la cle visee par les regles d'alerte et la
+            # tarification — deux Proxmox sans noms distincts seraient fondus
+            # en un seul.
+            - name: VIBOPS_HYPERVISORS
+              value: {{ .Values.hypervisors | toJson | quote }}
+            {{- end }}
+            {{- if .Values.vsphere.host }}
+            - name: VSPHERE_HOST
+              value: {{ .Values.vsphere.host | quote }}
+            - name: VSPHERE_USERNAME
+              value: {{ .Values.vsphere.username | quote }}
+            - name: VSPHERE_PASSWORD
+              value: {{ .Values.vsphere.password | quote }}
+            {{- if .Values.vsphere.port }}
+            - name: VSPHERE_PORT
+              value: {{ .Values.vsphere.port | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.proxmox.url }}
             - name: PROXMOX_URL
