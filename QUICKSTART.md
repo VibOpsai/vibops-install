@@ -245,15 +245,14 @@ VibOps manages GPU clusters through a small connector called a **Gateway**.
 4. On the machine that has `kubectl` access to your GPU cluster, run:
 
 ```
-# Add the VibOps Helm repo (once per machine)
-helm repo add vibops https://charts.vibops.io
-helm repo update
+# The chart ships inside this delivery, under charts/vibops-connect.
+# There is no public Helm repository — install from the local path.
 
 # Deploy the gateway.
 # GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
 # dans la console : connect ne s'enregistre pas, il s'authentifie comme une
 # passerelle deja creee et sort sans son id.
-helm upgrade --install vibops-connect vibops/vibops-connect \
+helm upgrade --install vibops-connect ./charts/vibops-connect \
   --namespace vibops-connect --create-namespace \
   --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="http://YOUR_MACHINE_IP:8000" \
@@ -495,15 +494,14 @@ For each GPU cluster:
 3. From a machine with `kubectl` access to that cluster, run:
 
 ```
-# Add the VibOps Helm repo (once per machine)
-helm repo add vibops https://charts.vibops.io
-helm repo update
+# The chart ships inside this delivery, under charts/vibops-connect.
+# There is no public Helm repository — install from the local path.
 
 # Deploy the gateway.
 # GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
 # dans la console : connect ne s'enregistre pas, il s'authentifie comme une
 # passerelle deja creee et sort sans son id.
-helm upgrade --install vibops-connect vibops/vibops-connect \
+helm upgrade --install vibops-connect ./charts/vibops-connect \
   --namespace vibops-connect --create-namespace \
   --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="http://INTERNAL_SERVER_IP:8000" \
@@ -672,15 +670,14 @@ For each GPU cluster:
 3. From a machine with `kubectl` access to that cluster, run:
 
 ```
-# Add the VibOps Helm repo (once per machine)
-helm repo add vibops https://charts.vibops.io
-helm repo update
+# The chart ships inside this delivery, under charts/vibops-connect.
+# There is no public Helm repository — install from the local path.
 
 # Deploy the gateway.
 # GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
 # dans la console : connect ne s'enregistre pas, il s'authentifie comme une
 # passerelle deja creee et sort sans son id.
-helm upgrade --install vibops-connect vibops/vibops-connect \
+helm upgrade --install vibops-connect ./charts/vibops-connect \
   --namespace vibops-connect --create-namespace \
   --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="https://your-domain.com" \

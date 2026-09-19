@@ -38,7 +38,7 @@ spec:
       {{- end }}
       initContainers:
         - name: alembic-migrate
-          image: "{{ .Values.images.core.repository }}:{{ .Values.images.core.tag }}"
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "core") | quote }}
           imagePullPolicy: {{ .Values.images.core.pullPolicy }}
           command: ["alembic", "upgrade", "heads"]
           securityContext:
@@ -56,7 +56,7 @@ spec:
               mountPath: /tmp
       containers:
         - name: core
-          image: "{{ .Values.images.core.repository }}:{{ .Values.images.core.tag }}"
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "core") | quote }}
           imagePullPolicy: {{ .Values.images.core.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}

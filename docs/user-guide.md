@@ -2356,7 +2356,7 @@ Deploy VibOps v0.21.0 on context prod-k8s
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `image_tag` | `v0.20.0` | Image tag to deploy |
+| `image_tag` | current release | Image tag to deploy |
 | `context` | `""` | kubectl context (empty = current context) |
 | `release` | `vibops` | Helm release name |
 | `namespace` | `vibops` | Target namespace |
@@ -2417,7 +2417,7 @@ curl -X POST https://vibops.yourcompany.com/api/v1/pipelines/from-template/conne
 ```
 
 **Steps executed:**
-1. `helm_upgrade` — deploys `oci://ghcr.io/vibops/charts/vibops-connect` with `--wait --timeout 5m`
+1. `helm_upgrade` — deploys the `./charts/vibops-connect` chart with `--wait --timeout 5m`
 2. `run_kubectl` — `get pods -n vibops-connect -l app=vibops-connect` to verify the pod is running
 
 ---
@@ -3354,7 +3354,7 @@ PATCH /api/v1/compliance/ai-act/{id}
 {
   "status": "compliant",
   "notes": "VibOps audit log chain satisfies Art12 requirements.",
-  "evidence_url": "https://docs.vibops.ai/compliance/art12"
+  "evidence_url": "https://your-intranet.example.com/compliance/art12"
 }
 ```
 

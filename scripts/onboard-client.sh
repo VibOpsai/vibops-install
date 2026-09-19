@@ -198,7 +198,8 @@ run helm repo update vibops
 info "Déploiement VibOps ${VERSION}..."
 
 HELM_ARGS=(
-  helm upgrade --install vibops vibops/vibops
+  # Aucun depot Helm public n'est servi : le chart est celui du paquet.
+  helm upgrade --install vibops ./helm/vibops
   --namespace "$NAMESPACE"
   --version "$VERSION"
   --set "secrets.existingSecret=vibops-secrets"
@@ -253,7 +254,7 @@ if [[ "$SEGMENT" == "csp" ]]; then
   # Sur le cluster GPU du client final — utiliser le token généré dans la console :
   # https://${HOST} → Fleet tab → "Add a gateway"  (ou ⚙ Admin → Gateways → New Gateway)
 
-  helm upgrade --install vibops-connect vibops/vibops-connect \\
+  helm upgrade --install vibops-connect ./charts/vibops-connect \\
     --namespace vibops-connect --create-namespace \\
     --set gateway.name="<nom-cluster>" \\
     --set vibops.coreUrl="https://${HOST}" \\
@@ -268,7 +269,7 @@ else
   echo -e "  2. Déployer sur chaque cluster GPU :"
   echo ""
   cat <<ENTERPRISE_CONNECT
-  helm upgrade --install vibops-connect vibops/vibops-connect \\
+  helm upgrade --install vibops-connect ./charts/vibops-connect \\
     --namespace vibops-connect --create-namespace \\
     --set gateway.name="<nom-cluster-gpu>" \\
     --set vibops.coreUrl="https://${HOST}" \\

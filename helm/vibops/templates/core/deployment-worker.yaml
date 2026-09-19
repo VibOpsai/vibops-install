@@ -34,7 +34,7 @@ spec:
         {{- end }}
       containers:
         - name: worker
-          image: "{{ .Values.images.core.repository }}:{{ .Values.images.core.tag }}"
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "core") | quote }}
           imagePullPolicy: {{ .Values.images.core.pullPolicy }}
           command: ["/entrypoint.sh", "worker"]
           securityContext:

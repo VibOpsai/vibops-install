@@ -17,7 +17,11 @@ set -euo pipefail
 
 CLIENT="${1:?Usage: $0 <client-slug> <version>}"
 VERSION="${2:?Usage: $0 <client-slug> <version>}"
-REGISTRY="${VIBOPS_REGISTRY:-ghcr.io/vibops}"
+# Le proprietaire publie est davidmacamara-boop et les images sont
+# nommees vibops-<composant> (cf. .github/workflows/release-images.yml).
+# `ghcr.io/vibops` n'existe pas : le paquet hors ligne se construisait
+# en tirant depuis un registre vide.
+REGISTRY="${VIBOPS_REGISTRY:-ghcr.io/davidmacamara-boop}"
 DIST="dist/vibops-${CLIENT}-${VERSION}"
 
 echo "→ Building VibOps delivery package"
@@ -152,8 +156,8 @@ REGISTRY=registry.${CLIENT}.internal
 
 for COMPONENT in core agent console; do
   docker load < images/vibops-\${COMPONENT}-${VERSION}.tar.gz
-  docker tag ghcr.io/vibops/\${COMPONENT}:${VERSION} \${REGISTRY}/vibops/\${COMPONENT}:${VERSION}
-  docker push \${REGISTRY}/vibops/\${COMPONENT}:${VERSION}
+  docker tag ghcr.io/davidmacamara-boop/vibops-\${COMPONENT}:${VERSION} \${REGISTRY}/vibops-\${COMPONENT}:${VERSION}
+  docker push \${REGISTRY}/vibops-\${COMPONENT}:${VERSION}
 done
 \`\`\`
 
@@ -214,7 +218,7 @@ Open https://vibops.${CLIENT}.internal in your browser.
 ## Support
 
 Contact: david@vibops.ai
-Documentation: https://docs.vibops.io
+Documentation: see the docs/ directory in this package
 
 ---
 

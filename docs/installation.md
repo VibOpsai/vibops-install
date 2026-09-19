@@ -148,7 +148,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.41.5` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.0` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -293,13 +293,25 @@ Log in at **http://localhost:8003** (or **http://SERVER_IP:8003** on a remote se
 
 Recommended for: CSP client deployments, enterprise on-prem, any production workload.
 
-#### Step 1 — Add Helm dependencies
+#### Step 1 — Fetch the chart
+
+The charts ship **in the public install repository**, alongside the compose
+file and this guide. There is no Helm *repository* to add — no chart index is
+served — so take the charts from the source tree.
 
 ```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo add vibops  https://charts.vibops.io
+helm repo add bitnami https://charts.bitnami.com/bitnami   # PostgreSQL/Redis dependencies
 helm repo update
+
+git clone https://github.com/VibOpsai/vibops-install.git
+cd vibops-install        # contains helm/vibops and charts/vibops-connect
 ```
+
+In an air-gapped installation, the same two charts are inside the delivery
+archive produced by `scripts/package-delivery.sh`; no clone and no outbound flow
+are required.
+
+Wherever the steps below reference a chart, use its path in that tree.
 
 #### Step 2 — Prepare your values file
 
@@ -354,7 +366,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/vibopsai/core:latest python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.0 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
@@ -363,7 +375,7 @@ docker run --rm ghcr.io/vibopsai/core:latest python -c \
 #### Step 3 — Install
 
 ```bash
-helm install vibops vibops/vibops \
+helm install vibops ./helm/vibops \
   -n vibops --create-namespace \
   -f my-values.yaml \
   --wait --timeout 10m
@@ -534,7 +546,7 @@ kubectl create secret generic vibops-connect-token \
 # GATEWAY_ID : l'UUID rendu avec le token a la creation de la passerelle.
 # Prometheus et le noeud Slurm se saisissent sur la passerelle dans la
 # console, pas ici — le chart ne les rend dans aucun template.
-helm upgrade --install vibops-connect vibops/vibops-connect \
+helm upgrade --install vibops-connect ./charts/vibops-connect \
   --namespace vibops-connect \
   --set gateway.id="$GATEWAY_ID" \
   --set vibops.coreUrl="https://vibops.mycompany.com" \
@@ -893,7 +905,7 @@ make update   # pulls latest images, restarts services, runs healthcheck
 
 ```bash
 helm repo update vibops
-helm upgrade vibops vibops/vibops -n vibops -f my-values.yaml --wait
+helm upgrade vibops ./helm/vibops -n vibops -f my-values.yaml --wait
 ```
 
 Alembic migrations run automatically on startup (Docker Compose: on core start; Helm: via init container).

@@ -25,7 +25,7 @@ spec:
         {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
         - name: agent
-          image: "{{ .Values.images.agent.repository }}:{{ .Values.images.agent.tag }}"
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "agent") | quote }}
           imagePullPolicy: {{ .Values.images.agent.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}

@@ -14,18 +14,27 @@ imageCredentials:
   password: ""               # set in values.secret.yaml (SOPS-encrypted)
 
 # ── Images ────────────────────────────────────────────────────────────────────
+# Le nom publie est `ghcr.io/<owner>/vibops-<composant>` — voir
+# .github/workflows/release-images.yml, ou REGISTRY vaut
+# `ghcr.io/${{ github.repository_owner }}/vibops` et le nom du composant est
+# accole avec un tiret. `ghcr.io/vibops/core` n'a jamais existe : un chart qui
+# le reference s'installe sans erreur et reste bloque en ImagePullBackOff.
+#
+# tag vide = la version applicative du chart (appVersion), comme
+# charts/vibops-connect. Poser "latest" ici ferait ignorer appVersion et
+# livrerait une version differente de celle que le chart annonce.
 images:
   core:
-    repository: ghcr.io/vibops/core
-    tag: "latest"
+    repository: ghcr.io/davidmacamara-boop/vibops-core
+    tag: ""
     pullPolicy: IfNotPresent
   agent:
-    repository: ghcr.io/vibops/agent
-    tag: "latest"
+    repository: ghcr.io/davidmacamara-boop/vibops-agent
+    tag: ""
     pullPolicy: IfNotPresent
   console:
-    repository: ghcr.io/vibops/console
-    tag: "latest"
+    repository: ghcr.io/davidmacamara-boop/vibops-console
+    tag: ""
     pullPolicy: IfNotPresent
 
 # ── Namespace ─────────────────────────────────────────────────────────────────

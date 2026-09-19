@@ -24,7 +24,7 @@ spec:
         {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
         - name: console
-          image: "{{ .Values.images.console.repository }}:{{ .Values.images.console.tag }}"
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "console") | quote }}
           imagePullPolicy: {{ .Values.images.console.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
