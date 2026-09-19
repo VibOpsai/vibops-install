@@ -9,6 +9,138 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.0] — 2026-09-19
+
+### Added
+- **Deterministic output formatter** (OpContract rule 7) — `agent/app/services/output_format.py`.
+  ADR 0032 promised that an on-prem Ollama deployment gets output of the same quality as a
+  Claude Sonnet one, through a formatter between the LLM response and the console. That
+  formatter did not exist; the rule rested on prompt templates, which work in proportion to how
+  good the model is. It strips leaked reasoning tags, inserts missing table separator rows, pads
+  ragged rows, normalises status tokens inside table cells, demotes document-level headings. It
+  repairs structure and never content: leaked template placeholders are logged, never
+  substituted. Idempotent, and it never empties a non-empty reply
+- **Prompt prefix caching** on the Anthropic path — the tool catalogue and static rules, about
+  60,700 tokens identical on every call, were re-billed in full on every turn of the agent loop.
+  The system prompt is now two blocks, the stable one carrying the cache breakpoint.
+  `test_prompt_cache_boundary.py` guards the boundary: the cached block must be identical across
+  users, clusters, languages and fleet state, or the cache is never read and the 25% write
+  premium is paid for nothing
+- **Capability-derived tool filtering** — six tool families target one platform each (vSphere,
+  Proxmox, Xen Orchestra, HPE VME, Slurm, NVIDIA NIM), 98 of 310 tools and a quarter of the
+  catalogue. They are withheld from organisations whose gateways do not report them. Derived
+  from `Gateway.capabilities`, never from a guess at the user's intent, and it fails open on
+  every path where the answer is unknown. What is withheld is named in the prompt so the model
+  says the platform is not connected rather than that the capability does not exist
+- **OpContract rules 2, 3 and 6 under test** — numeric coherence across surfaces
+  (`test_opcontract_rule2_coherence.py`), collection-failure safety
+  (`test_opcontract_rule3_collection_safety.py`), and `validate-seed.sh` wired into
+  `e2e-pipeline.yml`. All nine rules of ADR 0032 are now held by an automated check
+- **ADR 0043** — GreenOps: carbon as a second unit on the FinOps axis, status Backlog. Plus the
+  incoming specification, the 78-criterion RGESN referential and the assumption check in
+  `docs/specs/`
+
+### Fixed
+- **anyio 4.7.0 → 4.15.1 in the gateway** (CVE-2026-63374, CVE-2026-64847). It was the only
+  component still pinned to 4.7.0; core and agent were already on 4.15.1
+- `gpu_metric.py` documented a 30 s cadence; the beat schedule says 60 s
+- ADR 0032's enforcement table named files that did not exist for three rules
+
+### Changed
+- **Documentation language is English by default** — docs, ADRs, specs, docstrings and comments.
+  Recorded in `CLAUDE.md`. The five existing French documents are client-facing and stay French
+
+---
+
+## [0.44.0] — 2026-09-18
+
+### Added
+- **Backend rate surface** — per-organisation, per-backend LLM pricing in the console and a new
+  `llm_backend_rates` table. Rates lived in the proxy's `BACKEND_RATES` environment variable:
+  identical for every customer, changed only on redeploy, and a backend absent from the JSON
+  fell back to `default_gpu_hour_rate` with `compute_type: "gpu"` — a CPU inference billed at a
+  GPU rate. A confident wrong number is worse than a missing one
+- **Agent identities panel** wired into the console settings
+- **Daily SIEM export** — `push_audit_to_siem` sends the audit trail to Splunk HEC or Datadog,
+  with a watermark advanced only after a successful push
+- **vSphere collection** in `connect`, several hypervisors per gateway, and hypervisor metrics
+  without which no VM alert ever fired
+- **`schedulable` field** on the action catalogue, plus the four orphan actions it exposed
+- Docker healthchecks on all ten services, chosen per service rather than copied
+- Onboarding documentation for Kubernetes, VM and bare metal (`docs/connect-quickstart.md`)
+
+### Fixed
+- **The chart's recommended mode collected nothing** — `kubectl` does not implement in-cluster
+  configuration (that is client-go), so a pod with only a ServiceAccount fell back to
+  `localhost:8080` and reported an empty cluster without an error. Found on a real kind cluster,
+  not in nineteen green commits
+- **vSphere returned zeros instead of saying it could not read** — `/api/session` (7.0 U2+) and
+  `/rest/com/vmware/cis/session` (6.5–7.0) are two dialects; the collector now speaks both and
+  marks an unreachable hypervisor unreachable rather than empty
+- **A cluster name is a routing address, so it must be unique** — two gateways could claim the
+  same name and job routing depended on row order
+- 22 console automations proposed actions the policy engine refused; the four orphan actions and
+  the four agent aliases that named actions core does not accept
+- `scale_node_group` verification accepted the configured count immediately on all three clouds;
+  it now requires the node count *and* a settled state
+- e2e tests carried an absolute path from a developer's machine
+
+---
+
+## [0.43.0] — 2026-09-18
+
+### Added
+- **A local boundary on what a gateway will execute** — `connect/allowlist.py` derives the
+  allowed actions from the installed connector library rather than a hand-maintained list
+  (ADR 0042 decision 4). Core checks its policy before assigning a job; this is the gate that
+  still holds if core is wrong, if a token leaks, or if someone posts to the gateway's queue
+- **Network discovery moved into the client the customer actually deploys** (ADR 0042)
+- The 29 kubectl actions relayed through the connector library
+
+### Changed
+- **One gateway client** (ADR 0042) — the repository had two words for "gateway" and two
+  programs answering to it. `gateway/` keeps the OpenAI-compatible façade; the relay is gone
+
+### Fixed
+- The two publication paths built different images
+
+---
+
+## [0.42.0] — 2026-09-17
+
+### Added
+- **Bare metal, read-only** (ADR 0040) — a `RedfishConnector`, declared inventory, BMC
+  recognition in network discovery, four agent read tools, a simulated BMC for developing
+  without hardware, and a Bare Metal sub-tab in the console
+- **Post-action verification** (ADR 0038) — destructive actions declare how they can be proved,
+  the loop enforces the proof, and a failed verification returns the evidence rather than a
+  bare refusal
+- **External identity to rights** (ADR 0041) — a reconciliation service, a mapping API, and a
+  single place where rights are written
+- Automatic HTTPS in the installer via `--domain`, with an explicit warning when it is absent
+- The three MIG tools restored, with the proof of what they permit
+
+### Changed
+- **`agent_service.py` reduced from 6,505 to 110 lines of dispatcher** across ten refactors —
+  the tool catalogue, VM operations, the incident family, hypervisor tools, job lifecycle,
+  PromQL presets and 37 direct HTTP calls each moved to their own module or routing table.
+  Pinned first by characterization tests (`_execute_tool` at 100% of lines, `chat_stream` from
+  1% to 99%)
+
+### Fixed
+- **Twenty agent tools the PolicyEngine refused**, and the CI invariant that should have caught
+  them; every agent scaling path returned 403
+- **Six compliance frameworks the agent announced did not exist**; `generate_compliance_report`
+  offered two types core refuses; a citation could be written but never withdrawn; CC7.4 cried
+  tampering on an intact chain
+- Three verification defects found against a real cluster, not in tests
+- Twenty-two silent exception swallowers in the agent now log
+- `check-tool-parity` read TOOLS from the wrong file, so it had been comparing nothing
+- Administrator credentials removed from the seed scripts
+- A read failure displayed as an empty inventory; an empty Clusters tab showed a wall of zeros
+
+---
+
 ## [0.41.5] — 2026-09-13
 
 ### Fixed
