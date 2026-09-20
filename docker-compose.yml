@@ -22,6 +22,12 @@ services:
     networks:
       - vibops_net
 
+# REDIS_PASSWORD has no default on purpose. It used to fall back to
+# `vibops-dev`, a password published in this very file at vibops.ai — anyone
+# starting the stack without a .env got a Redis protected by a string the whole
+# internet could read, and nothing said so. `:?` makes Compose refuse to start
+# and name the missing variable, which is the difference between a weak secret
+# and a stopped deployment. `install.sh` generates one with `openssl rand`.
   redis:
     image: redis:7-alpine
     container_name: vibops_redis
@@ -30,9 +36,9 @@ services:
     # Redis is bound exclusively to the internal Docker bridge network (vibops_net)
     # and is not internet-exposed. This is an accepted risk documented in the
     # VibOps Risk Register (R-011). Authentication is enforced via --requirepass.
-    command: redis-server --requirepass ${REDIS_PASSWORD:-vibops-dev}
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-vibops-dev}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -51,7 +57,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
-      REDIS_URL: redis://:${REDIS_PASSWORD:-vibops-dev}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
       KUBECONFIG: /home/vibops/.kube/config
     volumes:
       - ${HOME}/.kube:/home/vibops/.kube:ro  # kubeconfig host — tous les contextes visibles
@@ -110,7 +116,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
-      REDIS_URL: redis://:${REDIS_PASSWORD:-vibops-dev}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
       OLLAMA_URL: http://ollama:11434
       DATADOG_API_KEY: ${DATADOG_API_KEY:-}
       DATADOG_APP_KEY: ${DATADOG_APP_KEY:-}
@@ -155,7 +161,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
-      REDIS_URL: redis://:${REDIS_PASSWORD:-vibops-dev}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
       DATADOG_API_KEY: ${DATADOG_API_KEY:-}
       DATADOG_APP_KEY: ${DATADOG_APP_KEY:-}
       DATADOG_SITE: ${DATADOG_SITE:-datadoghq.com}
@@ -383,7 +389,7 @@ services:
 
   # ─── Observabilité — Prometheus + Grafana (toujours actifs) ─────────────
   # Prometheus scrape core:8000/metrics, agent:8001/metrics, gpu-simulator:9400/metrics
-  # Grafana disponible sur http://localhost:3000 (admin / ${GRAFANA_PASSWORD:-vibops})
+  # Grafana disponible sur http://localhost:3000 (admin / ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — generate one with `openssl rand -base64 16`})
   # Pour désactiver en prod légère : docker compose --profile no-observability up (futur)
 
   gpu-simulator:
@@ -426,7 +432,7 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-vibops}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — generate one with `openssl rand -base64 16`}
       GF_SECURITY_ALLOW_EMBEDDING: "true"
       GF_AUTH_ANONYMOUS_ENABLED: "true"  # dev only — disable in production (Helm chart does not expose this)
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
