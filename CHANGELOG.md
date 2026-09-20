@@ -9,6 +9,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.2] — 2026-09-20
+
+### Fixed
+- **Celery beat could not persist its schedule.** `PersistentScheduler` writes to the working
+  directory; under the `readOnlyRootFilesystem` the Helm chart sets — correctly — that is
+  `[Errno 30]`. Worse, the pod reported **Ready while failing**: Celery survives the error, so it
+  schedules and cannot persist what it scheduled, and a restart loses or re-fires it. The
+  entrypoint now passes `--schedule=/tmp/celerybeat-schedule`. This release exists to ship that
+  image
+
+### Added
+- **The Helm chart bundles Redis.** It shipped a PostgreSQL subchart and no broker, while
+  `core.secret.redisUrl` said "REQUIRED in production" and defaulted to localhost — where
+  nothing listens inside the core pod. The official `redis:7-alpine`, as the compose deployment
+  has always used; `redis.enabled: false` remains the path to a managed broker
+
+### Fixed — the Helm chart, found by installing it
+- PostgreSQL pinned a Bitnami tag pruned from Docker Hub; repointed at `bitnamilegacy`, which is
+  frozen and a stopgap
+- core's egress policy selected `component: postgresql`; the Bitnami pod is `component: primary`,
+  so the selector matched nothing and the database was unreachable
+- Neither webhook secret was exposed, though core refuses to start in production without them
+- The console writes SQLite to `/data`; only `/tmp` was mounted. Added, with a PVC, so history
+  survives a restart as it does under compose
+- The agent's probes pointed at `/health`, which it does not serve — the pod ran forever and was
+  never Ready, so its Service had no endpoints
+- Adding a value broke `helm upgrade --reuse-values`; the new templates read through `dig`
+
+Seven pods of seven now reach 1/1 on a fresh cluster with nothing but the chart's own values.
+Every one of these passes `helm lint`, `helm template` and `--dry-run=server`.
+
+---
+
 ## [0.45.1] — 2026-09-20
 
 ### Fixed
