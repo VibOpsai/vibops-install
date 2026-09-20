@@ -1,0 +1,31 @@
+{{/*
+  Guarded with `dig`: `helm upgrade --reuse-values` rebuilds values from the
+  previous release and does not pick up a chart's new defaults, so a value added
+  in this version is nil on the first upgrade. Reaching into it directly turns
+  that upgrade into "nil pointer evaluating interface {}.enabled" — a chart that
+  breaks upgrades because something was added to it.
+*/}}
+{{- if dig "persistence" "enabled" false .Values.console }}
+{{/*
+  Conversation history. The docker-compose deployment has always mounted a named
+  volume at /data; the chart mounted nothing, so the console crashed on a
+  read-only root filesystem — and would have lost every conversation on restart
+  even if it had started.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vibops.fullname" . }}-console
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ dig "persistence" "size" "1Gi" .Values.console | quote }}
+  {{- with dig "persistence" "storageClass" "" .Values.console }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

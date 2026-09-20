@@ -330,10 +330,23 @@ agent:
     llmApiKey: "sk-ant-..."            # REQUIRED (or configure on-prem LLM below)
 
 # ── Security ──────────────────────────────────────────────────
+# All six below are REQUIRED when APP_ENV=production: core refuses to start
+# without them rather than accept an unauthenticated webhook or an unencrypted
+# vault. Installing with only the first two produces a CrashLoopBackOff and
+# every pod that waits on core behind it — verified on a cluster, 20/09/2026.
 core:
   secret:
     secretKey:        "a-random-32-char-string"   # REQUIRED — change in prod
     jwtSecretKey:     "a-random-32-char-string"   # REQUIRED — shared with agent
+    vaultKey:         ""                          # REQUIRED — Fernet key, see below
+    internalApiKey:   ""                          # REQUIRED — openssl rand -hex 32
+    githubWebhookSecret:  ""                      # REQUIRED — openssl rand -hex 32
+    grafanaWebhookSecret: ""                      # REQUIRED — openssl rand -hex 32
+
+    # REQUIRED — the chart bundles PostgreSQL but not Redis, and Celery needs
+    # one. Point this at your own instance; without it core defaults to
+    # localhost and never becomes healthy.
+    redisUrl: "redis://:<password>@<redis-host>:6379/0"
     authUsername:     "admin"
     authPasswordHash: ""               # generate below; empty = auth disabled
 

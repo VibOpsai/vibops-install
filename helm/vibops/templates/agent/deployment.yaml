@@ -47,15 +47,20 @@ spec:
             - name: training-data
               mountPath: /app/data/training
             {{- end }}
+          # The agent serves no /health: main.py exposes `/` and `/metrics`, and
+          # the compose deployment has always probed `/`. The chart probed
+          # /health, got 404, and the pod ran forever without becoming ready —
+          # so the Service had no endpoints and the console could not reach it.
+          # A pod that runs and is never ready looks like a slow start.
           livenessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 8001
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 8001
             initialDelaySeconds: 5
             periodSeconds: 10

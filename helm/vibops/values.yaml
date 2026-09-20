@@ -71,6 +71,10 @@ core:
     redisUrl: ""           # REQUIRED in production — e.g. redis://<redis-host>:6379/0
     vaultKey: "change-me-vault-key"    # Fernet key — python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     internalApiKey: "change-me-internal-key"  # service-to-service auth — python -c "import secrets; print(secrets.token_hex(32))"
+    # REQUIRED in production — core refuses to start without them, since an
+    # empty webhook secret accepts any source. Generate with `openssl rand -hex 32`.
+    githubWebhookSecret: ""
+    grafanaWebhookSecret: ""
     # Licence VibOps — laisser vide pour trial 14 jours
     # Obtenir une clé : contacter david@vibops.ai
     # La clé est un JWT RS256 signé par VibOps. Aucun secret partagé requis côté client.
@@ -148,6 +152,14 @@ agent:
 
 # ── Console (UI) ──────────────────────────────────────────────────────────────
 console:
+  # Conversation history lives in SQLite at /data. Without this the console
+  # cannot write at all under readOnlyRootFilesystem, and an emptyDir would
+  # discard every conversation on restart — which the compose deployment never
+  # did, since it mounts a named volume there.
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""   # empty = the cluster's default
   enabled: true
   replicaCount: 1
 
@@ -178,6 +190,21 @@ ingress:
 # ── PostgreSQL (Bitnami sub-chart) ────────────────────────────────────────────
 postgresql:
   enabled: true
+
+  # Bitnami pruned its free Docker Hub catalogue: the tag chart 15.5.x pins by
+  # default — `bitnami/postgresql:16.4.0-debian-12-r14` — returns "not found",
+  # and every pod that waits on the database crashes behind it. Found on
+  # 20/09/2026 by installing this chart on a cluster; `helm template` and
+  # `--dry-run=server` both pass, because neither pulls anything.
+  #
+  # The surviving copy lives under `bitnamilegacy`. It works and it is frozen:
+  # that repository receives no updates, security ones included. This is a
+  # stopgap, not a resting place — see docs/harness.md, Known gaps.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 16.4.0-debian-12-r14
+
   auth:
     username: vibops
     password: ""   # REQUIRED — set via --set postgresql.auth.password=<strong-password>

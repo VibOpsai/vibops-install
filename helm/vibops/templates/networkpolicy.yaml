@@ -24,10 +24,19 @@ spec:
             matchLabels:
               app.kubernetes.io/component: console
   egress:
+    # The Bitnami subchart labels its pod `app.kubernetes.io/name: postgresql`
+    # with `component: primary`, not `component: postgresql`. This selector
+    # matched nothing, so core's egress to its own database was denied and the
+    # migration init container died on "Connection timed out" — not "refused",
+    # which is the tell. Every pod waiting on core crashed behind it.
+    #
+    # Found on 20/09/2026 by installing the chart on a cluster whose CNI
+    # enforces NetworkPolicy. `helm template` and `--dry-run=server` both pass:
+    # neither evaluates a selector against a running pod.
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: postgresql
+              app.kubernetes.io/name: postgresql
       ports:
         - port: 5432
           protocol: TCP

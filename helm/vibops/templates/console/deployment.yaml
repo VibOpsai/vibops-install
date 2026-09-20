@@ -39,6 +39,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # The console stores conversation history in SQLite at
+            # CONVERSATIONS_DB_PATH, /data by default. The chart mounted only
+            # /tmp, so with readOnlyRootFilesystem the pod died on
+            # `sqlite3.OperationalError: unable to open database file`. The
+            # compose file has always mounted a named volume here; the chart had
+            # nothing. An emptyDir makes it run and loses the history on every
+            # restart — see values.yaml console.persistence.
+            - name: data
+              mountPath: /data
           resources:
             {{- toYaml .Values.console.resources | nindent 12 }}
           livenessProbe:
@@ -56,4 +65,11 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: data
+        {{- if dig "persistence" "enabled" false .Values.console }}
+          persistentVolumeClaim:
+            claimName: {{ include "vibops.fullname" . }}-console
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
 {{- end }}
