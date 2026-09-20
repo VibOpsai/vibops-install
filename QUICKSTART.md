@@ -15,6 +15,12 @@ No technical background required.
 
 ---
 
+> **Architecture: linux/amd64 only.** The published images carry no arm64
+> variant — it was withdrawn on 13/09/2026 because nothing pulled it. On an ARM
+> host (AWS Graviton, Ampere, Apple Silicon) the pull fails with
+> `no match for platform in manifest`, which names the symptom and not the cause.
+> Verified on 20/09/2026 against a real cluster.
+
 ## What you need before starting
 
 ### 1. Docker Desktop

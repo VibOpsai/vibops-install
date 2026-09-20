@@ -127,6 +127,12 @@ A countdown banner appears in the header as the trial or licence approaches expi
 
 ## 4. Choose your deployment mode
 
+> **Architecture: linux/amd64 only.** The published images carry no arm64
+> variant — it was withdrawn on 13/09/2026 because nothing pulled it. On an ARM
+> host (AWS Graviton, Ampere, Apple Silicon) the pull fails with
+> `no match for platform in manifest`, which names the symptom and not the cause.
+> Verified on 20/09/2026 against a real cluster.
+
 ### Option A — One-line install (`install.sh`)
 
 Fastest path on a fresh Linux VM (Ubuntu 22.04+ / Debian 12+). Installs Docker if
