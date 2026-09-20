@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.45.3] — 2026-09-20
+
 ### Fixed — Helm chart (`helm/vibops`)
 
 Found by installing the v0.45.2 chart on a real cluster; all four passed
@@ -35,6 +39,23 @@ Found by installing the v0.45.2 chart on a real cluster; all four passed
 - `docs/installation.md`: the Helm values example put `DATABASE_URL` and
   `REDIS_URL` under `core.env`, which the chart never reads; they belong under
   `core.secret`. It also still said the chart bundles no Redis.
+
+### Upgrading
+
+`helm upgrade` now fails with the name of any missing value rather than
+installing a release that cannot run — `--reuse-values` from an older release
+included. A cluster already running the v0.45.2 chart needs the password its
+PostgreSQL subchart generated, not a new one; `docs/runbooks/upgrade-migration.md`
+§5 has the two commands. Verified on a cluster: install the v0.45.2 chart as the
+guide described it (core, worker and beat all in CrashLoopBackOff), upgrade,
+7/7 pods Running with 0 restarts.
+
+### Note on versioning
+
+v0.45.2 shipped the chart with these four defects, and the fixes were published
+to the install repo on the main branch under the *same* chart version — two
+different charts answering to `0.45.2`. This release exists to give the
+corrected chart a version of its own.
 
 ---
 

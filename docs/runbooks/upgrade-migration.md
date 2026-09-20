@@ -232,6 +232,37 @@ kubectl exec -it deploy/vibops-core -n vibops -- alembic downgrade -1
 
 ## 5. Breaking Changes by Version
 
+### v0.45.3 — the Helm chart now refuses incomplete values
+
+`helm upgrade` fails with a named value instead of installing a release that
+cannot run. Eight values are required: `postgresql.auth.password`,
+`redis.auth.password`, and the six under `core.secret` (`secretKey`,
+`jwtSecretKey`, `vaultKey`, `internalApiKey`, `githubWebhookSecret`,
+`grafanaWebhookSecret`). `--reuse-values` from a release that predates them
+fails the same way — supply them on the command line.
+
+**If you installed the v0.45.2 chart, read this.** That chart rendered the
+database URL with an empty password while the PostgreSQL subchart generated a
+random one of its own, so core never connected and the schema was never
+created. Supplying a *new* password on upgrade does not fix it: the database
+was initialised with the generated one, and neither Helm nor the subchart
+rewrites it. Recover the password the subchart generated and pass that:
+
+```bash
+PW=$(kubectl -n vibops get secret vibops-postgresql \
+      -o jsonpath='{.data.password}' | base64 -d)
+
+helm upgrade vibops ./helm/vibops -n vibops --reuse-values \
+  --set postgresql.auth.password="$PW"
+```
+
+Verified on a cluster: 7/7 pods Running, 0 restarts, within six minutes.
+
+Alternatively — and only because a v0.45.2 chart install never reached a
+working core, so it holds no data — uninstall, delete the PVCs, and install
+again with all eight values.
+
+
 ### v0.15.x
 
 - **`Job.gateway_id` is VARCHAR** — internal code that compared against a Python `UUID` object required `str(gw.id)`. No action needed on upgrade; DB column unchanged.
