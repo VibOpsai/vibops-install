@@ -32,6 +32,54 @@ spec:
             secretName: {{ .Values.core.kubeconfig.secretName }}
             defaultMode: 0400
         {{- end }}
+      initContainers:
+        # The worker opens its gateway-heartbeat session once, at startup, and
+        # never retries. Scheduled before core's alembic init container has run,
+        # it logs `relation "gateways" does not exist` and then runs for the rest
+        # of the pod's life with the heartbeat dead — Ready, and quietly
+        # degraded. Compose gets the ordering from `depends_on: core`; the chart
+        # had no equivalent, so the race was decided by scheduling order.
+        #
+        # It waits on the schema, not on core: the worker never calls core over
+        # HTTP, and the core NetworkPolicy admits only the agent and the console
+        # — a wait on core's / would have hung here until the timeout, which is
+        # how this init container was first written.
+        - name: wait-for-migrations
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "core") | quote }}
+          imagePullPolicy: {{ .Values.images.core.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ include "vibops.fullname" . }}-core
+          command:
+            - python
+            - -c
+            - |
+              import os, sys, time, psycopg2
+              url = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+              deadline = time.time() + 600
+              while time.time() < deadline:
+                  try:
+                      conn = psycopg2.connect(url, connect_timeout=5)
+                      cur = conn.cursor()
+                      cur.execute("select to_regclass('public.gateways')")
+                      found = cur.fetchone()[0]
+                      conn.close()
+                      if found:
+                          sys.exit(0)
+                      print("schema not migrated yet", flush=True)
+                  except Exception as exc:
+                      print(f"waiting for database: {exc}", flush=True)
+                  time.sleep(5)
+              sys.exit("migrations did not complete within 10 minutes")
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
       containers:
         - name: worker
           image: {{ include "vibops.image" (dict "ctx" $ "component" "core") | quote }}

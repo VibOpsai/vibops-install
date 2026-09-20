@@ -63,14 +63,14 @@ core:
     # Surcharger les secrets via core.secret.*
 
   secret:
-    secretKey: "change-me-in-production"
-    jwtSecretKey: "change-me-jwt-secret"
+    secretKey: ""          # REQUIRED when APP_ENV=production — Fernet key
+    jwtSecretKey: ""       # REQUIRED when APP_ENV=production — openssl rand -hex 32
     authUsername: "admin"
     authPasswordHash: ""   # vide = auth désactivée
     databaseUrl: ""        # auto-généré si postgresql.enabled
     redisUrl: ""           # REQUIRED in production — e.g. redis://<redis-host>:6379/0
-    vaultKey: "change-me-vault-key"    # Fernet key — python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    internalApiKey: "change-me-internal-key"  # service-to-service auth — python -c "import secrets; print(secrets.token_hex(32))"
+    vaultKey: ""           # REQUIRED when APP_ENV=production — Fernet key — python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    internalApiKey: ""     # REQUIRED when APP_ENV=production — service-to-service auth — python -c "import secrets; print(secrets.token_hex(32))"
     # REQUIRED in production — core refuses to start without them, since an
     # empty webhook secret accepts any source. Generate with `openssl rand -hex 32`.
     githubWebhookSecret: ""
@@ -148,7 +148,9 @@ agent:
     # Example: http://vllm-service.ai-infra.svc:8000/v1
     # Leave empty for claude, ollama, or nemotron.
     llmBaseUrl: ""
-    jwtSecretKey: "change-me-jwt-secret"
+    # Leave empty: it then takes core.secret.jwtSecretKey. The agent validates
+    # tokens core signs, so two different values is a silent 401, not a warning.
+    jwtSecretKey: ""
 
 # ── Console (UI) ──────────────────────────────────────────────────────────────
 console:

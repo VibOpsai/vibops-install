@@ -7,6 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Helm chart (`helm/vibops`)
+
+Found by installing the v0.45.2 chart on a real cluster; all four passed
+`helm lint`, `helm template` and `--dry-run=server`.
+
+- **PostgreSQL password**: with `postgresql.auth.password` empty the chart
+  rendered `postgresql+asyncpg://vibops:@host` while the Bitnami subchart
+  generated a random password of its own. The release installed, every other
+  pod reported Ready, and core sat in `Init:Error` forever on
+  `fe_sendauth: no password supplied`. The chart now refuses to render.
+- **Production secrets**: `APP_ENV` defaults to `production`, where core
+  refuses to start without `GITHUB_WEBHOOK_SECRET` and `GRAFANA_WEBHOOK_SECRET`
+  — both shipped empty, so a default install gave a core in CrashLoopBackOff.
+  Those two, plus `secretKey`, `jwtSecretKey`, `vaultKey` and `internalApiKey`,
+  are now required at install time; the `change-me-…` defaults are gone.
+- **Agent JWT key**: `agent.secret.jwtSecretKey` defaults to core's. Two
+  independent `change-me-jwt-secret` defaults agreed by accident; setting one
+  side properly turned every agent→core call into a 401.
+- **Worker startup race**: the worker opens its gateway-heartbeat session once
+  and never retries. Scheduled before core's migrations it logged
+  `relation "gateways" does not exist` and ran Ready with the heartbeat dead. A
+  `wait-for-migrations` init container now holds it until the schema exists.
+
+### Changed
+
+- `docs/installation.md`: the Helm values example put `DATABASE_URL` and
+  `REDIS_URL` under `core.env`, which the chart never reads; they belong under
+  `core.secret`. It also still said the chart bundles no Redis.
+
 ---
 
 ## [0.45.2] — 2026-09-20

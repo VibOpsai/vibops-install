@@ -343,10 +343,10 @@ core:
     githubWebhookSecret:  ""                      # REQUIRED — openssl rand -hex 32
     grafanaWebhookSecret: ""                      # REQUIRED — openssl rand -hex 32
 
-    # REQUIRED — the chart bundles PostgreSQL but not Redis, and Celery needs
-    # one. Point this at your own instance; without it core defaults to
-    # localhost and never becomes healthy.
-    redisUrl: "redis://:<password>@<redis-host>:6379/0"
+    # Leave empty to use the Redis the chart bundles (set redis.auth.password
+    # below). Set it only to point Celery at a broker you run yourself, and
+    # then set redis.enabled=false.
+    redisUrl: ""
     authUsername:     "admin"
     authPasswordHash: ""               # generate below; empty = auth disabled
 
@@ -360,15 +360,30 @@ core:
     smtpPassword: "SG.xxx"
     smtpFrom:     "noreply@yourcompany.com"
 
-# ── Database ──────────────────────────────────────────────────
+# ── Database and broker ───────────────────────────────────────
+# Bundled (default): both passwords are REQUIRED. The chart refuses to render
+# without them rather than install a release whose core never connects.
 postgresql:
-  enabled: false   # use managed DB in prod (RDS, CloudSQL, AlloyDB…)
+  enabled: true
+  auth:
+    password: ""     # REQUIRED — openssl rand -hex 24
+redis:
+  enabled: true
+  auth:
+    password: ""     # REQUIRED — openssl rand -hex 24
 
-core:
-  env:
-    DATABASE_URL: "postgresql+asyncpg://vibops:pass@my-pg-host:5432/vibops"
-    REDIS_URL:    "redis://my-redis-host:6379/0"
-    APP_ENV:      "production"
+# Managed instead (RDS, CloudSQL, AlloyDB, ElastiCache…): disable the bundled
+# ones and give core the two URLs. They belong under core.secret, not core.env
+# — core.env holds no connection string, and a URL placed there is read by
+# nothing.
+# postgresql:
+#   enabled: false
+# redis:
+#   enabled: false
+# core:
+#   secret:
+#     databaseUrl: "postgresql+asyncpg://vibops:pass@my-pg-host:5432/vibops"
+#     redisUrl:    "redis://:pass@my-redis-host:6379/0"
 
 # ── Ingress + TLS ─────────────────────────────────────────────
 ingress:

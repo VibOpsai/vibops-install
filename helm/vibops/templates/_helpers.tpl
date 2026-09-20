@@ -50,11 +50,38 @@ imagePullSecrets:
 {{- end }}
 
 {{/* Database URL — utilise le sub-chart PostgreSQL si activé */}}
+{{/* vibops.prodSecret — a value core refuses to start without when
+     APP_ENV=production (see core/app/main.py `_check_security`).
+
+     The chart shipped these empty, or as "change-me-...", with APP_ENV
+     defaulting to production. A `helm install` following the guide therefore
+     produced a core in CrashLoopBackOff on `GITHUB_WEBHOOK_SECRET empty` — the
+     release reported deployed and every other pod reported Ready. The runtime
+     refusal is correct; what was missing was refusing at install time, where
+     the message can still name the value to set.
+
+     Call: {{ include "vibops.prodSecret" (dict "ctx" . "value" .Values.x "message" "...") }} */}}
+{{- define "vibops.prodSecret" -}}
+{{- if eq (dig "env" "APP_ENV" "production" .ctx.Values.core) "production" -}}
+{{- required .message .value -}}
+{{- else -}}
+{{- .value -}}
+{{- end -}}
+{{- end }}
+
 {{- define "vibops.databaseUrl" -}}
 {{- if .Values.postgresql.enabled }}
-{{- printf "postgresql+asyncpg://%s:%s@%s-postgresql:5432/%s" .Values.postgresql.auth.username .Values.postgresql.auth.password .Release.Name .Values.postgresql.auth.database }}
+{{- /* No default. An empty password renders `postgresql+asyncpg://vibops:@host`
+       while the Bitnami subchart generates a random one of its own: the release
+       installs, every pod reports Ready, and core sits in Init:Error forever on
+       `fe_sendauth: no password supplied`. values.yaml said REQUIRED; nothing
+       enforced it. Same guard as redis.auth.password. `dig` so that an upgrade
+       run with --reuse-values, whose values predate this key, fails with this
+       message instead of a nil pointer. */ -}}
+{{- $pw := required "postgresql.auth.password is required — generate one with `openssl rand -hex 24`, or set postgresql.enabled=false and point core.secret.databaseUrl at your own server" (dig "auth" "password" "" .Values.postgresql) }}
+{{- printf "postgresql+asyncpg://%s:%s@%s-postgresql:5432/%s" .Values.postgresql.auth.username $pw .Release.Name .Values.postgresql.auth.database }}
 {{- else }}
-{{- .Values.core.secret.databaseUrl }}
+{{- required "core.secret.databaseUrl is required when postgresql.enabled=false" (dig "secret" "databaseUrl" "" .Values.core) }}
 {{- end }}
 {{- end }}
 
