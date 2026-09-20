@@ -9,6 +9,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.1] — 2026-09-20
+
+### Fixed
+- **Two secrets carried a published default** in `docker-compose.yml`, which is served at
+  vibops.ai and downloaded by `install.sh`: `REDIS_PASSWORD` fell back to `vibops-dev` in five
+  places and `GRAFANA_PASSWORD` to `vibops` in three. An operator who downloaded the compose
+  file and started it without a `.env` — which the installation guide invites — got a Redis and
+  a Grafana admin protected by passwords printed on our own website, with Compose substituting
+  the missing variable in silence. Both are now `${VAR:?message}`: Compose refuses to start and
+  names what is missing. `install.sh` generates both with `openssl rand`, so the documented path
+  was never exposed
+- **The production Helm chart named a registry that has never existed** —
+  `ghcr.io/vibops/{core,agent,console}` instead of `ghcr.io/<owner>/vibops-<component>`. Helm
+  installed the release and the pods sat in ImagePullBackOff. The three images also pinned
+  `latest`, so the chart announced one appVersion and delivered whatever was newest
+- **The installation guide pointed at a Helm repository that does not resolve**
+  (`charts.vibops.io`) and, in another place, at a third spelling of the image owner. The charts
+  ship in the public install repository and in the delivery archive; neither needs an outbound flow
+- **The main-branch job published the install repository to a copy** rather than to
+  `VibOpsai/vibops-install`. The tag workflow had been fixed by overriding an environment
+  variable; the script's default was left pointing elsewhere
+
+### Added
+- `tests/test_no_weak_defaults.py` — a non-empty default on any variable named PASSWORD, SECRET,
+  TOKEN, API_KEY, VAULT_KEY or PRIVATE_KEY fails CI. It found the Grafana default on its first
+  run, in a file that had just been read line by line
+- `tests/test_sdk_api_parity.py` and `tests/test_sdk_field_parity.py` — the SDK is recognised as
+  a sixth interface onto the same data (ADR 0032). Its typed responses carried 3 of 17 budget
+  fields and 4 of 22 job fields; `parse()` discarded the rest in silence
+- `tests/test_docs_coherence.py` — versions, image references, dead hosts, chart versions and
+  stated tool counts, compared against the files that decide them
+- Agent behaviour (ADR 0009 layer 3) runs on every tag, on the model a deployment runs
+- `sync-sdk.yml` — the public SDK mirror is refreshed on every tag; it had been stale since August
+
+---
+
 ## [0.45.0] — 2026-09-19
 
 ### Added
