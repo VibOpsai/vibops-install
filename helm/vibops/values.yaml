@@ -188,6 +188,30 @@ ingress:
   #       - vibops.example.com
 
 # ── PostgreSQL (Bitnami sub-chart) ────────────────────────────────────────────
+# ── Redis (Celery broker) ────────────────────────────────────────────────────
+# Bundled like PostgreSQL. The chart used to ship the database and not the
+# broker, while core.secret.redisUrl said "REQUIRED in production" and defaulted
+# to localhost — so an install following the guide never became healthy, and
+# nothing explained why one stateful dependency was bundled and the other not.
+#
+# The official image rather than a Bitnami subchart: Bitnami pruned its free
+# Docker Hub catalogue, which is exactly what broke PostgreSQL here on
+# 20/09/2026.
+redis:
+  enabled: true
+  auth:
+    password: ""   # REQUIRED — openssl rand -hex 24
+  image:
+    repository: redis
+    tag: "7-alpine"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
 postgresql:
   enabled: true
 
