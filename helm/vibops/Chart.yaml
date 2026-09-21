@@ -2,8 +2,8 @@ apiVersion: v2
 name: vibops
 description: VibOps — Intent-driven MLOps platform
 type: application
-version: 0.45.3
-appVersion: "0.45.3"
+version: 0.45.4
+appVersion: "0.45.4"
 
 dependencies:
   - name: postgresql

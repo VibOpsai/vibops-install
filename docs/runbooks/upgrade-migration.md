@@ -232,36 +232,39 @@ kubectl exec -it deploy/vibops-core -n vibops -- alembic downgrade -1
 
 ## 5. Breaking Changes by Version
 
-### v0.45.3 — the Helm chart now refuses incomplete values
+### v0.45.4 — one copy of the database password
+
+Nothing to do. `helm upgrade` is enough, including from a release installed
+with the broken v0.45.2 chart.
+
+Until v0.45.3 the chart wrote `DATABASE_URL` into its own Secret from
+`postgresql.auth.password`, while the PostgreSQL subchart kept the real
+password in a Secret of its own. Two copies of one credential: left empty, the
+subchart generated a password and core was given none, so the server was
+initialised with a password no values file contained and no upgrade could
+repair it.
+
+Core, the worker, beat and both init containers now read that password from the
+subchart's Secret at start-up, and Kubernetes expands it into the URL. Whatever
+that Secret holds — generated or supplied — is what core connects with.
+
+Verified: the v0.45.2 chart installed as its guide described it (core, worker
+and beat in CrashLoopBackOff), then a plain `helm upgrade` with no PostgreSQL
+password supplied and nothing extracted by hand — 7/7 Running, 0 restarts,
+90 seconds.
+
+`postgresql.auth.password` is now optional. If you do set it, keep passing it
+on every upgrade: the subchart would otherwise rotate the Secret while the
+server keeps the password it was initialised with — the same divergence, from
+the other direction.
+
+### v0.45.3 — the Helm chart refuses incomplete values
 
 `helm upgrade` fails with a named value instead of installing a release that
-cannot run. Eight values are required: `postgresql.auth.password`,
-`redis.auth.password`, and the six under `core.secret` (`secretKey`,
-`jwtSecretKey`, `vaultKey`, `internalApiKey`, `githubWebhookSecret`,
-`grafanaWebhookSecret`). `--reuse-values` from a release that predates them
-fails the same way — supply them on the command line.
-
-**If you installed the v0.45.2 chart, read this.** That chart rendered the
-database URL with an empty password while the PostgreSQL subchart generated a
-random one of its own, so core never connected and the schema was never
-created. Supplying a *new* password on upgrade does not fix it: the database
-was initialised with the generated one, and neither Helm nor the subchart
-rewrites it. Recover the password the subchart generated and pass that:
-
-```bash
-PW=$(kubectl -n vibops get secret vibops-postgresql \
-      -o jsonpath='{.data.password}' | base64 -d)
-
-helm upgrade vibops ./helm/vibops -n vibops --reuse-values \
-  --set postgresql.auth.password="$PW"
-```
-
-Verified on a cluster: 7/7 pods Running, 0 restarts, within six minutes.
-
-Alternatively — and only because a v0.45.2 chart install never reached a
-working core, so it holds no data — uninstall, delete the PVCs, and install
-again with all eight values.
-
+cannot run. Seven values are required: `redis.auth.password` and the six under
+`core.secret` (`secretKey`, `jwtSecretKey`, `vaultKey`, `internalApiKey`,
+`githubWebhookSecret`, `grafanaWebhookSecret`). `--reuse-values` from a release
+that predates them fails the same way — supply them on the command line.
 
 ### v0.15.x
 

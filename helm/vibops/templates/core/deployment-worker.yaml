@@ -52,6 +52,8 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "vibops.fullname" . }}-core
+          env:
+            {{- include "vibops.databaseEnv" . | nindent 12 }}
           command:
             - python
             - -c
@@ -93,6 +95,7 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.core.env.APP_ENV | quote }}
+            {{- include "vibops.databaseEnv" . | nindent 12 }}
             {{- if .Values.core.kubeconfig.secretName }}
             - name: KUBECONFIG
               value: {{ .Values.core.kubeconfig.mountPath }}/config

@@ -9,6 +9,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.4] — 2026-09-21
+
+### Fixed — one copy of the database password
+
+v0.45.3 made the chart refuse to install without a PostgreSQL password, and
+left anyone who had installed the v0.45.2 chart with a manual repair: extract
+the password the subchart had generated, pass it back on upgrade. That is a
+procedure, not a fix — the defect was that the credential existed twice.
+
+The chart wrote `DATABASE_URL` into its own Secret from
+`postgresql.auth.password`; the subchart kept the real password in a Secret of
+its own. Nothing reconciled them.
+
+Core, the worker, beat and both init containers now read that password from the
+subchart's Secret at start-up, and Kubernetes expands `$(POSTGRES_PASSWORD)`
+into the URL. There is one copy, held by the component that owns it.
+`postgresql.auth.password` is optional again — the subchart generates one on
+install and keeps it on upgrade.
+
+Verified on a cluster: the v0.45.2 chart installed as its guide described it
+(core, worker and beat in CrashLoopBackOff), then a plain `helm upgrade` with
+no PostgreSQL password and nothing extracted by hand — 7/7 Running, 0
+restarts, 90 seconds. The manual procedure has been removed from
+`docs/runbooks/upgrade-migration.md`.
+
+`tests/test_helm_unsafe_defaults.py` gains two checks: the chart's own Secret
+carries no `DATABASE_URL` when PostgreSQL is bundled, and every container that
+connects — core, worker, beat, `alembic-migrate`, `wait-for-migrations` —
+takes the password from the same `secretKeyRef`.
+
+---
+
 ## [0.45.3] — 2026-09-20
 
 ### Fixed — Helm chart (`helm/vibops`)

@@ -49,6 +49,7 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.core.env.APP_ENV | quote }}
+            {{- include "vibops.databaseEnv" . | nindent 12 }}
           resources:
             {{- toYaml .Values.alembicInit.resources | nindent 12 }}
           volumeMounts:
@@ -69,6 +70,7 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.core.env.APP_ENV | quote }}
+            {{- include "vibops.databaseEnv" . | nindent 12 }}
             {{- if .Values.core.kubeconfig.secretName }}
             - name: KUBECONFIG
               value: {{ .Values.core.kubeconfig.mountPath }}/config

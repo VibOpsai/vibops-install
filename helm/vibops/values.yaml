@@ -233,7 +233,12 @@ postgresql:
 
   auth:
     username: vibops
-    password: ""   # REQUIRED — set via --set postgresql.auth.password=<strong-password>
+    # Optional. Left empty, the subchart generates one on install and keeps it
+    # on upgrade; core reads it from the subchart's Secret at start-up, so the
+    # two cannot disagree. Set it only if you need to choose the password
+    # yourself — and then keep passing it on every upgrade, or the subchart
+    # will rotate it while the server keeps the old one.
+    password: ""
     database: vibops
   primary:
     resources:

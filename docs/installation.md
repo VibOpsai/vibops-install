@@ -154,7 +154,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.3` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.4` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -361,12 +361,11 @@ core:
     smtpFrom:     "noreply@yourcompany.com"
 
 # ── Database and broker ───────────────────────────────────────
-# Bundled (default): both passwords are REQUIRED. The chart refuses to render
-# without them rather than install a release whose core never connects.
 postgresql:
   enabled: true
   auth:
-    password: ""     # REQUIRED — openssl rand -hex 24
+    password: ""     # optional — generated and kept by the subchart; core
+                     # reads it from that Secret, so nothing can diverge
 redis:
   enabled: true
   auth:
@@ -400,7 +399,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.3 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.4 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above

@@ -49,7 +49,35 @@ imagePullSecrets:
 {{- end }}
 {{- end }}
 
-{{/* Database URL — utilise le sub-chart PostgreSQL si activé */}}
+{{/* vibops.databaseEnv — the database connection, composed in the pod rather
+     than baked into a Secret at render time.
+
+     The chart used to write DATABASE_URL into its own Secret from
+     postgresql.auth.password, while the PostgreSQL subchart kept the real
+     password in a Secret of its own. Two copies of one credential: when the
+     value was left empty the subchart generated a password, core was given an
+     empty one, and nothing reconciled them — the database was unreachable and
+     no upgrade could repair it, because the server had been initialised with a
+     password no values file contained.
+
+     There is now one copy. The pod reads the subchart's Secret at start-up and
+     Kubernetes expands $(POSTGRES_PASSWORD) in the URL, so whatever password
+     that Secret holds — supplied or generated, on install or after an upgrade
+     — is the password core connects with. Divergence is no longer expressible.
+
+     `env` wins over `envFrom`, so this overrides the Secret's DATABASE_URL. */}}
+{{- define "vibops.databaseEnv" -}}
+{{- if .Values.postgresql.enabled }}
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ dig "auth" "existingSecret" "" .Values.postgresql | default (printf "%s-postgresql" .Release.Name) }}
+      key: {{ dig "auth" "secretKeys" "userPasswordKey" "password" .Values.postgresql }}
+- name: DATABASE_URL
+  value: {{ printf "postgresql+asyncpg://%s:$(POSTGRES_PASSWORD)@%s-postgresql:5432/%s" .Values.postgresql.auth.username .Release.Name .Values.postgresql.auth.database | quote }}
+{{- end }}
+{{- end }}
+
 {{/* vibops.prodSecret — a value core refuses to start without when
      APP_ENV=production (see core/app/main.py `_check_security`).
 
@@ -69,20 +97,10 @@ imagePullSecrets:
 {{- end -}}
 {{- end }}
 
+{{/* vibops.databaseUrl — a database the operator runs. The bundled one does
+     not come through here: see vibops.databaseEnv. */}}
 {{- define "vibops.databaseUrl" -}}
-{{- if .Values.postgresql.enabled }}
-{{- /* No default. An empty password renders `postgresql+asyncpg://vibops:@host`
-       while the Bitnami subchart generates a random one of its own: the release
-       installs, every pod reports Ready, and core sits in Init:Error forever on
-       `fe_sendauth: no password supplied`. values.yaml said REQUIRED; nothing
-       enforced it. Same guard as redis.auth.password. `dig` so that an upgrade
-       run with --reuse-values, whose values predate this key, fails with this
-       message instead of a nil pointer. */ -}}
-{{- $pw := required "postgresql.auth.password is required — generate one with `openssl rand -hex 24`, or set postgresql.enabled=false and point core.secret.databaseUrl at your own server" (dig "auth" "password" "" .Values.postgresql) }}
-{{- printf "postgresql+asyncpg://%s:%s@%s-postgresql:5432/%s" .Values.postgresql.auth.username $pw .Release.Name .Values.postgresql.auth.database }}
-{{- else }}
-{{- required "core.secret.databaseUrl is required when postgresql.enabled=false" (dig "secret" "databaseUrl" "" .Values.core) }}
-{{- end }}
+{{- required "core.secret.databaseUrl is required when postgresql.enabled=false" (dig "secret" "databaseUrl" "" .Values.core) -}}
 {{- end }}
 
 {{/* vibops.image — une reference d'image complete pour un composant.
