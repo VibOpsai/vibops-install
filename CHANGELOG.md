@@ -9,6 +9,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.8] — 2026-09-21
+
+### Fixed — `install.sh` installed Docker the way Docker says not to in production
+
+The script ran `curl -fsSL https://get.docker.com | bash` when Docker was
+missing. Docker documents that convenience script as *not for production use* —
+and this script configures Let's Encrypt, calls automatic HTTPS "recommended in
+production", and is the path the demo runs on. It had no business using it.
+
+It now follows Docker's documented production install: their signed apt
+repository, the key placed in `/etc/apt/keyrings` and verified by apt, packages
+from the stable channel. It downloads data, not code to execute. Only Ubuntu and
+Debian, the distributions this script claims to support; anything else stops
+with the link to Docker's instructions rather than guessing.
+
+Verified on a clean `ubuntu:22.04`: Docker Engine 29.8.1 and Compose v5.5.1
+installed from `download.docker.com`, signing key fingerprint
+`9DC858229FC7DD38854AE2D88D81803C0EBFCD88`.
+
+`docs/installation.md` updates the destination it names: `download.docker.com`
+instead of `get.docker.com`, and states that nothing downloaded during an
+install is executed as code except `install.sh` itself — which you can read
+first.
+
+---
+
 ## [0.45.7] — 2026-09-21
 
 ### Changed — the chart runs its own PostgreSQL

@@ -70,14 +70,21 @@ rule can be written once rather than discovered during a maintenance window.
 | `ghcr.io` | the seven VibOps images | all |
 | `docker.io` (Docker Hub) | PostgreSQL, Redis, Caddy, Grafana, Prometheus, the Docker socket proxy | all |
 | `vibops.ai` | `install.sh` and `docker-compose.yml` | one-line install only |
-| `get.docker.com` | installs Docker when absent — a remote script piped into a shell | one-line install only |
+| `download.docker.com` | installs Docker when absent, from Docker's signed apt repository | one-line install only |
 
 Two of those are avoidable and one is not:
 
-- **The Helm and Compose modes never touch `vibops.ai` or `get.docker.com`.** Clone
-  the install repository (or take the release tarball), install Docker or
+- **The Helm and Compose modes never touch `vibops.ai` or Docker's repository.**
+  Clone the install repository (or take the release tarball), install Docker or
   Kubernetes with your own means, and the only destinations left are the two
   registries.
+- **Nothing downloaded is executed as code**, with one exception you choose:
+  `install.sh` itself, which you can download and read before running. Docker
+  arrives as signed packages from Docker's apt repository — the procedure their
+  documentation gives for production — not as the `get.docker.com` convenience
+  script, which Docker states is not for production use. Until v0.45.8 this
+  script used that one; it configures Let's Encrypt and calls itself the
+  production path, so it had no business doing so.
 - **The registries are not avoidable in the general case.** Software has to come
   from somewhere. What an air-gapped site does instead is mirror them — see
   below.
@@ -104,13 +111,13 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.45.7 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.7 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.45.7 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.7 \
-  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.7 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.7 \
-  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.8 \
   docker.io/bitnamilegacy/postgresql:16.4.0-debian-12-r14 \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -125,7 +132,7 @@ Then, for Helm, override the repositories in your values file (`images.core.repo
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
 
-> **On PostgreSQL.** Until v0.45.7 the chart pulled a Bitnami image that existed
+> **On PostgreSQL.** Until v0.45.8 the chart pulled a Bitnami image that existed
 > only under `bitnamilegacy` — a copy that works and receives no updates,
 > security ones included. The chart now runs its own PostgreSQL on the official
 > `postgres:16-alpine`, the same image the Compose deployment has always used:
@@ -226,7 +233,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.7` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.8` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -455,7 +462,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.7 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.8 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
