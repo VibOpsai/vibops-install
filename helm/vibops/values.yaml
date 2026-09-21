@@ -219,7 +219,7 @@ redis:
     password: ""   # generated on install, kept on upgrade — leave it empty
   image:
     repository: redis
-    tag: "7-alpine"
+    tag: "7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
   resources:
     requests:
       cpu: "50m"
@@ -240,7 +240,8 @@ postgresql:
     # Override it for an air-gapped site — docs/installation.md lists every
     # image to mirror.
     repository: postgres
-    tag: "16-alpine"
+    # Pinned by digest: a tag is a moving pointer, a digest is the content.
+    tag: "16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
     pullPolicy: IfNotPresent
 
   auth:

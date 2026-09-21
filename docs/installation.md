@@ -83,7 +83,7 @@ Two of those are avoidable and one is not:
   `SHA256SUMS`, and read before running. Docker
   arrives as signed packages from Docker's apt repository — the procedure their
   documentation gives for production — not as the `get.docker.com` convenience
-  script, which Docker states is not for production use. Until v0.45.9 this
+  script, which Docker states is not for production use. Until v0.45.10 this
   script used that one; it configures Let's Encrypt and calls itself the
   production path, so it had no business doing so.
 - **The registries are not avoidable in the general case.** Software has to come
@@ -105,6 +105,34 @@ Optional integrations add their own destinations when enabled, and only then:
 GitHub or GitLab webhooks, an SMTP server, a Slack or Teams webhook, an OIDC or
 LDAP provider, an OTLP collector.
 
+#### Verifying the images
+
+Every VibOps image is signed at its digest by the release workflow, with no
+private key involved: cosign obtains a short-lived certificate from Sigstore's
+CA by presenting the workflow's OIDC token, signs, and records the signature in
+the public Rekor transparency log. The signature therefore asserts *which
+workflow, in which repository, at which tag* produced that digest — a claim a
+stolen key could not make.
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.10
+```
+
+The identity flags are not optional decoration. Without them you would be
+checking that *someone* signed the image; with them you are checking that *we*
+did, from our repository. Each image also carries a provenance attestation and
+an SBOM — `cosign download sbom <image>` and
+`cosign verify-attestation --type slsaprovenance <image>`.
+
+**Third-party images are pinned by digest** in both the Compose file and the
+chart (`postgres`, `redis`, `caddy`, `grafana`, `prometheus`, the Docker socket
+proxy). A tag is a moving pointer — its publisher can repoint it at different
+content tomorrow, and every install after that pulls something nobody reviewed.
+The digest is the content. Refreshing one is a commit that shows what changed.
+
 #### Air-gapped installation
 
 Mirror both registries into one of your own, then point the deployment at it.
@@ -112,13 +140,13 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.45.9 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.9 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.45.9 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.9 \
-  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.9 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.9 \
-  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.10 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.10 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.45.10 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.10 \
+  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.10 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.10 \
+  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.10 \
   docker.io/bitnamilegacy/postgresql:16.4.0-debian-12-r14 \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -133,7 +161,7 @@ Then, for Helm, override the repositories in your values file (`images.core.repo
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
 
-> **On PostgreSQL.** Until v0.45.9 the chart pulled a Bitnami image that existed
+> **On PostgreSQL.** Until v0.45.10 the chart pulled a Bitnami image that existed
 > only under `bitnamilegacy` — a copy that works and receives no updates,
 > security ones included. The chart now runs its own PostgreSQL on the official
 > `postgres:16-alpine`, the same image the Compose deployment has always used:
@@ -254,7 +282,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.9` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.10` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -483,7 +511,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.9 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.10 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above

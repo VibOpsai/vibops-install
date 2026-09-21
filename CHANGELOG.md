@@ -9,6 +9,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.10] — 2026-09-21
+
+### Added — signed images, and digests instead of tags
+
+Asked whether the images were "secured", the honest answer was no on every
+count: pulled by tag, unsigned, no SBOM, no provenance, and the CVE scan looking
+at the repository rather than at what we publish. Two of those are fixed here.
+
+**Every VibOps image is signed at its digest**, keyless. cosign exchanges the
+workflow's OIDC token for a short-lived Sigstore certificate, signs, throws the
+ephemeral key away, and records the signature in the public Rekor log. No
+private key exists to store, rotate or lose, and the claim is stronger than a
+key's: *this digest was produced by this workflow, in this repository, at this
+tag*. The digest is signed, never the tag — a signature on a moving pointer is
+worth nothing.
+
+Each image now also carries a **provenance attestation** (`mode=max`) and an
+**SBOM**.
+
+**Third-party images are pinned by digest** in the Compose file and the chart:
+postgres, redis, caddy, grafana, prometheus and the Docker socket proxy. A tag
+is a pointer its publisher can move; a digest is the content. Verified on a
+host: the pinned reference pulls, and a wrong digest is refused with `not
+found`.
+
+`docs/installation.md` carries the verification commands, including the identity
+flags — without them `cosign verify` only checks that *somebody* signed.
+
+### Still open, and named so nobody assumes otherwise
+
+The Helm chart itself is not signed and not published to an OCI registry: it
+ships inside the `vibops-install` git repository. The published images are not
+scanned — Trivy looks at the repository filesystem. Neither is addressed here.
+
+---
+
 ## [0.45.9] — 2026-09-21
 
 ### Added — checksums for what we ask you to run as root
