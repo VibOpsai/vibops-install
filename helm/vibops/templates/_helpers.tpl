@@ -132,10 +132,10 @@ imagePullSecrets:
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ tpl (dig "auth" "existingSecret" "" .Values.postgresql | default (printf "%s-postgresql" .Release.Name)) . }}
-      key: {{ dig "auth" "secretKeys" "userPasswordKey" "password" .Values.postgresql }}
+      name: {{ include "vibops.fullname" . }}-db
+      key: POSTGRES_PASSWORD
 - name: DATABASE_URL
-  value: {{ printf "postgresql+asyncpg://%s:$(POSTGRES_PASSWORD)@%s-postgresql:5432/%s" .Values.postgresql.auth.username .Release.Name .Values.postgresql.auth.database | quote }}
+  value: {{ printf "postgresql+asyncpg://%s:$(POSTGRES_PASSWORD)@%s-db:5432/%s" (dig "auth" "username" "vibops" .Values.postgresql) (include "vibops.fullname" .) (dig "auth" "database" "vibops" .Values.postgresql) | quote }}
 {{- end }}
 {{- end }}
 

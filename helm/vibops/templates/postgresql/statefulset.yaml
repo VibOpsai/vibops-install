@@ -1,0 +1,113 @@
+{{- if .Values.postgresql.enabled }}
+{{/*
+  PostgreSQL, on the image the compose deployment has always used.
+
+  The chart depended on the Bitnami subchart until 21/09/2026. Bitnami pruned its
+  free Docker Hub catalogue in August 2026 and the pinned tag started returning
+  "not found" mid-install; the stopgap was to point at `bitnamilegacy`, a copy
+  that works and receives nothing — security updates included. Shipping a product
+  whose database image is frozen is not a position to hold, and paying for the
+  commercial catalogue to run one PostgreSQL is not one either.
+
+  So the chart owns it, as it already owns Redis, on `postgres:16-alpine` — the
+  same image, the same major version and the same maintenance as the compose
+  deployment. One image to follow instead of two, and the CVE scan sees it.
+
+  Set `postgresql.enabled: false` and point `core.secret.databaseUrl` at a managed
+  instance when you have one. That remains the right answer in production.
+*/}}
+{{- /*
+  Every value read through `dig` with a default. An upgrade run with
+  --reuse-values carries the previous release's `postgresql` map — the Bitnami
+  subchart's shape, which has no `persistence` key at this level — and a direct
+  read is a nil pointer that stops the upgrade before any guard can explain it.
+  Fourth time this trap has been paid in this chart, and the first where it hid
+  a message the operator needed to read.
+*/ -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vibops.fullname" . }}-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  serviceName: {{ include "vibops.fullname" . }}-db
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        {{- include "vibops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: database
+    spec:
+      securityContext:
+        # The official image runs as uid 999. fsGroup makes the volume writable
+        # for it without an init container doing a recursive chown.
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: "{{ dig "image" "repository" "postgres" .Values.postgresql }}:{{ dig "image" "tag" "16-alpine" .Values.postgresql }}"
+          imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" .Values.postgresql }}
+          securityContext:
+            runAsUser: 999
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: POSTGRES_USER
+              value: {{ dig "auth" "username" "vibops" .Values.postgresql | quote }}
+            - name: POSTGRES_DB
+              value: {{ dig "auth" "database" "vibops" .Values.postgresql | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops.fullname" . }}-db
+                  key: POSTGRES_PASSWORD
+            # The volume is mounted a level above, so the data directory is a
+            # subdirectory: initdb refuses to run in a mount point that already
+            # holds `lost+found`.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ dig "auth" "username" "vibops" .Values.postgresql | quote }}, "-d", {{ dig "auth" "database" "vibops" .Values.postgresql | quote }}]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ dig "auth" "username" "vibops" .Values.postgresql | quote }}, "-d", {{ dig "auth" "database" "vibops" .Values.postgresql | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml (dig "resources" (dict) .Values.postgresql) | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with dig "persistence" "storageClass" "" .Values.postgresql }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ dig "persistence" "size" "20Gi" .Values.postgresql }}
+{{- end }}

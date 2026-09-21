@@ -231,41 +231,44 @@ redis:
 postgresql:
   enabled: true
 
-  # Bitnami pruned its free Docker Hub catalogue: the tag chart 15.5.x pins by
-  # default — `bitnami/postgresql:16.4.0-debian-12-r14` — returns "not found",
-  # and every pod that waits on the database crashes behind it. Found on
-  # 20/09/2026 by installing this chart on a cluster; `helm template` and
-  # `--dry-run=server` both pass, because neither pulls anything.
-  #
-  # The surviving copy lives under `bitnamilegacy`. It works and it is frozen:
-  # that repository receives no updates, security ones included. This is a
-  # stopgap, not a resting place — see docs/harness.md, Known gaps.
+  # The official image, the same one the compose deployment has always used.
+  # The Bitnami subchart is gone: Bitnami pruned its free Docker Hub catalogue
+  # in August 2026, the pinned tag began returning "not found" mid-install, and
+  # the surviving `bitnamilegacy` copy receives no updates at all — security
+  # ones included. One image to follow instead of two, and the CVE scan sees it.
   image:
-    registry: docker.io
-    repository: bitnamilegacy/postgresql
-    tag: 16.4.0-debian-12-r14
+    # Override it for an air-gapped site — docs/installation.md lists every
+    # image to mirror.
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
 
   auth:
     username: vibops
-    # Nothing to supply. The subchart generates a password on install, stores
-    # it in its own Secret, and reuses that value on every upgrade
-    # (`common.secrets.passwords.manage` reads the live Secret before it
-    # generates). Core reads the same Secret at start-up, so there is one copy
-    # and it belongs to the component that owns the database.
-    #
-    # Setting this is supported and only sensible at install time: changing it
-    # later rewrites the Secret while the server keeps the password it was
-    # initialised with. Rotate deliberately — ALTER ROLE first.
-    password: ""
     database: vibops
-  primary:
-    resources:
-      requests:
-        cpu: "250m"
-        memory: "256Mi"
-      limits:
-        cpu: "1"
-        memory: "512Mi"
+    # Generated on first install and kept for the life of the release. Set it
+    # only to impose your own, and only at install time: the server is
+    # initialised with it, and changing it later would leave the server on the
+    # password it was created with.
+    password: ""
+
+  persistence:
+    size: 20Gi
+    storageClass: ""   # empty = the cluster default
+
+  # Upgrading a release whose data still sits in the Bitnami subchart's volume
+  # is refused, because it would start an empty database and leave the old one
+  # on disk with nobody told. Set this to true once your dump is taken —
+  # docs/runbooks/upgrade-migration.md, section v0.45.7.
+  legacyAcknowledged: false
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
 
 # ── HPA (désactivé par défaut — activer avec values.ha.yaml) ─────────────────
 autoscaling:

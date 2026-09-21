@@ -9,6 +9,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.7] — 2026-09-21
+
+### Changed — the chart runs its own PostgreSQL
+
+Bitnami pruned its free Docker Hub catalogue in August 2026 and the tag the
+subchart pinned began returning `not found` mid-install. The stopgap was to
+point at `bitnamilegacy`, a surviving copy that works and receives nothing —
+security updates included. Shipping a product whose database image is frozen is
+not a position to hold, and paying for the commercial catalogue to run one
+PostgreSQL is not one either.
+
+The chart now owns the database, as it already owned Redis, on
+`postgres:16-alpine` — the same image, major version and maintenance as the
+Compose deployment. The subchart, its vendored `.tgz` and `Chart.lock` are gone:
+the chart has no dependencies left, so packaging it reaches no chart repository
+either.
+
+- A NetworkPolicy of its own. The subchart brought one; dropping it with the
+  subchart would have left 5432 open to every pod in the namespace, and nothing
+  would have reported it. It admits core, the worker and beat, and nothing else.
+- Generated password, kept for the life of the release, pinned once written —
+  the same rule as every other credential since v0.45.5.
+- Every value read through `dig`. An upgrade with `--reuse-values` carries the
+  subchart's values shape, which has no `persistence` key at that level: a
+  direct read was a nil pointer that stopped the upgrade before the guard could
+  explain anything. Fourth time that trap has been paid here.
+
+### Upgrading
+
+**New installations: nothing to do.** **Existing Helm releases: the upgrade
+stops and names the volume it found.** The old StatefulSet has a different data
+layout and a different uid, so upgrading in place would start an empty database,
+core would migrate it, and the release would come up healthy and blank with the
+data still on disk. `docs/runbooks/upgrade-migration.md` §v0.45.7 has the dump
+and restore, and `postgresql.legacyAcknowledged=true` is the acknowledgement the
+procedure uses once the dump is taken.
+
+### Verified on a cluster
+
+Fresh install, zero values: 7/7 Running, `postgres:16-alpine`, health green,
+54 tables created. A release installed from the v0.45.6 chart: upgrade refused,
+volume named, the running release untouched.
+
+### Documented
+
+`docs/installation.md` now lists every destination an installation reaches —
+ghcr.io, Docker Hub, and for the one-line install `vibops.ai` and
+`get.docker.com` — with the air-gap mirror procedure, and states what does not
+happen: no activation call, no licence server, no telemetry, no version check.
+
+---
+
 ## [0.45.6] — 2026-09-21
 
 ### Fixed — an Ingress the chart's own NetworkPolicy blocked

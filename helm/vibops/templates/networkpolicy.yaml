@@ -45,8 +45,8 @@ spec:
           protocol: TCP
 {{- end }}
   egress:
-    # The Bitnami subchart labels its pod `app.kubernetes.io/name: postgresql`
-    # with `component: primary`, not `component: postgresql`. This selector
+    # Kept short because it was wrong twice. The Bitnami subchart labelled its
+    # pod `component: primary`, not `component: postgresql`; this selector
     # matched nothing, so core's egress to its own database was denied and the
     # migration init container died on "Connection timed out" — not "refused",
     # which is the tell. Every pod waiting on core crashed behind it.
@@ -57,7 +57,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: postgresql
+              app.kubernetes.io/component: database
       ports:
         - port: 5432
           protocol: TCP
@@ -177,5 +177,40 @@ spec:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vibops.fullname" . }}-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+spec:
+  # The Bitnami subchart brought its own policy; the chart owns the database
+  # now, so it owns the policy too. Dropping it silently would have left the
+  # database reachable from every pod in the namespace — a regression nothing
+  # would have reported.
+  podSelector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: core
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: worker
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: beat
+      ports:
+        - port: 5432
           protocol: TCP
 {{- end }}

@@ -232,6 +232,60 @@ kubectl exec -it deploy/vibops-core -n vibops -- alembic downgrade -1
 
 ## 5. Breaking Changes by Version
 
+### v0.45.7 — the chart runs its own PostgreSQL
+
+**New installations: nothing to do.** The chart bundles PostgreSQL on
+`postgres:16-alpine`, the image the Compose deployment has always used.
+
+**Existing Helm releases: the upgrade stops and tells you.** Until v0.45.6 the
+database came from the Bitnami subchart, whose StatefulSet is
+`<release>-postgresql` with a volume of its own, a different data layout and a
+different uid. The chart now runs `<release>-vibops-db`. Upgrading in place
+would start an *empty* database, core would migrate it, and the release would
+come up healthy and blank with the old data still on disk and nobody told — so
+the upgrade refuses instead, naming the volume it found.
+
+Two ways out.
+
+**Dump and restore** (a few minutes of downtime):
+
+```bash
+NS=vibops            # your namespace
+REL=vibops           # your release name
+
+# 1. Dump from the Bitnami pod, which is still running
+kubectl -n $NS exec ${REL}-postgresql-0 -- \
+  env PGPASSWORD="$(kubectl -n $NS get secret ${REL}-postgresql \
+      -o jsonpath='{.data.password}' | base64 -d)" \
+  pg_dump -U vibops -d vibops > vibops-backup.sql
+
+# 2. Scale the application down so nothing writes during the move
+kubectl -n $NS scale deploy --replicas=0 -l app.kubernetes.io/name=vibops
+
+# 3. Upgrade: the new StatefulSet starts empty beside the old one
+helm upgrade $REL ./helm/vibops -n $NS --set postgresql.legacyAcknowledged=true
+
+# 4. Restore into it
+kubectl -n $NS exec -i ${REL}-vibops-db-0 -- \
+  env PGPASSWORD="$(kubectl -n $NS get secret ${REL}-vibops-db \
+      -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)" \
+  psql -U vibops -d vibops < vibops-backup.sql
+
+# 5. Bring it back up
+kubectl -n $NS rollout restart deploy -l app.kubernetes.io/name=vibops
+```
+
+The old PVC is left in place. Delete it once you have verified the restore —
+`kubectl -n $NS delete pvc data-${REL}-postgresql-0` — and not before.
+
+**Or keep the database you have**: set `postgresql.enabled=false` and point
+`core.secret.databaseUrl` at it. That is also the right answer if you were
+planning to move to a managed instance anyway.
+
+Verified on a cluster: a release installed from the v0.45.6 chart, upgraded to
+this one, is refused with the volume named; a fresh install on the new chart
+reaches 7/7 with 54 tables created.
+
 ### v0.45.5 — every credential is generated and kept
 
 Nothing to supply, on install or on upgrade, including from a release installed

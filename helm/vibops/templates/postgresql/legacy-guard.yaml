@@ -1,0 +1,26 @@
+{{- if .Values.postgresql.enabled }}
+{{- /*
+  Refuse to upgrade a release whose data is still in the Bitnami subchart's
+  volume.
+
+  Until v0.45.6 the database came from the Bitnami PostgreSQL subchart, whose
+  StatefulSet is `<release>-postgresql` with a PVC `data-<release>-postgresql-0`,
+  a different data layout and a different uid. The chart now runs its own
+  `<fullname>-db` with its own volume. Upgrading in place would therefore start
+  an empty database, core would migrate it, and the release would come up
+  healthy and blank — the data still on disk, and nobody told.
+
+  Silence is the failure mode this repository keeps paying for, so the upgrade
+  stops here instead, and the runbook holds the dump and restore. `lookup`
+  returns nothing under `helm template`, so this costs a render nothing.
+*/ -}}
+{{- $legacy := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "data-%s-postgresql-0" .Release.Name) -}}
+{{- $ours := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "data-%s-db-0" (include "vibops.fullname" .)) -}}
+{{- /* The escape hatch the runbook's procedure uses at step 3: the operator
+       has taken their dump and wants the new, empty StatefulSet to start so
+       they can restore into it. Explicit, one-shot, and named in the message
+       above so nobody has to guess it exists. */ -}}
+{{- if and $legacy (not $ours) (not (dig "legacyAcknowledged" false .Values.postgresql)) }}
+{{- fail (printf "This release still holds its data in the Bitnami subchart's volume (PVC data-%s-postgresql-0). v0.45.7 runs its own PostgreSQL on postgres:16-alpine, with its own volume, so upgrading in place would start an EMPTY database and leave the old one untouched on disk. Dump and restore first — docs/runbooks/upgrade-migration.md, section v0.45.7 — or set postgresql.enabled=false and point core.secret.databaseUrl at the database you want to keep. Once your dump is taken, --set postgresql.legacyAcknowledged=true lets the upgrade proceed with an empty volume." .Release.Name) }}
+{{- end }}
+{{- end }}

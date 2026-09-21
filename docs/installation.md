@@ -104,13 +104,13 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.45.6 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.6 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.45.6 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.6 \
-  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.6 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.6 \
-  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.7 \
+  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.7 \
   docker.io/bitnamilegacy/postgresql:16.4.0-debian-12-r14 \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -125,10 +125,11 @@ Then, for Helm, override the repositories in your values file (`images.core.repo
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
 
-> **The PostgreSQL line above deserves a note.** Bitnami pruned its free Docker
-> Hub catalogue in August 2026, and the tag the chart pins now exists only under
-> `bitnamilegacy` — a copy that works and receives no updates, security ones
-> included. It is a stopgap. Tracked in `docs/harness.md` under known gaps.
+> **On PostgreSQL.** Until v0.45.7 the chart pulled a Bitnami image that existed
+> only under `bitnamilegacy` — a copy that works and receives no updates,
+> security ones included. The chart now runs its own PostgreSQL on the official
+> `postgres:16-alpine`, the same image the Compose deployment has always used:
+> one image to follow instead of two, and the CVE scan sees it.
 
 ### Network requirement for gateway connectivity
 
@@ -225,7 +226,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.6` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.7` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -454,7 +455,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.6 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.7 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
