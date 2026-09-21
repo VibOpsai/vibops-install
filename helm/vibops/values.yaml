@@ -23,18 +23,24 @@ imageCredentials:
 # tag vide = la version applicative du chart (appVersion), comme
 # charts/vibops-connect. Poser "latest" ici ferait ignorer appVersion et
 # livrerait une version differente de celle que le chart annonce.
+# Set `digest: sha256:…` on any of these and it wins over the tag. The chart
+# published with each release carries digests, resolved from the registry after
+# the images exist; this file keeps tags so a local build still runs.
 images:
   core:
     repository: ghcr.io/davidmacamara-boop/vibops-core
     tag: ""
+    digest: "sha256:29fde66d0dfc7ee26b4882fe5c3f7c2ee5905e0ae44f6f1e92091f7f8e394a55"
     pullPolicy: IfNotPresent
   agent:
     repository: ghcr.io/davidmacamara-boop/vibops-agent
     tag: ""
+    digest: "sha256:577886a4a3e1b8eb26b9421aa575c9a5bd92be2ddab73b874811f862260b0941"
     pullPolicy: IfNotPresent
   console:
     repository: ghcr.io/davidmacamara-boop/vibops-console
     tag: ""
+    digest: "sha256:c6fc106546c5fd508e85349c6935b2df128af62ad21f7f24c557c5c1081f10f6"
     pullPolicy: IfNotPresent
 
 # ── Namespace ─────────────────────────────────────────────────────────────────

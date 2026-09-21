@@ -83,7 +83,7 @@ Two of those are avoidable and one is not:
   `SHA256SUMS`, and read before running. Docker
   arrives as signed packages from Docker's apt repository — the procedure their
   documentation gives for production — not as the `get.docker.com` convenience
-  script, which Docker states is not for production use. Until v0.45.10 this
+  script, which Docker states is not for production use. Until v0.45.11 this
   script used that one; it configures Let's Encrypt and calls itself the
   production path, so it had no business doing so.
 - **The registries are not avoidable in the general case.** Software has to come
@@ -118,7 +118,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.45.10
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.11
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -126,6 +126,28 @@ checking that *someone* signed the image; with them you are checking that *we*
 did, from our repository. Each image also carries a provenance attestation and
 an SBOM — `cosign download sbom <image>` and
 `cosign verify-attestation --type slsaprovenance <image>`.
+
+**Our own images are pinned too, in what we distribute.** The Compose file
+served at vibops.ai and the chart shipped in `vibops-install` carry digests,
+resolved from the registry once the images exist; the repository itself keeps
+tags so a local build still runs. A pinned Compose file belongs to one release:
+`install.sh --version vX.Y.Z` therefore takes that release's own file from the
+install repository, rather than swapping a tag under a digest that would ignore
+it.
+
+**Enforcing the signature, rather than hoping someone checks it.** A
+verification an operator has to remember is a verification that does not happen,
+and Kubernetes checks nothing by itself. `helm/vibops/policies/kyverno-verify-images.yaml`
+is a Kyverno policy that refuses any `vibops-*` image without a signature issued
+to our release workflow, and rewrites the reference to the verified digest so
+the pod runs what was checked. It is not installed by the chart — Kyverno is a
+cluster-wide decision — and it ships in `Audit` mode: see what would be refused
+first, then switch to `Enforce`. Going straight to Enforce on a live cluster is
+how a policy gets deleted during an incident.
+
+```bash
+kubectl apply -f helm/vibops/policies/kyverno-verify-images.yaml
+```
 
 **Third-party images are pinned by digest** in both the Compose file and the
 chart (`postgres`, `redis`, `caddy`, `grafana`, `prometheus`, the Docker socket
@@ -140,14 +162,13 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.45.10 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.10 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.45.10 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.10 \
-  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.10 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.10 \
-  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.10 \
-  docker.io/bitnamilegacy/postgresql:16.4.0-debian-12-r14 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.11 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.11 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.45.11 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.11 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.11 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.45.11 \
+  docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
   docker.io/grafana/grafana:11.6.0 \
@@ -161,7 +182,7 @@ Then, for Helm, override the repositories in your values file (`images.core.repo
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
 
-> **On PostgreSQL.** Until v0.45.10 the chart pulled a Bitnami image that existed
+> **On PostgreSQL.** Until v0.45.11 the chart pulled a Bitnami image that existed
 > only under `bitnamilegacy` — a copy that works and receives no updates,
 > security ones included. The chart now runs its own PostgreSQL on the official
 > `postgres:16-alpine`, the same image the Compose deployment has always used:
@@ -282,7 +303,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.10` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.11` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -511,7 +532,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.10 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.11 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above

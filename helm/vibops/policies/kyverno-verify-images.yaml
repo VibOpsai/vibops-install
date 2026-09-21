@@ -1,0 +1,63 @@
+# Refuse to run a VibOps image that we did not sign.
+#
+# Every image is signed at its digest by the release workflow, and the
+# installation guide gives the `cosign verify` command — but a verification an
+# operator has to remember is a verification that does not happen. This is the
+# same check, enforced by the cluster on every pod, including the ones created
+# at three in the morning by an autoscaler.
+#
+# It is not installed by the chart: it needs Kyverno, which is a cluster-wide
+# decision that belongs to whoever runs the cluster, not to an application
+# chart. Apply it yourself:
+#
+#   kubectl apply -f helm/vibops/policies/kyverno-verify-images.yaml
+#
+# Start with `validationFailureAction: Audit` (below) to see what would be
+# refused, then switch to `Enforce`. Going straight to Enforce on a running
+# cluster is how a policy gets deleted in a hurry during an incident.
+#
+# What it verifies is not "somebody signed this" but "this was built by the
+# VibOps release workflow, in the VibOps repository, at a tag" — the identity
+# in the certificate. Without `subject` and `issuer`, anyone with a Sigstore
+# account satisfies the rule.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: vibops-verify-images
+  annotations:
+    policies.kyverno.io/title: Verify VibOps image signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Every ghcr.io/davidmacamara-boop/vibops-* image must carry a keyless
+      cosign signature issued to the VibOps release workflow. Unsigned images,
+      images signed by anyone else, and images whose digest does not match the
+      signature are refused.
+spec:
+  validationFailureAction: Audit   # switch to Enforce once the audit is clean
+  background: false                # signature checks need the registry
+  webhookTimeoutSeconds: 30
+  failurePolicy: Fail              # a broken verifier must not become an open door
+  rules:
+    - name: verify-vibops-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/davidmacamara-boop/vibops-*"
+          # Kyverno rewrites the reference to the digest it verified, so the pod
+          # runs exactly what was checked — not whatever the tag points at by
+          # the time the kubelet pulls.
+          mutateDigest: true
+          required: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/davidmacamara-boop/vibops/.github/workflows/release-images.yml@refs/tags/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev

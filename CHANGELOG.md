@@ -9,6 +9,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.11] — 2026-09-21
+
+### Added — the three gaps named in v0.45.10 are closed
+
+**Our own images are pinned by digest in what we distribute.** They were the
+last artefacts still referenced by a tag, which made them the least protected in
+the chain: a tag is a pointer, and whoever can write to the registry can move
+it. The digests exist only after the push, so they are resolved at publish time
+and written into the copies that leave — the repository keeps tags so a local
+build still runs. A pinned Compose file belongs to one release, so
+`install.sh --version vX.Y.Z` now takes that release's own file from the install
+repository; keeping one file and swapping a tag would have looked like it worked
+while Docker resolved the digest and ignored the tag.
+
+**The published images are scanned**, by digest, after the push. CI already ran
+`trivy fs` over the source tree, which sees nothing of the base image: a CVE in
+the Python or Debian layer we ship appeared in neither pip-audit nor a
+filesystem scan. CRITICAL fails the release; HIGH is reported and does not,
+because a gate that blocks every release on an unfixable base-image HIGH is a
+gate somebody disables within a month.
+
+**An admission policy enforces the signature** —
+`helm/vibops/policies/kyverno-verify-images.yaml`. Verification that an operator
+has to remember does not happen, and Kubernetes checks nothing by itself. The
+policy refuses any `vibops-*` image without a signature issued to our release
+workflow, and rewrites the reference to the verified digest so the pod runs what
+was checked. Not installed by the chart — Kyverno is a cluster-wide decision —
+and shipped in `Audit` mode.
+
+### Fixed
+
+- **`vibops-beat` and `vibops-gateway` are private, and used by nothing.** The
+  mirror list in the installation guide named them, so an air-gapped customer
+  following it hit a 403 on two images they did not need. The list now names
+  the six that are actually pulled. The two images are still built by the
+  release workflow and still referenced by nothing — worth removing, not done
+  here.
+- **The mirror list still said `bitnamilegacy`.** The v0.45.7 edit that replaced
+  it did not match, and I had not asserted the replacement — the kind of silent
+  no-op this repository has a test for everywhere else.
+
+---
+
 ## [0.45.10] — 2026-09-21
 
 ### Added — signed images, and digests instead of tags

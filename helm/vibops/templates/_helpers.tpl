@@ -178,6 +178,15 @@ imagePullSecrets:
      charts/vibops-connect, ou le meme defaut avait ete corrige le 18/09. */}}
 {{- define "vibops.image" -}}
 {{- $img := index .ctx.Values.images .component -}}
+{{- $digest := dig "digest" "" $img -}}
+{{- if $digest -}}
+{{- /* A digest is the content; a tag is a pointer its owner can move — ours
+       included. The published chart carries digests, written at release time
+       once the images exist; the repository keeps tags so that a local build
+       still runs. */ -}}
+{{- printf "%s@%s" $img.repository $digest -}}
+{{- else -}}
 {{- $tag := $img.tag | default (printf "v%s" .ctx.Chart.AppVersion) -}}
 {{- printf "%s:%s" $img.repository $tag -}}
+{{- end -}}
 {{- end -}}
