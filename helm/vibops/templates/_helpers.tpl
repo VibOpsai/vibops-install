@@ -66,12 +66,73 @@ imagePullSecrets:
      — is the password core connects with. Divergence is no longer expressible.
 
      `env` wins over `envFrom`, so this overrides the Secret's DATABASE_URL. */}}
+{{/* vibops.preserved — a secret the chart generates once and then never
+     changes on its own.
+
+     VibOps exists so that operating infrastructure needs no human typing
+     values into a terminal. A chart that demands eight passwords before it
+     will install contradicts that, and every one of them typed by hand is a
+     value that can be lost, weakened, or forgotten on the next upgrade.
+
+     So: if the value is already live in the cluster, it is used. Otherwise the
+     operator's value if they supplied one. Otherwise a fresh random one. The
+     live value comes first for anything whose change breaks stored state — a
+     database initialised with a password, a vault that encrypts with a key, an
+     audit chain signed with one (`pinned`); for the rest the operator's value
+     wins, so a deliberate rotation is still a `--set` away.
+
+     `legacySecret` lets a value be adopted from wherever it used to live, so
+     an upgrade inherits the running credential instead of generating a new one
+     the server has never heard of.
+
+     `lookup` returns nothing under `helm template` and `--dry-run`: renders
+     without a cluster show a fresh random value, and nothing is applied. */}}
+{{- define "vibops.preserved" -}}
+{{- $ns := .ctx.Release.Namespace -}}
+{{- $live := "" -}}
+{{- $s := lookup "v1" "Secret" $ns .secret -}}
+{{- if $s -}}{{- $live = (index $s.data .key | default "" | b64dec) -}}{{- end -}}
+{{- /* A placeholder is not a value worth keeping. Releases up to v0.45.2
+       shipped `change-me-in-production` and friends; preserving them faithfully
+       is how an upgraded release reached core with the exact string core
+       refuses to start on — verified on a cluster, 21/09/2026. */ -}}
+{{- if hasPrefix "change-me" $live -}}{{- $live = "" -}}{{- end -}}
+{{- $legacy := "" -}}
+{{- if and (not $live) .legacySecret -}}
+  {{- $l := lookup "v1" "Secret" $ns .legacySecret -}}
+  {{- if $l -}}{{- $legacy = (index $l.data (.legacyKey | default .key) | default "" | b64dec) -}}{{- end -}}
+{{- end -}}
+{{- if hasPrefix "change-me" $legacy -}}{{- $legacy = "" -}}{{- end -}}
+{{- if and .value (not .pinned) -}}{{- .value -}}
+{{- else if $live -}}{{- $live -}}
+{{- else if $legacy -}}{{- $legacy -}}
+{{- else if .value -}}{{- .value -}}
+{{- else -}}{{- .generate -}}
+{{- end -}}
+{{- end }}
+
+{{/* vibops.redisEnv — the broker connection, composed in the pod from the
+     Secret that owns the password. Same reason as vibops.databaseEnv: the URL
+     used to be assembled at render time with the password inlined, which is a
+     second copy of a credential. */}}
+{{- define "vibops.redisEnv" -}}
+{{- if .Values.redis.enabled }}
+- name: REDIS_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "vibops.fullname" . }}-redis
+      key: REDIS_PASSWORD
+- name: REDIS_URL
+  value: {{ printf "redis://:$(REDIS_PASSWORD)@%s-redis:6379/0" (include "vibops.fullname" .) | quote }}
+{{- end }}
+{{- end }}
+
 {{- define "vibops.databaseEnv" -}}
 {{- if .Values.postgresql.enabled }}
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ dig "auth" "existingSecret" "" .Values.postgresql | default (printf "%s-postgresql" .Release.Name) }}
+      name: {{ tpl (dig "auth" "existingSecret" "" .Values.postgresql | default (printf "%s-postgresql" .Release.Name)) . }}
       key: {{ dig "auth" "secretKeys" "userPasswordKey" "password" .Values.postgresql }}
 - name: DATABASE_URL
   value: {{ printf "postgresql+asyncpg://%s:$(POSTGRES_PASSWORD)@%s-postgresql:5432/%s" .Values.postgresql.auth.username .Release.Name .Values.postgresql.auth.database | quote }}

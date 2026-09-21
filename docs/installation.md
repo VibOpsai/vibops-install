@@ -154,7 +154,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.4` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.5` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -321,7 +321,10 @@ Wherever the steps below reference a chart, use its path in that tree.
 
 #### Step 2 — Prepare your values file
 
-Create `my-values.yaml` (never commit this file — store it in your secrets manager):
+`helm install vibops ./helm/vibops -n vibops --create-namespace` needs no values
+file at all: every credential is generated on install and kept across upgrades.
+A values file is for what only you can provide — your LLM key, your ingress host,
+your SMTP server (never commit it; store it in your secrets manager):
 
 ```yaml
 # ── LLM provider ──────────────────────────────────────────────
@@ -330,23 +333,12 @@ agent:
     llmApiKey: "sk-ant-..."            # REQUIRED (or configure on-prem LLM below)
 
 # ── Security ──────────────────────────────────────────────────
-# All six below are REQUIRED when APP_ENV=production: core refuses to start
-# without them rather than accept an unauthenticated webhook or an unencrypted
-# vault. Installing with only the first two produces a CrashLoopBackOff and
-# every pod that waits on core behind it — verified on a cluster, 20/09/2026.
+# Nothing to fill in. The chart generates every secret core needs on first
+# install — signing keys, the vault key, the internal API key, both webhook
+# secrets, the database and broker passwords — and keeps them for the life of
+# the release. Set one of them only to impose your own value.
 core:
   secret:
-    secretKey:        "a-random-32-char-string"   # REQUIRED — change in prod
-    jwtSecretKey:     "a-random-32-char-string"   # REQUIRED — shared with agent
-    vaultKey:         ""                          # REQUIRED — Fernet key, see below
-    internalApiKey:   ""                          # REQUIRED — openssl rand -hex 32
-    githubWebhookSecret:  ""                      # REQUIRED — openssl rand -hex 32
-    grafanaWebhookSecret: ""                      # REQUIRED — openssl rand -hex 32
-
-    # Leave empty to use the Redis the chart bundles (set redis.auth.password
-    # below). Set it only to point Celery at a broker you run yourself, and
-    # then set redis.enabled=false.
-    redisUrl: ""
     authUsername:     "admin"
     authPasswordHash: ""               # generate below; empty = auth disabled
 
@@ -361,16 +353,8 @@ core:
     smtpFrom:     "noreply@yourcompany.com"
 
 # ── Database and broker ───────────────────────────────────────
-postgresql:
-  enabled: true
-  auth:
-    password: ""     # optional — generated and kept by the subchart; core
-                     # reads it from that Secret, so nothing can diverge
-redis:
-  enabled: true
-  auth:
-    password: ""     # REQUIRED — openssl rand -hex 24
-
+# Bundled by default, with generated passwords. Nothing to supply.
+#
 # Managed instead (RDS, CloudSQL, AlloyDB, ElastiCache…): disable the bundled
 # ones and give core the two URLs. They belong under core.secret, not core.env
 # — core.env holds no connection string, and a URL placed there is read by
@@ -399,7 +383,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.4 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.5 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above

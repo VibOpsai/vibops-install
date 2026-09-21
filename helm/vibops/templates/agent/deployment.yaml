@@ -38,6 +38,14 @@ spec:
           env:
             - name: TRAINING_DATA_DIR
               value: /app/data/training
+            # The agent validates tokens core signs. It reads core's Secret
+            # rather than carrying its own copy: two independent defaults once
+            # agreed by accident, and the first deliberate value broke the pair.
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops.fullname" . }}-core
+                  key: JWT_SECRET_KEY
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
           volumeMounts:

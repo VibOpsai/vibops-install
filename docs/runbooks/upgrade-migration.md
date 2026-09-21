@@ -232,39 +232,35 @@ kubectl exec -it deploy/vibops-core -n vibops -- alembic downgrade -1
 
 ## 5. Breaking Changes by Version
 
-### v0.45.4 — one copy of the database password
+### v0.45.5 — every credential is generated and kept
 
-Nothing to do. `helm upgrade` is enough, including from a release installed
-with the broken v0.45.2 chart.
+Nothing to supply, on install or on upgrade, including from a release installed
+with the broken v0.45.2 chart. `helm upgrade` is the whole procedure.
 
-Until v0.45.3 the chart wrote `DATABASE_URL` into its own Secret from
-`postgresql.auth.password`, while the PostgreSQL subchart kept the real
-password in a Secret of its own. Two copies of one credential: left empty, the
-subchart generated a password and core was given none, so the server was
-initialised with a password no values file contained and no upgrade could
-repair it.
+The chart generates each secret on first install — signing keys, the vault key,
+the internal API key, both webhook secrets, the Redis password — and reuses the
+live value on every later render. The database password belongs to the
+PostgreSQL subchart, which does the same; core, the worker, beat and both init
+containers read it from that Secret instead of holding a copy.
 
-Core, the worker, beat and both init containers now read that password from the
-subchart's Secret at start-up, and Kubernetes expands it into the URL. Whatever
-that Secret holds — generated or supplied — is what core connects with.
+Placeholders are not preserved. A release installed before v0.45.3 holds
+`change-me-in-production` in its Secret; the chart treats those as absent and
+generates real values, because core refuses to start on exactly that string.
 
-Verified: the v0.45.2 chart installed as its guide described it (core, worker
-and beat in CrashLoopBackOff), then a plain `helm upgrade` with no PostgreSQL
-password supplied and nothing extracted by hand — 7/7 Running, 0 restarts,
-90 seconds.
+Two secrets are pinned once written, since changing them breaks what they
+protect: `core.secret.vaultKey` (decrypts stored secrets) and
+`core.secret.secretKey` (signs the audit chain; a new key does not re-sign what
+is already written). Supplying a different value for either is ignored on an
+existing release — rotate deliberately, after re-encrypting.
 
-`postgresql.auth.password` is now optional. If you do set it, keep passing it
-on every upgrade: the subchart would otherwise rotate the Secret while the
-server keeps the password it was initialised with — the same divergence, from
-the other direction.
+Verified on a cluster, all three from scratch:
 
-### v0.45.3 — the Helm chart refuses incomplete values
-
-`helm upgrade` fails with a named value instead of installing a release that
-cannot run. Seven values are required: `redis.auth.password` and the six under
-`core.secret` (`secretKey`, `jwtSecretKey`, `vaultKey`, `internalApiKey`,
-`githubWebhookSecret`, `grafanaWebhookSecret`). `--reuse-values` from a release
-that predates them fails the same way — supply them on the command line.
+| Scenario | Result |
+|---|---|
+| `helm install` with no values at all | 7/7 Running, 150 s |
+| Two upgrades, still no values | every credential unchanged, no pod restarted |
+| Install with a chosen PostgreSQL password, upgrade without repeating it | password kept |
+| The broken v0.45.2 chart, then `helm upgrade` with no values | 7/7 Running, 90 s |
 
 ### v0.15.x
 

@@ -94,5 +94,5 @@ stringData:
   # No default. An empty password means `--requirepass ` with no argument, which
   # is no authentication at all — worse than the weak default removed from the
   # compose file on 20/09/2026.
-  REDIS_PASSWORD: {{ required "redis.auth.password is required — generate one with `openssl rand -hex 24`, or set redis.enabled=false and point core.secret.redisUrl at your own broker" (dig "auth" "password" "" .Values.redis) | quote }}
+  REDIS_PASSWORD: {{ include "vibops.preserved" (dict "ctx" . "secret" (printf "%s-redis" (include "vibops.fullname" .)) "key" "REDIS_PASSWORD" "value" (dig "auth" "password" "" .Values.redis) "generate" (randAlphaNum 32)) | quote }}
 {{- end }}

@@ -9,6 +9,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.5] — 2026-09-21
+
+### Changed — an install needs nothing typed by a human
+
+VibOps exists so that running infrastructure does not mean a person entering
+values into a terminal. The chart contradicted that: v0.45.3 made it refuse to
+install without eight secrets, which is safer than the placeholders it replaced
+and still a form to fill in — eight values to generate, store, and remember on
+every upgrade.
+
+The chart now generates each of them on first install and keeps them for the
+life of the release: signing keys, the vault key, the internal API key, both
+webhook secrets, the Redis password. The database password belongs to the
+PostgreSQL subchart, which already preserves it; core, the worker, beat and
+both init containers read it from that Secret. The Redis URL is composed in the
+pod the same way, and the agent reads core's signing key rather than holding a
+copy. No credential is written in two places.
+
+`helm install vibops ./helm/vibops -n vibops --create-namespace` — no values,
+no flags — is now the supported path. The only value only you can provide is
+the LLM API key.
+
+### Fixed
+
+- **Placeholders are no longer preserved.** Keeping a release's live secrets
+  across upgrades, applied to a release installed before v0.45.3, faithfully
+  preserved `change-me-in-production` — the exact string core refuses to start
+  on. Found by replaying a real upgrade; `helm template` cannot see it, since
+  `lookup` returns nothing without a cluster.
+- **The v0.45.4 warning about password rotation was wrong.** The subchart's
+  `common.secrets.passwords.manage` reads the live Secret before it generates,
+  so a password supplied once is not rotated by later upgrades that omit it.
+  Verified, and the warning is gone from the runbook.
+
+### Verified on a cluster
+
+| Scenario | Result |
+|---|---|
+| `helm install` with no values at all | 7/7 Running, 150 s |
+| Two upgrades, still no values | every credential unchanged, no pod restarted |
+| Chosen PostgreSQL password, upgrade without repeating it | password kept |
+| The broken v0.45.2 chart, then `helm upgrade` with no values | 7/7 Running, 90 s |
+
+`tests/test_helm_unsafe_defaults.py` now renders the chart with no values and
+pins what comes out — every secret present, strong, distinct, different on two
+installs, a usable Fernet key, and each credential read from the one Secret
+that owns it.
+
+---
+
 ## [0.45.4] — 2026-09-21
 
 ### Fixed — one copy of the database password
