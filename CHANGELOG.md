@@ -9,6 +9,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.6] — 2026-09-21
+
+### Fixed — an Ingress the chart's own NetworkPolicy blocked
+
+First test of the chart on a three-node cluster with a real Ingress controller.
+`ingress.enabled=true` publishes three paths — `/` to the console, `/api/v1` to
+core, `/api/v1/chat` to the agent. The core policy admitted the agent and the
+console; the agent policy admitted the console. A controller runs in its own
+namespace and is neither, so two of the three paths timed out while
+`kubectl get ingress` showed an address and `helm install` reported deployed.
+Measured: `/` 200, the other two no response at all.
+
+Both policies now admit the controller's namespace when ingress is enabled,
+matched on `kubernetes.io/metadata.name`, which Kubernetes sets by itself. The
+namespace is `ingress.controllerNamespace`, default `ingress-nginx`.
+
+The first version of that fix read the new value directly, and an upgrade run
+with `--reuse-values` — which carries the release's old `ingress` map — rendered
+`kubernetes.io/metadata.name: ""`, a selector matching no namespace. The upgrade
+reported deployed and the routes still timed out. It reads through `dig` with a
+default now. Third time that trap has been paid in this chart.
+
+After the fix, on the same cluster: `/` 200, `/api/v1/health` 200 with a live
+body, `/api/v1/chat` 405 — the agent rejecting a GET, which is the route
+arriving.
+
+### Verified on three nodes
+
+Autoscaling, pod disruption budgets and the Grafana dashboard ConfigMap all
+render and behave: HPAs report real CPU and memory figures against
+metrics-server, the dashboard ConfigMap carries its key, and `serviceMonitor`
+is refused with a clear message when the Prometheus CRD is absent.
+
+### Documented rather than changed
+
+- `podDisruptionBudget.enabled=true` with one replica allows zero disruptions,
+  so `kubectl drain` blocks on that node. Arithmetic, surprising at the wrong
+  hour, now written in values.yaml.
+- Local-path storage pins PostgreSQL to its node: draining it leaves the
+  StatefulSet Pending and core in CrashLoopBackOff until the node returns.
+
+### Observed, not reproduced
+
+After that drain, the Celery worker stayed `1/1 Running` with zero restarts,
+stopped answering `inspect ping`, and core's health read
+`worker: no workers responding` until the deployment was restarted. Deleting
+the Redis pod in place, and forcing Redis onto another node, both failed to
+reproduce it — the worker kept executing tasks and answered. Recorded in
+`docs/harness.md` under known gaps rather than claimed as a defect.
+
+---
+
 ## [0.45.5] — 2026-09-21
 
 ### Changed — an install needs nothing typed by a human

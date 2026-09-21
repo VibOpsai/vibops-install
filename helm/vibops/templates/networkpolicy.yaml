@@ -23,6 +23,27 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: console
+{{- if .Values.ingress.enabled }}
+    # The Ingress publishes this service, and an Ingress controller lives in its
+    # own namespace: no podSelector above admits it. Enabling `ingress.enabled`
+    # without this produces an Ingress with an address whose routes time out —
+    # `/` reached the console only because the console policy carries no `from`
+    # clause at all. Found on 21/09/2026 on a three-node cluster; `helm
+    # template` cannot see it, and neither can a single-node install with no
+    # controller.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # `dig`, not a direct read: an upgrade run with --reuse-values
+              # carries the old ingress map, which has no controllerNamespace,
+              # and a direct read renders an empty name — a selector that
+              # matches nothing, which is the same silent failure this rule
+              # exists to remove. Verified on a cluster, 21/09/2026.
+              kubernetes.io/metadata.name: {{ dig "controllerNamespace" "ingress-nginx" .Values.ingress }}
+      ports:
+        - port: {{ .Values.core.service.port }}
+          protocol: TCP
+{{- end }}
   egress:
     # The Bitnami subchart labels its pod `app.kubernetes.io/name: postgresql`
     # with `component: primary`, not `component: postgresql`. This selector
@@ -72,6 +93,27 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: console
+{{- if .Values.ingress.enabled }}
+    # The Ingress publishes this service, and an Ingress controller lives in its
+    # own namespace: no podSelector above admits it. Enabling `ingress.enabled`
+    # without this produces an Ingress with an address whose routes time out —
+    # `/` reached the console only because the console policy carries no `from`
+    # clause at all. Found on 21/09/2026 on a three-node cluster; `helm
+    # template` cannot see it, and neither can a single-node install with no
+    # controller.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # `dig`, not a direct read: an upgrade run with --reuse-values
+              # carries the old ingress map, which has no controllerNamespace,
+              # and a direct read renders an empty name — a selector that
+              # matches nothing, which is the same silent failure this rule
+              # exists to remove. Verified on a cluster, 21/09/2026.
+              kubernetes.io/metadata.name: {{ dig "controllerNamespace" "ingress-nginx" .Values.ingress }}
+      ports:
+        - port: {{ .Values.agent.service.port }}
+          protocol: TCP
+{{- end }}
   egress:
     - to:
         - podSelector:

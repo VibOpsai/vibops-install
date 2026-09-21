@@ -189,6 +189,12 @@ console:
 ingress:
   enabled: false
   className: "nginx"
+  # Where the Ingress controller runs. The NetworkPolicies admit only the pods
+  # that need each service, and a controller in another namespace is admitted by
+  # none of them — so enabling ingress without naming its namespace publishes
+  # routes that time out. Matched on `kubernetes.io/metadata.name`, which
+  # Kubernetes sets on every namespace by itself.
+  controllerNamespace: ingress-nginx
   annotations: {}
   host: vibops.example.com
   tls: []
@@ -275,6 +281,12 @@ autoscaling:
     targetCPUUtilizationPercentage: 60
 
 # ── PodDisruptionBudget (désactivé par défaut) ────────────────────────────────
+# Only useful once something runs more than one replica. With replicas=1 and
+# minAvailable=1 the budget allows zero disruptions, so `kubectl drain` on the
+# node holding that pod blocks until its timeout and the node never drains —
+# measured on a three-node cluster on 21/09/2026, where core and console both
+# refused eviction for the full 100 s. Enable it together with autoscaling, or
+# raise the replica counts first.
 podDisruptionBudget:
   enabled: false
   core:
