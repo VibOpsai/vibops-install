@@ -9,6 +9,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.45.9] — 2026-09-21
+
+### Added — checksums for what we ask you to run as root
+
+`curl -fsSL https://vibops.ai/install.sh | bash` was the documented way in, and
+nothing let an operator check what they were about to execute. The script is
+ours, on our domain, served by GitHub Pages — the one link in the install chain
+we are responsible for, and the only one with no verification.
+
+Each release now publishes `SHA256SUMS` beside `install.sh` and
+`docker-compose.yml`, with `SHA256SUMS.version` naming the release. The guide
+leads with the verified form and shows it gating the run:
+
+```bash
+curl -fsSLO https://vibops.ai/install.sh
+curl -fsSL  https://vibops.ai/SHA256SUMS | sha256sum --ignore-missing -c - && bash install.sh
+```
+
+The file carries the two checksum lines and nothing else. A first version
+included a comment header, and `sha256sum -c` warned `improperly formatted` on
+every one of those lines — a verification step that prints warnings when it
+passes is a verification step people learn to ignore.
+
+Tested both ways: matching checksums report OK, a single appended line reports
+`install.sh: FAILED` and exits non-zero.
+
+---
+
 ## [0.45.8] — 2026-09-21
 
 ### Fixed — `install.sh` installed Docker the way Docker says not to in production

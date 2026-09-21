@@ -79,10 +79,11 @@ Two of those are avoidable and one is not:
   Kubernetes with your own means, and the only destinations left are the two
   registries.
 - **Nothing downloaded is executed as code**, with one exception you choose:
-  `install.sh` itself, which you can download and read before running. Docker
+  `install.sh` itself, which you can download, verify against the published
+  `SHA256SUMS`, and read before running. Docker
   arrives as signed packages from Docker's apt repository — the procedure their
   documentation gives for production — not as the `get.docker.com` convenience
-  script, which Docker states is not for production use. Until v0.45.8 this
+  script, which Docker states is not for production use. Until v0.45.9 this
   script used that one; it configures Let's Encrypt and calls itself the
   production path, so it had no business doing so.
 - **The registries are not avoidable in the general case.** Software has to come
@@ -111,13 +112,13 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.45.8 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.8 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.45.8 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.8 \
-  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.8 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.8 \
-  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.8 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.9 \
+  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.9 \
   docker.io/bitnamilegacy/postgresql:16.4.0-debian-12-r14 \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -132,7 +133,7 @@ Then, for Helm, override the repositories in your values file (`images.core.repo
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
 
-> **On PostgreSQL.** Until v0.45.8 the chart pulled a Bitnami image that existed
+> **On PostgreSQL.** Until v0.45.9 the chart pulled a Bitnami image that existed
 > only under `bitnamilegacy` — a copy that works and receives no updates,
 > security ones included. The chart now runs its own PostgreSQL on the official
 > `postgres:16-alpine`, the same image the Compose deployment has always used:
@@ -221,10 +222,30 @@ needed, generates secrets, pulls the images and starts the stack.
 curl -fsSL https://vibops.ai/install.sh | bash
 ```
 
-For anything beyond the defaults, download it first and pass options:
+**Verify it first** — it runs as root, and a piped script is read by nobody:
 
 ```bash
-curl -fsSL https://vibops.ai/install.sh -o install.sh
+curl -fsSLO https://vibops.ai/install.sh
+curl -fsSL  https://vibops.ai/SHA256SUMS | sha256sum --ignore-missing -c -
+# install.sh: OK
+bash install.sh
+```
+
+`SHA256SUMS` is published beside the script at each release and covers
+`install.sh` and `docker-compose.yml`; `SHA256SUMS.version` names the release it
+belongs to. A mismatch prints `install.sh: FAILED` and exits non-zero, so it can
+gate the run:
+
+```bash
+curl -fsSL https://vibops.ai/SHA256SUMS | sha256sum --ignore-missing -c - && bash install.sh
+```
+
+It is the protection you would want from any vendor asking you to run a script
+as root, and it costs us one line in a workflow.
+
+For anything beyond the defaults, pass options to the file you downloaded:
+
+```bash
 bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 ```
 
@@ -233,7 +254,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.45.8` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.45.9` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -462,7 +483,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.8 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.45.9 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
