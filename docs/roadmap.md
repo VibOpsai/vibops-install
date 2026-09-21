@@ -636,6 +636,33 @@ difficulty. Full rationale and evidence: the review document and the commits cit
 - [x] Scenario 28 — Cloud registry deploy (ECR+EKS and GCR+GKE variants)
 - [x] Scenario 29 — OpenShift deploy (`openshift_add_scc` + `deploy_webapp` + `openshift_create_route`)
 
+### Audit trail verifiable by a third party (ADR 0044)
+
+An audit trail that only its operator can check is a claim, not evidence.
+
+- [x] **Sign every field a reader acts on** — the chain signed the action, the actor and the
+  outcome, and left `payload`, `result`, `matched_rule` and `reason` outside the signature:
+  `namespace: prod` could become `namespace: dev` with `/audit/verify` still reporting the
+  chain intact. Version 2 covers them; version 1 rows keep verifying under version 1 rather
+  than being re-signed, and `/audit/verify` reports how many rows are held under each.
+  ✓ 21 Sept 2026
+- [ ] **Ed25519 beside the HMAC, public key published** — HMAC is symmetric, so verifying
+  requires the key that can forge. Asymmetric signatures let a customer or an auditor check an
+  export without being handed the means to write one.
+- [ ] **Anchor the chain head where the operator cannot rewrite it** — hourly, into the
+  customer's SIEM first: it already receives the exports, it adds no outbound destination and
+  it works air-gapped. A WORM bucket or an RFC 3161 timestamp authority for those who want a
+  neutral third party.
+- [ ] **Sign inside a KMS/HSM** so the private key cannot be taken elsewhere, and log every
+  signing operation.
+- [ ] **`vibops audit verify` in the SDK** — checks the chain and the anchors offline. A
+  verification you must ask the audited party to run is not a verification.
+
+The boundary is published with it: this makes retroactive rewriting infeasible, and it does
+not make the record true. An operator who never writes an event, or writes a false one as they
+act, is untouched by any of it — that needs the cluster's own API server and admission logs
+beside ours, and saying so is worth more than a claim that does not hold.
+
 ### GreenOps — carbon as a second unit (ADR 0043)
 
 Decided and costed, not scheduled. Full rationale, data-model mapping and risks:
