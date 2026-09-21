@@ -636,6 +636,46 @@ difficulty. Full rationale and evidence: the review document and the commits cit
 - [x] Scenario 28 — Cloud registry deploy (ECR+EKS and GCR+GKE variants)
 - [x] Scenario 29 — OpenShift deploy (`openshift_add_scc` + `deploy_webapp` + `openshift_create_route`)
 
+### GreenOps — carbon as a second unit (ADR 0043)
+
+Decided and costed, not scheduled. Full rationale, data-model mapping and risks:
+`core/docs/adr/0043-greenops-carbon-as-a-second-unit.md`.
+
+Everything after the first step is arithmetic on its number, and the count of persisted power
+measurements today is zero — so the order matters more than usual.
+
+- [x] **Prompt caching, then intent-based tool filtering** — outside the GreenOps scope and to
+  be done first: 310 tools, roughly 43,800 tokens on every call. A cost and latency matter
+  before an environmental one. ✓ v0.45.0
+- [ ] **Per-cluster measurement-sources page** — the first deliverable, before any collector.
+  DCGM needs the GPU Operator; without it the collection returns nothing and "nothing" renders
+  as zero. A footprint dashboard that silently under-reports is worse than none.
+- [ ] **`power_w` and `energy_wh` in `gpu_metrics_history`**, `PowerConsumedWatts` on the
+  Redfish connector. Two columns and one GET — plus partitioning and a purge task in the same
+  migration: per-GPU at one row a minute is ~460,000 rows a day on a forty-node fleet.
+- [ ] **Declared entry: `annual_kwh` on `cluster_rates`** — a `declared`-quality figure with no
+  sensor at all, from a field operators already fill in.
+- [ ] **Factors** — grid intensity on the `llm_backend_rates` pattern, PUE per site,
+  `carbon_method` as provenance. A missing factor yields `null`, never a default.
+- [ ] **Surfaces** — gCO2e beside `cost_usd` in the FinOps routes, the console and the waste
+  panel; energy attributed by utilisation-weighted GPU-seconds, not by request latency.
+- [ ] **`kwh` and `gco2e` in the monthly chargeback report** — beside `gpu_hours`, by team and
+  by vendor, idle share as a third figure. This is what the demand actually asked for, and it
+  appears in none of the incoming specification's seven phases.
+- [ ] **RGESN as framework #20** — 78 criteria, 10 automatic evaluators that propose while a
+  human confirms. Blocking before anything is published: the official Arcep wording, and the
+  priority split cross-checked against the official tool.
+- [ ] **Exports (NumEcoEval, SCI)** — feed the tool where the customer's reporting is
+  assembled rather than replace it.
+
+Not planned here, and named so nobody assumes otherwise: low-carbon scheduling (the
+specification's optional phase 6), a CSRD ESRS E1 export, VibOps's own footprint, and the
+RGESN declaration of VibOps as a product. Never: "N tonnes saved thanks to VibOps" — that
+requires a counterfactual we cannot observe.
+
+Every figure leaves with its perimeter attached: the GPU fleet under management, not the rest
+of the datacentre, the workstations, the network, the storage or the software lifecycle.
+
 ### Onboarding
 - [x] Step 3 GitHub: webhook setup UI in onboarding wizard (optional, copy URL + repo/branch/action config) ✓ v0.31.1
 - [x] Post-onboarding checklist: floating widget, 4 auto-tracking items, localStorage dismiss ✓ v0.24.1
