@@ -59,6 +59,77 @@ VibOps runs on a Linux server — not on a workstation. The server must be reach
 - **No GPU** on the VibOps server itself — GPUs stay on the client GPU clusters, managed via gateways
 - **No local LLM** if using `LLM_PROVIDER=claude` or `openai` — the model is called via external API
 
+### What an installation reaches on the network
+
+An installation is not self-contained: it pulls images and, in one mode, a
+script and a compose file. Everything it reaches is listed here, so a firewall
+rule can be written once rather than discovered during a maintenance window.
+
+| Destination | Why | Which mode |
+|---|---|---|
+| `ghcr.io` | the seven VibOps images | all |
+| `docker.io` (Docker Hub) | PostgreSQL, Redis, Caddy, Grafana, Prometheus, the Docker socket proxy | all |
+| `vibops.ai` | `install.sh` and `docker-compose.yml` | one-line install only |
+| `get.docker.com` | installs Docker when absent — a remote script piped into a shell | one-line install only |
+
+Two of those are avoidable and one is not:
+
+- **The Helm and Compose modes never touch `vibops.ai` or `get.docker.com`.** Clone
+  the install repository (or take the release tarball), install Docker or
+  Kubernetes with your own means, and the only destinations left are the two
+  registries.
+- **The registries are not avoidable in the general case.** Software has to come
+  from somewhere. What an air-gapped site does instead is mirror them — see
+  below.
+
+**Nothing phones home.** Licence keys are RS256 JWTs verified with a public key
+embedded in the product: no activation call, no licence server, no telemetry, no
+version check. A VibOps that has pulled its images runs with no outbound
+connection at all, except the two the operator configures:
+
+- the **LLM provider**, when it is a hosted one (`api.anthropic.com`,
+  `api.openai.com`…). Point `LLM_BASE_URL` at an on-premise endpoint and even
+  that disappears.
+- the **gateways**, which poll your VibOps server outbound over 443 — see the
+  next section. They reach your server, not ours.
+
+Optional integrations add their own destinations when enabled, and only then:
+GitHub or GitLab webhooks, an SMTP server, a Slack or Teams webhook, an OIDC or
+LDAP provider, an OTLP collector.
+
+#### Air-gapped installation
+
+Mirror both registries into one of your own, then point the deployment at it.
+
+```bash
+# On a machine with network access — copies manifests by digest, no rebuild
+for image in \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-beat:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.45.6 \
+  ghcr.io/davidmacamara-boop/vibops-gateway:v0.45.6 \
+  docker.io/bitnamilegacy/postgresql:16.4.0-debian-12-r14 \
+  docker.io/library/redis:7-alpine \
+  docker.io/library/caddy:2-alpine \
+  docker.io/grafana/grafana:11.6.0 \
+  docker.io/prom/prometheus:v3.4.0 \
+  docker.io/tecnativa/docker-socket-proxy:0.2 ; do
+    docker buildx imagetools create --tag registry.internal/vibops/${image##*/} "$image"
+done
+```
+
+Then, for Helm, override the repositories in your values file (`images.core.repository`,
+`images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
+`redis.image.repository`); for Compose, set the image lines to your registry.
+
+> **The PostgreSQL line above deserves a note.** Bitnami pruned its free Docker
+> Hub catalogue in August 2026, and the tag the chart pins now exists only under
+> `bitnamilegacy` — a copy that works and receives no updates, security ones
+> included. It is a stopgap. Tracked in `docs/harness.md` under known gaps.
+
 ### Network requirement for gateway connectivity
 
 GPU cluster gateways connect to VibOps using **outbound HTTPS polling** (no inbound ports required on the cluster side). The only firewall rule needed on the cluster side:
