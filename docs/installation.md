@@ -83,7 +83,7 @@ Two of those are avoidable and one is not:
   `SHA256SUMS`, and read before running. Docker
   arrives as signed packages from Docker's apt repository — the procedure their
   documentation gives for production — not as the `get.docker.com` convenience
-  script, which Docker states is not for production use. Until v0.46.1 this
+  script, which Docker states is not for production use. Until v0.46.2 this
   script used that one; it configures Let's Encrypt and calls itself the
   production path, so it had no business doing so.
 - **The registries are not avoidable in the general case.** Software has to come
@@ -118,7 +118,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.46.1
+  ghcr.io/davidmacamara-boop/vibops-core:v0.46.2
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -148,7 +148,7 @@ reported. It spent its first days in `Audit` for the usual reason — a policy
 that refuses before anyone has seen what it would refuse gets deleted during an
 incident — and the audit was run on 22/09/2026 against the published images by
 digest: `core`, `agent`, `console`, `connect`, `worker` and `llm-proxy` are all
-signed at `v0.46.1`. Those are every image the chart deploys that the rule
+signed at `v0.46.2`. Those are every image the chart deploys that the rule
 matches; `postgres` and `redis` come from Docker Hub and are outside it.
 
 Two things to know before applying it. If you build your own VibOps images,
@@ -176,12 +176,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.46.1 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.46.1 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.46.1 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.46.1 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.46.1 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.46.1 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.46.2 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.46.2 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.46.2 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.46.2 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.46.2 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.46.2 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -196,7 +196,7 @@ Then, for Helm, override the repositories in your values file (`images.core.repo
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
 
-> **On PostgreSQL.** Until v0.46.1 the chart pulled a Bitnami image that existed
+> **On PostgreSQL.** Until v0.46.2 the chart pulled a Bitnami image that existed
 > only under `bitnamilegacy` — a copy that works and receives no updates,
 > security ones included. The chart now runs its own PostgreSQL on the official
 > `postgres:16-alpine`, the same image the Compose deployment has always used:
@@ -317,7 +317,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.46.1` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.46.2` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -546,7 +546,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.46.1 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.46.2 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above

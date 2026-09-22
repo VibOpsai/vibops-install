@@ -1,9 +1,13 @@
+# VibOps — Production Docker Compose (100% published images)
+# Usage: docker compose up -d
+# Console: http://<your-server>:8003
+
 services:
 
   # ─── Infrastructure ───────────────────────────────────────────────────────
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: vibops_postgres
     restart: unless-stopped
     environment:
@@ -13,7 +17,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"  # Localhost only — not exposed to network
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vibops -d vibops_db"]
       interval: 5s
@@ -29,13 +33,9 @@ services:
 # and name the missing variable, which is the difference between a weak secret
 # and a stopped deployment. `install.sh` generates one with `openssl rand`.
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     container_name: vibops_redis
     restart: unless-stopped
-    # Security note: TLS between services is delegated to the network layer.
-    # Redis is bound exclusively to the internal Docker bridge network (vibops_net)
-    # and is not internet-exposed. This is an accepted risk documented in the
-    # VibOps Risk Register (R-011). Authentication is enforced via --requirepass.
     command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}", "ping"]
@@ -45,12 +45,10 @@ services:
     networks:
       - vibops_net
 
-  # ─── Execution Engine (core/) ─────────────────────────────────────────────
+  # ─── Core API ─────────────────────────────────────────────────────────────
 
   core:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/davidmacamara-boop/vibops-core@sha256:5ebe3e136ead73d810c2a3e0e9c5c4ea7da5f38fd87f9c710fab841dd3905fce
     container_name: vibops_core
     restart: unless-stopped
     command: ["api"]
@@ -58,11 +56,6 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
-      KUBECONFIG: /home/vibops/.kube/config
-    volumes:
-      - ${HOME}/.kube:/home/vibops/.kube:ro  # kubeconfig host — tous les contextes visibles
-    ports:
-      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,22 +69,16 @@ services:
       start_period: 15s
     networks:
       - vibops_net
-      - kind  # Accessible by VibOps Connect pods running in kind clusters
 
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:0.2
+    image: tecnativa/docker-socket-proxy:0.2@sha256:083bd0ed8783e366d745f332f0e4489816dd35d984bef8f16e6d89484a22c082
     container_name: vibops_docker_proxy
     restart: unless-stopped
     environment:
       CONTAINERS: 1
       IMAGES: 1
-      NETWORKS: 0
-      VOLUMES: 0
-      POST: 1        # required for docker build
+      POST: 1
       BUILD: 1
-      EXEC: 0
-      SWARM: 0
-      NODES: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
@@ -106,10 +93,10 @@ services:
     networks:
       - vibops_net
 
+  # ─── Worker + Beat ────────────────────────────────────────────────────────
+
   worker:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/davidmacamara-boop/vibops-worker@sha256:b8363366106f8c86195183acf3624bef75d247dab3be99c1dfc4ed127bfae7dd
     container_name: vibops_worker
     restart: unless-stopped
     command: ["worker"]
@@ -117,17 +104,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
-      OLLAMA_URL: http://ollama:11434
-      DATADOG_API_KEY: ${DATADOG_API_KEY:-}
-      DATADOG_APP_KEY: ${DATADOG_APP_KEY:-}
-      DATADOG_SITE: ${DATADOG_SITE:-datadoghq.com}
-      SLURM_DEMO_MODE: ${SLURM_DEMO_MODE:-true}
-      KUBECONFIG: /home/vibops/.kube/config
       DOCKER_HOST: tcp://docker-proxy:2375
-    volumes:
-      - ${HOME}/.kube:/home/vibops/.kube         # kubeconfig host — setup_kubeconfig écrit ici
-    ports:
-      - "127.0.0.1:8080:8080"   # kubectl port-forward (ex: open-webui)
     depends_on:
       postgres:
         condition: service_healthy
@@ -150,11 +127,8 @@ services:
     networks:
       - vibops_net
 
-  # Celery Beat — planificateur de tâches (évalue les triggers toutes les 60s)
   beat:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/davidmacamara-boop/vibops-core@sha256:5ebe3e136ead73d810c2a3e0e9c5c4ea7da5f38fd87f9c710fab841dd3905fce
     container_name: vibops_beat
     restart: unless-stopped
     command: ["beat"]
@@ -162,9 +136,6 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
-      DATADOG_API_KEY: ${DATADOG_API_KEY:-}
-      DATADOG_APP_KEY: ${DATADOG_APP_KEY:-}
-      DATADOG_SITE: ${DATADOG_SITE:-datadoghq.com}
     depends_on:
       - redis
       - worker
@@ -185,12 +156,10 @@ services:
     networks:
       - vibops_net
 
-  # ─── Backup PostgreSQL quotidien ─────────────────────────────────────────
-  # Lance un pg_dump compressé chaque jour à 02:00 UTC.
-  # Les dumps sont stockés dans le volume vibops_backups (hôte : ./backups/).
-  # Rotation automatique : les fichiers de plus de 30 jours sont supprimés.
+  # ─── Backup ───────────────────────────────────────────────────────────────
+
   backup:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: vibops_backup
     restart: unless-stopped
     environment:
@@ -202,10 +171,7 @@ services:
         while true; do
           STAMP=$$(date -u +%Y-%m-%d);
           DEST=/backups/vibops_$${STAMP}.sql.gz;
-          echo "[backup] $$(date -u +%FT%TZ) → $$DEST";
-          pg_dump -h postgres -U vibops -d vibops_db | gzip > $$DEST \
-            && echo "[backup] done" \
-            || echo "[backup] FAILED";
+          pg_dump -h postgres -U vibops -d vibops_db | gzip > $$DEST;
           find /backups -name "vibops_*.sql.gz" -mtime +30 -delete;
           sleep 86400;
         done
@@ -227,12 +193,10 @@ services:
     networks:
       - vibops_net
 
-  # ─── Agent Claude (agent/) ────────────────────────────────────────────────
+  # ─── Agent ────────────────────────────────────────────────────────────────
 
   agent:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
+    image: ghcr.io/davidmacamara-boop/vibops-agent@sha256:f7b9531f7a119114f990a30c1ba677d7abc9da355e2484d82f203f85e351fb8a
     container_name: vibops_agent
     restart: unless-stopped
     env_file: .env
@@ -243,9 +207,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
     ports:
-      - "8001:8001"
-    volumes:
-      - agent_training_data:/app/data/training
+      - "127.0.0.1:8001:8001"
     depends_on:
       core:
         condition: service_healthy
@@ -261,46 +223,28 @@ services:
     networks:
       - vibops_net
 
-  # ─── Console web (console/) ──────────────────────────────────────────────
+  # ─── Console ──────────────────────────────────────────────────────────────
 
   console:
-    build:
-      context: .
-      dockerfile: console/Dockerfile
+    image: ghcr.io/davidmacamara-boop/vibops-console@sha256:9aa835e38dadf479dea6856065210c29983984192cae95e79322efc030c5d934
     container_name: vibops_console
     restart: unless-stopped
     env_file: .env
     environment:
       CORE_API_URL: http://core:8000
       AGENT_API_URL: http://agent:8001
-      OLLAMA_URL: http://ollama:11434
-      DATADOG_API_KEY: ${DATADOG_API_KEY:-}
-      DATADOG_APP_KEY: ${DATADOG_APP_KEY:-}
-      DATADOG_SITE: ${DATADOG_SITE:-datadoghq.com}
-      # URL publique de Grafana — accessible depuis le navigateur (pas depuis Docker)
-      # Vide si le profil observability n'est pas activé
-      GRAFANA_PUBLIC_URL: ${GRAFANA_PUBLIC_URL:-}
     volumes:
       - console_data:/data
-    ports:
-      - "8003:8003"
-    # Sans healthcheck, console etait declare « Up » des que le processus
-    # existait — bien avant qu'uvicorn serve. `docker compose up -d` rendait
-    # donc la main sur une console qui repondait par une reponse vide (curl
-    # exit 52), et tout script qui enchainait dessus echouait par intermittence.
-    #
-    # `/api/health` existe depuis longtemps — sonde de liveness deja publique,
-    # 361 octets, contre 765 Ko pour `/`. Rien a ajouter cote application :
-    # il manquait seulement que le compose le demande.
-    # Meme forme que celui de core : urllib plutot que curl, absent de l'image.
+    # Sans lui, console est « Up » des que le processus existe, avant
+    # qu'uvicorn serve : `docker compose up -d` rend la main sur une console
+    # qui repond par une reponse vide. `/api/health` existe deja et est
+    # publique ; il manquait seulement que le compose la sonde. urllib plutot
+    # que curl, absent de l'image.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/api/health')\" 2>/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      # La console attend core (service_healthy) avant de demarrer, donc son
-      # propre demarrage est court — mais elle initialise une base SQLite et
-      # tronque son WAL au passage.
       start_period: 15s
     depends_on:
       core:
@@ -310,45 +254,15 @@ services:
     networks:
       - vibops_net
 
-  # ─── Ollama — runtime LLM local ──────────────────────────────────────────
-  # GPU : décommenter le bloc "deploy" si tu as une carte NVIDIA
-  ollama:
-    image: ollama/ollama:0.9.0
-    container_name: vibops_ollama
-    restart: unless-stopped
-    volumes:
-      - ollama_data:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-    networks:
-      - vibops_net
+  # ─── LLM Proxy ───────────────────────────────────────────────────────────
 
-  # ─── LLM Inference Proxy ──────────────────────────────────────────────────
-  # Transparent OpenAI-compatible proxy that captures inference metrics
-  # per agent for FinOps attribution. Agents point here instead of vLLM/Ollama.
   llm-proxy:
-    build:
-      # Contexte racine comme les huit autres services : le Dockerfile de
-      # llm-proxy fait `COPY llm-proxy/app/`, et release-images.yml construit
-      # deja avec context=. — d'ou une image publiee correcte et un build
-      # local casse, invisible tant que le job E2E n'a pas tourne.
-      context: .
-      dockerfile: llm-proxy/Dockerfile
+    image: ghcr.io/davidmacamara-boop/vibops-llm-proxy@sha256:e5dd1bf9affc2484d4ea2c9ef349b4d0fb2d253d101a73c0dc20ec1bcd190d14
     container_name: vibops_llm_proxy
     restart: unless-stopped
     environment:
       CORE_API_URL: http://core:8000
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
-      DEFAULT_BACKEND_URL: http://ollama:11434
-    ports:
-      - "127.0.0.1:8004:8004"
     depends_on:
       core:
         condition: service_healthy
@@ -361,60 +275,45 @@ services:
     networks:
       - vibops_net
 
-  # ─── Connect Gateway (optionnel — profil connect) ────────────────────────
-  # Déployé chez un CSP ou client final pour gérer des clusters distants.
-  # Utiliser plutôt : docker build -f connect/Dockerfile -t vibops/connect .
-  # et déployer sur le serveur du CSP avec les variables ci-dessous.
-  connect:
-    build:
-      context: .
-      dockerfile: connect/Dockerfile
-    container_name: vibops_connect
-    restart: unless-stopped
-    environment:
-      VIBOPS_CORE_URL: http://core:8000
-      VIBOPS_GATEWAY_ID: ${CONNECT_GATEWAY_ID:-}
-      VIBOPS_TOKEN: ${CONNECT_TOKEN:-}
-      VIBOPS_POLL_INTERVAL: "15"
-      KUBECONFIG: /home/vibops/.kube/config
-    volumes:
-      - ${HOME}/.kube:/home/vibops/.kube:ro
-    depends_on:
-      core:
-        condition: service_healthy
-    networks:
-      - vibops_net
-    profiles:
-      - connect
+  # ─── Reverse Proxy ───────────────────────────────────────────────────────
 
-  # ─── Observabilité — Prometheus + Grafana (toujours actifs) ─────────────
-  # Prometheus scrape core:8000/metrics, agent:8001/metrics, gpu-simulator:9400/metrics
-  # Grafana disponible sur http://localhost:3000 (admin / ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — generate one with `openssl rand -base64 16`})
-  # Pour désactiver en prod légère : docker compose --profile no-observability up (futur)
-
-  gpu-simulator:
-    build:
-      context: .
-      dockerfile: tools/gpu-simulator/Dockerfile
-    container_name: vibops_gpu_simulator
+  caddy:
+    image: caddy:2-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e
+    container_name: vibops_caddy
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9400:9400"
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./static:/static:ro
+    depends_on:
+      - console
+      - core
+    healthcheck:
+      # L'API d'admin, sur 127.0.0.1 et non `localhost` : elle n'ecoute qu'en
+      # IPv4, et `localhost` resout d'abord en ::1 dans cette image — wget y
+      # recoit un refus de connexion. Verifie sur caddy:2-alpine.
+      test: ["CMD-SHELL", "wget -q -O/dev/null --timeout=5 http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - vibops_net
 
+  # ─── Prometheus + Grafana ─────────────────────────────────────────────────
+
   prometheus:
-    image: prom/prometheus:v3.4.0
+    image: prom/prometheus:v3.4.0@sha256:78ed1f9050eb9eaf766af6e580230b1c4965728650e332cd1ee918c0c4699775
     container_name: vibops_prometheus
     restart: unless-stopped
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./alerting_rules.yml:/etc/prometheus/alerting_rules.yml:ro
       - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.enable-lifecycle"
     ports:
       - "127.0.0.1:9090:9090"
     healthcheck:
@@ -427,20 +326,14 @@ services:
       - vibops_net
 
   grafana:
-    image: grafana/grafana:11.6.0
+    image: grafana/grafana:11.6.0@sha256:62d2b9d20a19714ebfe48d1bb405086081bc602aa053e28cf6d73c7537640dfb
     container_name: vibops_grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — generate one with `openssl rand -base64 16`}
-      GF_SECURITY_ALLOW_EMBEDDING: "true"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"  # dev only — disable in production (Helm chart does not expose this)
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_FEATURE_TOGGLES_ENABLE: publicDashboards
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -454,37 +347,15 @@ services:
     networks:
       - vibops_net
 
-  # ─── Gateway OpenAI-compatible (gateway/) ────────────────────────────────
-
-  gateway:
-    build:
-      context: .
-      dockerfile: gateway/Dockerfile
-    container_name: vibops_gateway
-    restart: unless-stopped
-    environment:
-      AGENT_API_URL: http://agent:8001
-    ports:
-      - "8002:8002"
-    depends_on:
-      - agent
-    networks:
-      - vibops_net
-
-# ─── Volumes & Réseau ────────────────────────────────────────────────────────
-
 volumes:
   postgres_data:
-  ollama_data:
-  console_data:
-  agent_training_data:   # dataset JSONL — persisté entre redémarrages
+  backups:
   prometheus_data:
   grafana_data:
-  backups:               # pg_dump quotidiens — vibops_YYYY-MM-DD.sql.gz, 30j de rétention
-  # kubeconfig: remplacé par bind mount ${HOME}/.kube (voir core et worker volumes)
+  caddy_data:
+  caddy_config:
+  console_data:
 
 networks:
   vibops_net:
     driver: bridge
-  kind:
-    external: true
