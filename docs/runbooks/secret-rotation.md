@@ -21,7 +21,8 @@ _Last updated: 2026-06-19 · v0.18.0_
 | Database password | `POSTGRES_PASSWORD` | Core, Celery workers, Console → PostgreSQL | DB connections drop until all services restarted |
 | LLM API key | `LLM_API_KEY` | Agent → Anthropic/OpenAI | Agent LLM calls fail until restarted |
 | Gateway connect token | Per-gateway Bearer token | Gateway → Core ping/claim/result endpoints | Gateway goes offline until re-registered |
-| Admin password | `ADMIN_PASSWORD`, `AUTH_PASSWORD_HASH` | The fallback administrator account, and the demo console login | Whoever holds the old one loses access at the next deploy |
+| Account password | `users.password_hash` (in the database) | Every console and API login — this is the only thing `/auth/login` checks | The account holder changes it through the API; no deploy, no downtime |
+| Auth-enabled flag | `AUTH_PASSWORD_HASH` | Read by the briefing worker and the agent only to decide whether auth is on; its value is compared to nothing | None on logins. Emptying it disables authentication |
 | Hetzner root password | — (provider console) | The demo VM, and therefore everything running on it | None on the product; full compromise if leaked |
 | Agent identity key | `INTERNAL_API_KEY`, agent identity `key_hash` | Agent → Core, and `POST /agent-identities/{id}/rotate` | The agent stops being able to call Core until restarted |
 
@@ -328,13 +329,57 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/gateways
 
 ---
 
-## 8. Admin password (`ADMIN_PASSWORD` / `AUTH_PASSWORD_HASH`)
+## 8. Admin password
 
-**Impact:** whoever holds the old password loses access at the next deploy. There
-is no session to invalidate — this is the fallback account, used when no `User`
-row matches.
+**Read this first, because the docstrings lie.** Several comments in the code
+(`app/auth.py`, `app/models/tenant.py`) describe `AUTH_PASSWORD_HASH` as a
+fallback administrator credential used when no `User` row matches. The login
+endpoint does not implement that. `POST /api/v1/auth/login` looks up
+`users.username` or `users.email` and compares against `users.password_hash`,
+and nothing else. Verified 22/09/2026.
 
-`AUTH_PASSWORD_HASH` holds a hash, not the password — and not a bcrypt one.
+`AUTH_PASSWORD_HASH` survives as a **flag**: `briefing_task.py` and the agent
+read it only to decide whether authentication is enabled at all — empty means
+dev mode. Its value is never compared to a password anywhere in the codebase.
+
+So there are two different operations, and only the second one changes how
+anyone logs in.
+
+### 8a. Rotating a real account's password
+
+This is the one that matters. It needs no SSH and no deploy — the account holder
+does it through the API:
+
+```bash
+# Log in with the current password to get a token
+TOKEN=$(curl -s -X POST https://<host>/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<CURRENT>"}' | jq -r .access_token)
+
+# Change it (minimum 8 characters; the endpoint re-checks the current one)
+curl -s -o /dev/null -w "%{http_code}\n" -X PATCH https://<host>/api/v1/auth/me/password \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"current_password":"<CURRENT>","new_password":"<NEW>"}'    # expect 204
+
+# Verify the old one is dead — expect 401
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<host>/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<CURRENT>"}'
+```
+
+An account whose password is lost has no self-service path: an org admin
+recreates it, or the row's `password_hash` is set directly in the database using
+the scrypt recipe below.
+
+### 8b. Rotating `AUTH_PASSWORD_HASH`
+
+Worth doing as hygiene — it is passed into the cluster by `deploy.yml` and has
+been unchanged since 11/04/2026 — but understand that it changes no login. Keep
+it non-empty, or authentication turns itself off.
+
+**Impact:** none on who can log in. Takes effect at the next deploy.
+
+It holds a hash, not the password — and not a bcrypt one.
 `app/auth.py` uses scrypt and stores `salt:hash` in hex
 (`hashlib.scrypt(n=16384, r=8, p=1)`, 16-byte hex salt). A bcrypt string in that
 secret produces an account nobody can log into, and the failure reads as a wrong
@@ -495,14 +540,15 @@ Recorded 22/09/2026 so the list does not live in anyone's memory.
 
 | Credential | Why | Who can do it |
 |---|---|---|
-| `Montreal69@` | Was committed in five seed scripts and removed from the working tree on 14/09/2026. It remains in the git history of every clone: `git log --all -S'Montreal69'` finds eight commits. Removing it from history is not the fix — the fix is that the password stops working. | Whoever holds the demo admin account |
-| `VibOps2026!` | The demo console password, shared in demonstrations. | Same |
+| `Montreal69@` | Was committed in five seed scripts and removed from the working tree on 14/09/2026. It remains in the git history of every clone: `git log --all -S'Montreal69'` finds eight commits. Removing it from history is not the fix — the fix is that the password stops working. **Rotate it with §8a**; `AUTH_PASSWORD_HASH` has no effect on it. | Whoever holds the demo admin account |
+| `VibOps2026!` | The demo console password, shared in demonstrations. Same: §8a. | Same |
 | `LLM_API_KEY` | Last set 05/05/2026. A new key has to be minted in the Anthropic console; nobody else can produce one. | The Anthropic account holder |
 | Hetzner root password | Set at VM creation and unchanged since. | The Hetzner account holder |
 | Test agent key | Issued for the local inference chain; never rotated. `POST /api/v1/agent-identities/{id}/rotate` issues a new one and revokes the old. | Any org admin |
 
-`JWT_SECRET_KEY`, `AUTH_PASSWORD_HASH` and `VAULT_KEY` in GitHub secrets date
-from 11/04/2026 and have never been rotated either. `VAULT_KEY` is the one that
+`JWT_SECRET_KEY` and `VAULT_KEY` in GitHub secrets date from 11/04/2026 and
+have never been rotated. `AUTH_PASSWORD_HASH` was rotated on 22/09/2026 — which
+changed no login, for the reason §8 explains. `VAULT_KEY` is the one that
 needs §4 followed exactly rather than a `gh secret set`.
 
 ---
