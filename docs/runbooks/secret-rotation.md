@@ -473,8 +473,37 @@ Setting `postgresql.appRole.enabled: false` puts the application back on the
 owner. That does not remove the policies; it removes their effect. It is the
 rollback if an isolation bug ever locks a legitimate read out.
 
-**Everywhere else — the Compose deployment, an external database — it is still
-manual**, because there the same process runs the migrations and serves the
+**Check this before the first `helm upgrade` that carries ADR 0047's
+migrations**, on any database the chart does not run itself:
+
+```bash
+psql "$DATABASE_URL" -c \
+  "SELECT current_user, rolsuper, rolcreaterole FROM pg_roles WHERE rolname = current_user"
+```
+
+Two things turn on the answer.
+
+`rolcreaterole` (or `rolsuper`) must be true, or migration `f5a6b7c8d9e0` fails
+on `CREATE ROLE vibops_app` and takes the upgrade with it. On a managed
+database the master user usually has it; a least-privilege application user
+does not.
+
+`rolsuper` decides whether the policies start enforcing **immediately**. A
+superuser bypasses row level security whatever the tables say, so nothing
+changes until the application is moved to `vibops_app`. A non-superuser owner —
+which is what a managed database typically gives you — is subject to
+`FORCE ROW LEVEL SECURITY` the moment the migration runs. The application sets
+a scope on every transaction, so it works; but it will be doing so in
+production for the first time, and any read path that reaches the database
+without one returns nothing rather than failing loudly.
+
+If `rolsuper` is false and you would rather not find out during an upgrade,
+`ALTER TABLE <t> NO FORCE ROW LEVEL SECURITY` on the forty-six tables puts it
+back, and `postgresql.appRole.enabled` is irrelevant there because the chart is
+not managing that database.
+
+**Everywhere else — the Compose deployment, an external database — the
+switch-over is still manual**, because there the same process runs the migrations and serves the
 API, so it needs two connections and only has one. What follows is that
 procedure. Migration `f5a6b7c8d9e0` creates the role without a password;
 credentials do not belong in migrations.
