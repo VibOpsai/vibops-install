@@ -37,4 +37,16 @@ stringData:
       "value" (dig "auth" "password" "" .Values.postgresql)
       "pinned" true
       "generate" (randAlphaNum 32)) | quote }}
+  # The application role's password (ADR 0047). Generated on first install and
+  # kept: the role is created with it by the `grant-app-role` init container,
+  # and rotating it here without rotating it on the role would leave every pod
+  # unable to connect. Not pinned to a value in values.yaml — nobody should
+  # have to type this one.
+  APP_ROLE_PASSWORD: {{ include "vibops.preserved" (dict
+      "ctx" .
+      "secret" (printf "%s-db" (include "vibops.fullname" .))
+      "key" "APP_ROLE_PASSWORD"
+      "value" ""
+      "pinned" true
+      "generate" (randAlphaNum 32)) | quote }}
 {{- end }}

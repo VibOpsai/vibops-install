@@ -461,9 +461,22 @@ design: reviving a revoked agent should be a deliberate act, not a side effect.
 
 ## 11. Switching the application to `vibops_app`
 
-Until this is done, row level security enforces nothing: the application
-connects as `vibops`, a superuser, and a superuser bypasses RLS unconditionally
-(ADR 0047). Migration `f5a6b7c8d9e0` creates the role without a password —
+**On the Helm chart this is done for you.** `postgresql.appRole.enabled`
+defaults to true: the chart generates the role's password into its own Secret
+on first install, a `grant-app-role` init container gives the role that
+password after the migrations create it, and core, the worker and beat connect
+as `vibops_app`. The init container refuses to continue if the role turns out
+to be a superuser or to carry BYPASSRLS, so a silently exempt role fails the
+deployment instead of quietly disabling every policy.
+
+Setting `postgresql.appRole.enabled: false` puts the application back on the
+owner. That does not remove the policies; it removes their effect. It is the
+rollback if an isolation bug ever locks a legitimate read out.
+
+**Everywhere else — the Compose deployment, an external database — it is still
+manual**, because there the same process runs the migrations and serves the
+API, so it needs two connections and only has one. What follows is that
+procedure. Migration `f5a6b7c8d9e0` creates the role without a password;
 credentials do not belong in migrations.
 
 ```bash

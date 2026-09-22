@@ -53,6 +53,11 @@ spec:
             - secretRef:
                 name: {{ include "vibops.fullname" . }}-core
           env:
+            # The owner connection, not the application role: this waits for
+            # the schema to exist, and the role's password is granted by an
+            # init container in the core deployment which may not have run yet.
+            # A probe that cannot connect would spend its whole deadline
+            # retrying an authentication failure.
             {{- include "vibops.databaseEnv" . | nindent 12 }}
             {{- include "vibops.redisEnv" . | nindent 12 }}
           command:
@@ -96,7 +101,7 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.core.env.APP_ENV | quote }}
-            {{- include "vibops.databaseEnv" . | nindent 12 }}
+            {{- include "vibops.appDatabaseEnv" . | nindent 12 }}
             {{- include "vibops.redisEnv" . | nindent 12 }}
             {{- if .Values.core.kubeconfig.secretName }}
             - name: KUBECONFIG

@@ -56,6 +56,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+        {{- include "vibops.grantAppRole" . | nindent 8 }}
       containers:
         - name: core
           image: {{ include "vibops.image" (dict "ctx" $ "component" "core") | quote }}
@@ -71,7 +72,7 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.core.env.APP_ENV | quote }}
-            {{- include "vibops.databaseEnv" . | nindent 12 }}
+            {{- include "vibops.appDatabaseEnv" . | nindent 12 }}
             {{- include "vibops.redisEnv" . | nindent 12 }}
             {{- if .Values.core.kubeconfig.secretName }}
             - name: KUBECONFIG

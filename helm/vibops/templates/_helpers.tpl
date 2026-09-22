@@ -139,6 +139,95 @@ imagePullSecrets:
 {{- end }}
 {{- end }}
 
+{{/* vibops.appDatabaseEnv — the connection the application uses.
+
+     The owner role is a superuser, and a superuser bypasses row level security
+     unconditionally: the forty-six policies of ADR 0047 enforce nothing while
+     the application connects as it. `vibops_app` is a plain role, created
+     NOLOGIN by migration f5a6b7c8d9e0 and given a password by the
+     `grant-app-role` init container, which runs after the migrations that
+     create it.
+
+     Migrations keep the owner connection (`vibops.databaseEnv`): a data
+     migration has to reach every tenant, and DDL needs privileges this role
+     does not have.
+
+     `postgresql.appRole.enabled: false` puts the application back on the owner
+     — the rollback if an isolation bug ever locks a legitimate read out. It
+     does not remove the policies; it removes their effect. */}}
+{{- define "vibops.appDatabaseEnv" -}}
+{{- if and .Values.postgresql.enabled (dig "appRole" "enabled" true .Values.postgresql) }}
+- name: APP_ROLE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "vibops.fullname" . }}-db
+      key: APP_ROLE_PASSWORD
+- name: DATABASE_URL
+  value: {{ printf "postgresql+asyncpg://vibops_app:$(APP_ROLE_PASSWORD)@%s-db:5432/%s" (include "vibops.fullname" .) (dig "auth" "database" "vibops" .Values.postgresql) | quote }}
+{{- else }}
+{{- include "vibops.databaseEnv" . }}
+{{- end }}
+{{- end }}
+
+{{/* vibops.grantAppRole — an init container that gives `vibops_app` its
+     password, after the migrations that create the role and before any
+     application container starts.
+
+     The password is never interpolated into SQL. `ALTER ROLE … PASSWORD` takes
+     no bind parameter, so it goes through a session setting and `format(%L)`,
+     which quotes it correctly whatever it contains. */}}
+{{- define "vibops.grantAppRole" -}}
+{{- if and .Values.postgresql.enabled (dig "appRole" "enabled" true .Values.postgresql) }}
+- name: grant-app-role
+  image: {{ include "vibops.image" (dict "ctx" . "component" "core") | quote }}
+  imagePullPolicy: {{ .Values.images.core.pullPolicy }}
+  securityContext:
+    {{- toYaml .Values.containerSecurityContext | nindent 4 }}
+  env:
+    - name: APP_ROLE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "vibops.fullname" . }}-db
+          key: APP_ROLE_PASSWORD
+    {{- include "vibops.databaseEnv" . | nindent 4 }}
+  command:
+    - python
+    - -c
+    - |
+      import os
+      from sqlalchemy import create_engine, text
+
+      url = os.environ["DATABASE_URL"].replace("postgresql+asyncpg", "postgresql+psycopg2")
+      engine = create_engine(url, isolation_level="AUTOCOMMIT")
+      with engine.connect() as conn:
+          conn.execute(
+              text("SELECT set_config('vibops.app_pw', :pw, false)"),
+              {"pw": os.environ["APP_ROLE_PASSWORD"]},
+          )
+          conn.execute(text(
+              "DO $$ BEGIN EXECUTE format("
+              "'ALTER ROLE vibops_app WITH LOGIN PASSWORD %L',"
+              " current_setting('vibops.app_pw')); END $$;"
+          ))
+          row = conn.execute(text(
+              "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles"
+              " WHERE rolname = 'vibops_app'"
+          )).first()
+      if row is None:
+          raise SystemExit("vibops_app does not exist — migrations did not run")
+      if row[0] or row[1]:
+          raise SystemExit("vibops_app is exempt from row level security; refusing to continue")
+      if not row[2]:
+          raise SystemExit("vibops_app cannot log in")
+      print("vibops_app ready: no superuser, no bypassrls, login granted")
+  resources:
+    {{- toYaml .Values.alembicInit.resources | nindent 4 }}
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+{{- end }}
+{{- end }}
+
 {{/* vibops.prodSecret — a value core refuses to start without when
      APP_ENV=production (see core/app/main.py `_check_security`).
 

@@ -253,6 +253,17 @@ postgresql:
   auth:
     username: vibops
     database: vibops
+
+  # Row level security (ADR 0047). The application connects as `vibops_app`, a
+  # role with no superuser and no BYPASSRLS, so the forty-six tenant policies
+  # actually apply to it. Migrations keep the owner connection — they need DDL,
+  # and a data migration has to reach every tenant.
+  #
+  # Set to false to put the application back on the owner role. That does not
+  # remove the policies, it removes their effect: the rollback if an isolation
+  # bug ever locks a legitimate read out.
+  appRole:
+    enabled: true
     # Generated on first install and kept for the life of the release. Set it
     # only to impose your own, and only at install time: the server is
     # initialised with it, and changing it later would leave the server on the

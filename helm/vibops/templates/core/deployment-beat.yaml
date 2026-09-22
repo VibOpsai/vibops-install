@@ -41,7 +41,7 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.core.env.APP_ENV | quote }}
-            {{- include "vibops.databaseEnv" . | nindent 12 }}
+            {{- include "vibops.appDatabaseEnv" . | nindent 12 }}
             {{- include "vibops.redisEnv" . | nindent 12 }}
           volumeMounts:
             - name: tmp
