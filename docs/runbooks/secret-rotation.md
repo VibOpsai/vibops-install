@@ -459,6 +459,40 @@ design: reviving a revoked agent should be a deliberate act, not a side effect.
 
 ---
 
+## 11. Switching the application to `vibops_app`
+
+Until this is done, row level security enforces nothing: the application
+connects as `vibops`, a superuser, and a superuser bypasses RLS unconditionally
+(ADR 0047). Migration `f5a6b7c8d9e0` creates the role without a password —
+credentials do not belong in migrations.
+
+```bash
+# 1. Give it a password
+NEW_DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+psql "$ADMIN_DATABASE_URL" -c \
+  "ALTER ROLE vibops_app WITH LOGIN PASSWORD '$NEW_DB_PASSWORD'"
+
+# 2. Confirm it is not exempt — all three must be false
+psql "$ADMIN_DATABASE_URL" -c \
+  "SELECT rolsuper, rolbypassrls, rolcreaterole FROM pg_roles WHERE rolname='vibops_app'"
+
+# 3. Point the application at it (NOT alembic — migrations stay on vibops)
+#    core, worker, beat, console: DATABASE_URL=postgresql+asyncpg://vibops_app:<pw>@…
+
+# 4. Restart, then verify isolation is real: as vibops_app with no scope set,
+#    this must return 0 rows, not every row.
+psql "postgresql://vibops_app:$NEW_DB_PASSWORD@<host>/vibops_db" -c \
+  "SELECT count(*) FROM training_exchanges"
+```
+
+Step 4 is the only proof that matters. If it returns rows, one of the three
+pieces is missing and the policies are decorative — check `FORCE` on the table,
+`rolsuper` on the role, and that the app sets `app.current_org_id`.
+
+Keep `vibops` for Alembic. A data migration has to reach every tenant.
+
+---
+
 ## Emergency Rotation — Full Rotation in < 30 Minutes
 
 Use this procedure when a breach is suspected and there is no time to be methodical. Accept that:
