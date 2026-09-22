@@ -141,9 +141,23 @@ and Kubernetes checks nothing by itself. `helm/vibops/policies/kyverno-verify-im
 is a Kyverno policy that refuses any `vibops-*` image without a signature issued
 to our release workflow, and rewrites the reference to the verified digest so
 the pod runs what was checked. It is not installed by the chart — Kyverno is a
-cluster-wide decision — and it ships in `Audit` mode: see what would be refused
-first, then switch to `Enforce`. Going straight to Enforce on a live cluster is
-how a policy gets deleted during an incident.
+cluster-wide decision.
+
+It ships in `Enforce`: an unsigned `vibops-*` image is refused, not merely
+reported. It spent its first days in `Audit` for the usual reason — a policy
+that refuses before anyone has seen what it would refuse gets deleted during an
+incident — and the audit was run on 22/09/2026 against the published images by
+digest: `core`, `agent`, `console`, `connect`, `worker` and `llm-proxy` are all
+signed at `v0.45.11`. Those are every image the chart deploys that the rule
+matches; `postgres` and `redis` come from Docker Hub and are outside it.
+
+Two things to know before applying it. If you build your own VibOps images,
+sign them with the same identity or narrow `imageReferences` — the policy does
+not care who built an image, only who signed it. And `failurePolicy: Fail`
+means a cluster that cannot reach ghcr or Rekor refuses new pods rather than
+admitting unverified ones; that is the intended trade, but it is a real
+dependency on two external services, and an air-gapped cluster needs a mirrored
+Rekor or this policy removed.
 
 ```bash
 kubectl apply -f helm/vibops/policies/kyverno-verify-images.yaml

@@ -21,6 +21,21 @@ _Last updated: 2026-06-19 · v0.18.0_
 | Database password | `POSTGRES_PASSWORD` | Core, Celery workers, Console → PostgreSQL | DB connections drop until all services restarted |
 | LLM API key | `LLM_API_KEY` | Agent → Anthropic/OpenAI | Agent LLM calls fail until restarted |
 | Gateway connect token | Per-gateway Bearer token | Gateway → Core ping/claim/result endpoints | Gateway goes offline until re-registered |
+| Admin password | `ADMIN_PASSWORD`, `AUTH_PASSWORD_HASH` | The fallback administrator account, and the demo console login | Whoever holds the old one loses access at the next deploy |
+| Hetzner root password | — (provider console) | The demo VM, and therefore everything running on it | None on the product; full compromise if leaked |
+| Agent identity key | `INTERNAL_API_KEY`, agent identity `key_hash` | Agent → Core, and `POST /agent-identities/{id}/rotate` | The agent stops being able to call Core until restarted |
+
+**Where these actually live.** `.github/workflows/deploy.yml` passes
+`JWT_SECRET_KEY`, `AUTH_PASSWORD_HASH`, `VAULT_KEY` and `LLM_API_KEY` from
+GitHub repository secrets into the Helm release with `--set`. Changing a GitHub
+secret therefore changes production **at the next deploy**, not immediately, and
+not visibly. Two consequences worth stating before anyone edits one:
+
+- The old value keeps working until the next tag is pushed. A rotation that
+  feels done is not done until a deploy has run.
+- `gh secret set VAULT_KEY` without the re-encryption in §4 below makes every
+  stored secret unreadable at that deploy. There is no undo: the ciphertext is
+  still there and the key that opens it is gone. Re-encrypt first, always.
 
 ---
 
@@ -313,6 +328,92 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/gateways
 
 ---
 
+## 8. Admin password (`ADMIN_PASSWORD` / `AUTH_PASSWORD_HASH`)
+
+**Impact:** whoever holds the old password loses access at the next deploy. There
+is no session to invalidate — this is the fallback account, used when no `User`
+row matches.
+
+`AUTH_PASSWORD_HASH` holds a hash, not the password — and not a bcrypt one.
+`app/auth.py` uses scrypt and stores `salt:hash` in hex
+(`hashlib.scrypt(n=16384, r=8, p=1)`, 16-byte hex salt). A bcrypt string in that
+secret produces an account nobody can log into, and the failure reads as a wrong
+password rather than a malformed hash. Generate it with the product's own
+function so the two can never disagree:
+
+```bash
+# Step 1: generate a password and its hash together
+NEW_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+NEW_HASH=$(docker compose exec -T core python3 -c "
+import sys
+from app.auth import hash_password
+print(hash_password(sys.argv[1]))
+" "$NEW_PASSWORD")
+
+# Off the host, without a running stack, the same thing in plain Python:
+#   python3 -c "
+#   import hashlib, secrets, sys
+#   salt = secrets.token_hex(16)
+#   h = hashlib.scrypt(sys.argv[1].encode(), salt=salt.encode(), n=16384, r=8, p=1)
+#   print(f'{salt}:{h.hex()}')
+#   " "$NEW_PASSWORD"
+
+# Step 2: store the password where a human will find it. Do this before step 3 —
+# the hash is one-way, and a password lost here is an account lost.
+echo "$NEW_PASSWORD"
+
+# Step 3: the GitHub secret, which deploy.yml passes to the chart
+gh secret set AUTH_PASSWORD_HASH --body "$NEW_HASH"
+
+# Step 4: the VM's own .env, for anything not going through the chart
+ssh <host> "sed -i 's|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD='\"$NEW_PASSWORD\"'|' /opt/vibops/.env"
+
+# Step 5: it is not in effect until a deploy runs
+git push origin vX.Y.Z    # or run the Deploy workflow manually
+
+# Step 6: verify the old one is dead — this must return 401
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<host>/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<OLD PASSWORD>"}'
+```
+
+---
+
+## 9. Hetzner root password
+
+Not a product secret — it is the machine everything else runs on, so it belongs
+in this list rather than in someone's head.
+
+1. Hetzner Cloud console → the server → **Rescue** → *Reset root password*.
+2. The new password is shown **once**. Store it before closing the dialog.
+3. SSH in with it and confirm, then prefer a key: `ssh-copy-id`, and set
+   `PasswordAuthentication no` in `/etc/ssh/sshd_config`. A password that cannot
+   be used remotely is a password that cannot be brute-forced remotely.
+4. Note for this project: VM keys have to be declared by hand in the Hetzner web
+   console — the API creates servers without one.
+
+---
+
+## 10. Agent identity key
+
+An agent authenticates to Core with a key whose hash is stored in
+`agent_identities.key_hash`. Rotation is a product feature, not a file edit:
+
+```bash
+# Issues a new key and invalidates the old one in the same call.
+curl -s -X POST https://<host>/api/v1/agent-identities/<id>/rotate \
+  -H "Authorization: Bearer $ADMIN_JWT" | jq -r .key
+
+# Put the value in the agent's environment, then restart it.
+# Verify: the agent's next call succeeds, and the old key returns 401.
+```
+
+`POST /agent-identities/{id}/revoke` is the other half — use it when the key is
+to be withdrawn rather than replaced. A revoked identity refuses rotation, by
+design: reviving a revoked agent should be a deliberate act, not a side effect.
+
+---
+
 ## Emergency Rotation — Full Rotation in < 30 Minutes
 
 Use this procedure when a breach is suspected and there is no time to be methodical. Accept that:
@@ -385,6 +486,24 @@ echo "POSTGRES_PASSWORD=$NEW_PG_PASS"
 | `POSTGRES_PASSWORD` | Every 180 days | Any suspected DB access |
 | `LLM_API_KEY` | Per provider recommendation (90 days) | Provider notifies of exposure |
 | Gateway tokens | Every 90 days, or per offboarding | Gateway host compromise |
+| Admin password | Every 90 days | Any value that has ever been committed |
+| Hetzner root password | Every 180 days | Any shared access, any offboarding |
+
+### Credentials known to need rotation
+
+Recorded 22/09/2026 so the list does not live in anyone's memory.
+
+| Credential | Why | Who can do it |
+|---|---|---|
+| `Montreal69@` | Was committed in five seed scripts and removed from the working tree on 14/09/2026. It remains in the git history of every clone: `git log --all -S'Montreal69'` finds eight commits. Removing it from history is not the fix — the fix is that the password stops working. | Whoever holds the demo admin account |
+| `VibOps2026!` | The demo console password, shared in demonstrations. | Same |
+| `LLM_API_KEY` | Last set 05/05/2026. A new key has to be minted in the Anthropic console; nobody else can produce one. | The Anthropic account holder |
+| Hetzner root password | Set at VM creation and unchanged since. | The Hetzner account holder |
+| Test agent key | Issued for the local inference chain; never rotated. `POST /api/v1/agent-identities/{id}/rotate` issues a new one and revokes the old. | Any org admin |
+
+`JWT_SECRET_KEY`, `AUTH_PASSWORD_HASH` and `VAULT_KEY` in GitHub secrets date
+from 11/04/2026 and have never been rotated either. `VAULT_KEY` is the one that
+needs §4 followed exactly rather than a `gh secret set`.
 
 ---
 
