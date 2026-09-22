@@ -8,7 +8,7 @@ type: application
 version: 0.27.1
 # Suit la version de l image vibops-connect, puisque le tag vide retombe
 # dessus. Un appVersion en retard tirait une image d il y a vingt versions.
-appVersion: "0.46.2"
+appVersion: "0.46.3"
 keywords:
   - kubernetes
   - gpu
