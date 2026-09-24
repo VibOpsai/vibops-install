@@ -287,3 +287,13 @@ docker compose exec worker celery -A app.workers.celery_app purge
 - [ ] Incident timeline noted in `#vibops-incidents`
 - [ ] If data integrity concern: trigger backup (`make backup-now`) and verify restore
 - [ ] If auth-related: rotate `SECRET_KEY` and `INTERNAL_API_KEY`, restart all services
+
+> **Before rotating `SECRET_KEY` during an incident.** It is not only the Fernet
+> key: the audit ledger signs every row with `sha256(SECRET_KEY)`. Rotating it
+> makes every row written before that moment fail verification, and the system
+> reports a failed chain as *"a row was modified or deleted after insertion"* —
+> so a real tampering becomes indistinguishable from the rotation, in the middle
+> of the incident where that ledger is the evidence.
+>
+> Verify and export the chain first. The sequence is in
+> [secret-rotation.md](secret-rotation.md#secret_key-also-signs-the-audit-chain).

@@ -1,6 +1,6 @@
 # VibOps — Secret Rotation Runbook
 
-_Last updated: 2026-06-19 · v0.18.0_
+_Last updated: 2026-09-24 · v0.47.2_
 
 > **When to use this runbook:**
 > - Scheduled rotation (see schedule at the bottom)
@@ -14,7 +14,7 @@ _Last updated: 2026-06-19 · v0.18.0_
 
 | Secret | Env var | Where used | Rotation impact |
 |--------|---------|-----------|----------------|
-| Fernet encryption key | `SECRET_KEY` | Encrypts LDAP/SSO credentials at rest in DB | Re-encrypt stored secrets; no downtime if done correctly |
+| Fernet encryption key **and audit chain signing key** | `SECRET_KEY` | Encrypts LDAP/SSO credentials at rest in DB; **signs every audit row** (see the warning below) | Re-encrypt stored secrets; **the whole audit chain stops verifying** |
 | JWT signing key | `JWT_SECRET_KEY` | Signs all user access + refresh tokens | **All active sessions invalidated immediately** |
 | Internal service key | `INTERNAL_API_KEY` | Agent → Core, Console → Core auth (`X-Internal-Key` header) | Service-to-service calls fail until all services restarted |
 | Vault Fernet key | `VAULT_KEY` | Encrypts secrets stored in the secrets vault (`/api/v1/secrets`) | Secrets unreadable until re-encryption complete |
@@ -37,6 +37,51 @@ not visibly. Two consequences worth stating before anyone edits one:
 - `gh secret set VAULT_KEY` without the re-encryption in §4 below makes every
   stored secret unreadable at that deploy. There is no undo: the ciphertext is
   still there and the key that opens it is gone. Re-encrypt first, always.
+
+### `SECRET_KEY` also signs the audit chain
+
+This runbook described `SECRET_KEY` as the Fernet encryption key for a year. It
+is that, and it is also the material the audit ledger signs with:
+
+```python
+# core/app/services/audit.py
+def _hmac_key() -> bytes:
+    return hashlib.sha256(settings.secret_key.encode()).digest()
+```
+
+Nothing stores that key. It is derived on every signature, so rotating
+`SECRET_KEY` silently changes the key every existing row was signed under. Three
+things follow, and the third is the one that matters:
+
+- `GET /audit/verify` recomputes each row's HMAC and reports the first broken
+  link. After a rotation the first row fails, so the endpoint reports the chain
+  broken at position 0.
+- The SOC 2 control **CC7.4 — audit trail integrity** recomputes the same HMACs
+  (`compliance_checker.py`) and runs **every 24 hours** by scheduled task. It
+  starts failing on its own, without anyone touching the ledger.
+- A broken chain means, in this system's own words, *"a row was modified or
+  deleted after insertion"*. So the rotation does not merely raise a false alarm:
+  it makes a real tampering indistinguishable from the rotation, for every row
+  written before it. That is the evidence the ledger exists to hold, and it is
+  the property that cannot be restored afterwards.
+
+New rows signed under the new key verify among themselves. The chain is split at
+the rotation, not repaired by it.
+
+**Before rotating `SECRET_KEY`:**
+
+1. Verify the chain first and keep the result — `GET /audit/verify` — so there is
+   a statement that the ledger was intact up to that moment.
+2. Export the rows you must be able to prove later, with their HMACs, somewhere
+   outside the database. After the rotation nothing can re-establish them.
+3. Decide, and write down, that verification of pre-rotation rows is expected to
+   fail from that date. Otherwise the daily CC7.4 failure is investigated as an
+   incident, or worse, learned as noise.
+4. Only then rotate, and re-encrypt the Fernet material as §4 describes.
+
+ADR 0044 refuses re-signing the ledger under a new key, and it is right to: a
+ledger whose owner can re-sign it proves nothing. The cost of that decision is
+paid here, once, whenever this key moves.
 
 ---
 

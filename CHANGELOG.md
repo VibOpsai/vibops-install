@@ -9,6 +9,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.47.3] — 2026-09-24
+
+### Fixed — the agent started with no dynamic tools and no verification
+
+`GET /api/v1/catalog` compared `ToolPolicyOverride.org_id`, a uuid column, to the
+empty string an anonymous caller carries. That does not match nothing: the driver
+raises and the endpoint answers 500. The agent calls it once at startup, caught
+the failure, and carried on with its static tools. On a cold `docker compose up`:
+
+                          before    after
+    static tools            310       310
+    dynamic tools             0       141
+    verification specs        0        79
+
+Not just 141 missing tools — every Nutanix, Proxmox, vSphere, XO, HPE, Outscale
+and Scaleway action. The verification specs come from the same response, so
+**post-action verification was off entirely**: any destructive action the agent
+could still reach ran unproved.
+
+Nothing announced it. The container reported healthy, the agent answered
+normally, one WARNING line in a startup log was the only trace.
+
+The catalogue now skips the override query when there is no organisation, and the
+agent retries the load five times before giving up — at ERROR, because serving
+310 tools out of 451 with no verification is not a warning.
+
+Found by the release smoke tests, which is the second time today they caught
+something that would otherwise have been tagged.
+
+### Added
+
+- **A ratchet on the public figures.** The README claimed 36 connectors in one
+  place and 34 in another; there are 33. The MCP server's public README promised
+  117 tools in its first line and listed 87, the thirty missing being every
+  Proxmox, vSphere and Xen Orchestra tool. The landing page showed three stale
+  figures and called the product "MIT open-core" — only `mcp/` and `sdk/` carry
+  an MIT licence.
+
+  Nothing checked any of it. `tests/test_public_figures.py` recomputes each
+  figure from its source and holds the licence wording to a test asserting which
+  components actually carry a LICENSE file. The two checks that read the live
+  landing page run under `VIBOPS_CHECK_PUBLIC_SITE=1`, by hand before a tag.
+
+### Fixed
+
+- Thirty of the 117 MCP tools were served and undocumented. The public README now
+  documents all of them, and its section counts add up to the number its first
+  line promises.
+- README figures recounted by collection; `connect` and `sdk` test suites were
+  missing from the list entirely.
+- Nutanix AHV added where the other hypervisors appear.
+
+### Documented
+
+- **`SECRET_KEY` also signs the audit chain**, which the rotation runbook had not
+  said since June. Rotating it makes every existing row fail verification, flips
+  the daily SOC 2 CC7.4 control to failing on its own, and — the part that
+  matters — makes a real tampering indistinguishable from the rotation for every
+  row written before it. The incident-response runbook, whose checklist tells you
+  to rotate `SECRET_KEY` when an incident is auth-related, now carries the same
+  warning at the point it is triggered.
+
+---
+
 ## [0.47.2] — 2026-09-24
 
 ### Fixed
