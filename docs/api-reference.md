@@ -113,7 +113,7 @@ creates a job. All jobs are org-scoped, audited, and policy-checked.
 
 Creates a job. Passes through 4 guards: auth, rate limiter, PolicyEngine, GPU quota.
 
-Destructive actions (`scale_cluster`, `delete_deployment`, `helm_uninstall`…) return 409 with a
+Destructive actions (`scale_cluster`, `delete_deployment`, `helm_install`, `helm_upgrade`, `helm_uninstall`…) return 409 with a
 dry-run preview unless `confirmed: true` is present. The `confirmed` flag can only be injected
 by the `confirm_action` agent tool — it is stripped from direct API calls.
 
@@ -222,9 +222,9 @@ curl -s -X POST https://<host>/api/v1/pipelines \
   -d '{
     "name": "deploy-llama3-prod",
     "steps": [
-      {"action": "helm_upgrade", "payload": {"release": "llama3", "namespace": "staging"}, "gateway_id": "gw-abc123"},
+      {"action": "helm_upgrade", "payload": {"release": "llama3", "namespace": "staging", "confirmed": true}, "gateway_id": "gw-abc123"},
       {"action": "get_cluster_deployments", "payload": {"cluster_name": "prod-cluster"}, "gateway_id": "gw-abc123"},
-      {"action": "helm_upgrade", "payload": {"release": "llama3", "namespace": "prod"}, "gateway_id": "gw-abc123"}
+      {"action": "helm_upgrade", "payload": {"release": "llama3", "namespace": "prod", "confirmed": true}, "gateway_id": "gw-abc123"}
     ],
     "on_failure": "rollback"
   }' | jq .
@@ -569,7 +569,7 @@ curl -s -X POST https://<host>/api/v1/webhooks/subscriptions \
     "branch": "main",
     "event": "push",
     "action": "helm_upgrade",
-    "payload": {"release": "llama3", "namespace": "prod"},
+    "payload": {"release": "llama3", "namespace": "prod", "confirmed": true},
     "gateway_id": "gw-abc123"
   }'
 ```

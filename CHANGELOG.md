@@ -9,6 +9,112 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.47.0] — 2026-09-24
+
+### Added
+
+- **Nutanix AHV connector**, through Prism Central — 33rd connector, 5th
+  hypervisor. Twelve actions: inventory, power, clone, live migration,
+  snapshots. Not yet run against a real Prism Central; see below.
+
+- **Post-action verification went from 14 proofs to 79.** A destructive action
+  declares how its effect can be proven, and CI forbids the list of unproved ones
+  from growing (ADR 0038). That list stood at 69 and stands at 12. Seventeen
+  predicates were written, each with its tests.
+
+  What this buys: `helm upgrade --install` returns 0 while a release sits
+  `pending-upgrade`; a Proxmox stop returns a UPID, not a stopped VM; `terraform
+  apply` returns 0 having applied some resources and not others; a rolling pool
+  update that stops halfway leaves a working cluster that can no longer live
+  migrate. All of those now read back and say so.
+
+### Changed — breaking for callers
+
+- **`helm_install` and `helm_upgrade` now require `confirmed: true`.** Both were
+  flagged non-destructive, and the policy engine reads that flag alone to decide
+  whether an action needs a dry-run preview. They installed or upgraded a Helm
+  release with no gate at all, against security invariant 3. They now answer HTTP
+  409 with a preview until confirmed. The MCP tools `helm_upgrade` and
+  `helm_uninstall` take a `confirmed` argument, default `False`.
+
+- **The MCP `helm_uninstall` tool could never succeed** — it sent no `confirmed`
+  flag for an action that has always been destructive, so every call was refused.
+  Fixed with the above.
+
+- Several actions gained **optional** identifying parameters so their effect can
+  be read back: `vm_id` on `xo_delete_snapshot`, `instance_id` on
+  `vme_delete_snapshot`, `cluster_id` on the Scaleway pool actions, `tag` on
+  `registry_delete_tag`, `repository`/`tag`/`registry_type` on the image pushes.
+  Omitting them leaves the action's behaviour unchanged; the proof then reads
+  UNKNOWN rather than inventing a verdict.
+
+### Fixed
+
+- **Eight write handlers reported success and persisted nothing.** `get_db`
+  yields a session and never commits; these handlers only flushed, so the session
+  closed, the transaction rolled back, and the response was built from the
+  in-memory object — a 201 describing a row that exists nowhere. Every write in
+  `agent_budget.py` and `reselling.py` was lost, plus `PATCH /tenants/orgs/{id}`.
+  Found while running the release smoke tests.
+
+- `terraform_plan` runs with `-detailed-exitcode` and reports `has_changes`. The
+  return code 2 means "changes pending", not failure.
+- `list_ingresses` added to the kubectl connector; `list_deployments` gained no
+  duplicate.
+- Xen Orchestra host listings carry `version`; Proxmox, VME and Nutanix reads
+  expose `power_state` at the root; HPE workloads expose `ready_replicas`.
+- Empty snapshot listings return their block instead of nothing — deleting the
+  last snapshot was unprovable for want of an empty list.
+
+### Known limitation
+
+- The Nutanix connector has **not been run against a real Prism Central**. Every
+  endpoint and response field lives in `connectors/vibops_connectors/nutanix/
+  _prism.py`, which states what is uncertain and the order to settle it in. Treat
+  it as unfit for a customer site until one `POST /api/nutanix/v3/vms/list` has
+  been read against a live cluster.
+
+### Added
+
+- **Nutanix AHV connector**, through Prism Central: VM inventory, power, clone,
+  live migration and snapshots — twelve actions, six of them destructive and all
+  six shipping with their proof of effect (ADR 0038). The gateway recognises
+  `nutanix` as a hypervisor type and reports its VM inventory like any other, and
+  the generic `list_vms` / `stop_vm` / `delete_vm` tools route to it.
+
+  **Not yet run against a real Prism Central.** Every endpoint and response field
+  lives in `connectors/vibops_connectors/nutanix/_prism.py`, which states what is
+  uncertain and the order in which to settle it. Its tests replace the HTTP layer
+  with responses written from documentation, not captured from a system, and say
+  so. Treat the connector as unfit for a customer site until one `POST
+  /api/nutanix/v3/vms/list` has been read against a live cluster.
+
+### Fixed — security
+
+- **`helm_install` and `helm_upgrade` had no confirmation gate.** Both were
+  flagged `destructive: False` in the connector catalogue, and the policy engine
+  reads that flag — and only it — to require a dry-run preview and
+  `confirmed: true`. Installing or upgrading a Helm release, which replaces the
+  running workloads, therefore went through with neither. Security invariant 3
+  had not held for either action. The same flag is what the post-action
+  verification ratchet counts, so both also sat outside it.
+
+  **Breaking for callers.** `helm_install` and `helm_upgrade` now answer HTTP 409
+  with a dry-run preview until the payload carries `confirmed: true`. The MCP
+  tools `helm_upgrade` and `helm_uninstall` take a `confirmed` argument
+  (default `False`, which returns the preview).
+
+- **The MCP `helm_uninstall` tool could never succeed.** It sent no `confirmed`
+  flag for an action that has always been destructive, so every call was refused
+  with a 409. Found while fixing the above.
+
+- `helm_install` ships with its proof of effect (ADR 0038): `release_deployed`
+  reads the release status back, because `helm upgrade --install` returns 0 while
+  a release sits `pending-upgrade` or ends `failed` with the old pods still
+  serving.
+
+---
+
 ## [0.45.11] — 2026-09-21
 
 ### Added — the three gaps named in v0.45.10 are closed

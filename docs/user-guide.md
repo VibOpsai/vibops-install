@@ -502,7 +502,9 @@ Org admins see two additional toggles at the bottom of the drawer:
 
 These overrides are **per-org** and **per-action** — they do not affect other organizations. Changes take effect immediately and are recorded in the audit log.
 
-**Example use case:** your org wants confirmation before any `helm_upgrade` in production, even though VibOps does not classify it as destructive by default. Enable "Requires confirmation" on `helm_upgrade` — from that point on, VibOps will always block and ask before running it, even if the LLM would have executed silently.
+**Example use case:** your org wants confirmation before `port_forward`, which VibOps does not classify as destructive by default. Enable "Requires confirmation" on it — from that point on, VibOps will always block and ask before running it, even if the LLM would have executed silently.
+
+> Since v0.46.7, `helm_install` and `helm_upgrade` no longer need this override: both are classified destructive and gate by default. They were not, and the gate simply never fired — an install or upgrade reached the cluster with no preview and no confirmation.
 
 > **Note:** overrides supplement the connector defaults. Removing an override reverts the action to its built-in behavior.
 > **LLM-agnostic guarantee:** the Confirmation gate is enforced by the policy engine (HTTP 409), not by the LLM's own judgment. It works identically whether VibOps is connected to Claude, GPT-4o, Mistral, or any other model.
@@ -1472,7 +1474,7 @@ The Tool policy table lists all 258 actions across every registered connector. E
 
 | Goal | Action to configure | Toggle |
 |------|---------------------|--------|
-| Always confirm before Helm upgrades | `helm_upgrade` | Confirmation ON |
+| Require ITSM sign-off on Helm upgrades *(confirmation is already on by default)* | `helm_upgrade` | Approval ON |
 | Route all scaling decisions through ITSM | `scale_deployment` | Approval ON |
 | Require both in-chat + manager sign-off on MIG partitioning | `accelerator_partition_device` | Both ON |
 | Enforce approval before any cluster deletion | `delete_cluster` | Approval ON |

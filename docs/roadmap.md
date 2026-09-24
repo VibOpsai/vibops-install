@@ -345,10 +345,15 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   each fixed in its own commit. Remaining: extracting the loop itself — optional, the
   file is no longer a liability. (14 Sept 2026)
 
-- [ ] **Enforce post-action verification in the agent loop** — the highest-value gap in
-  the execution loop, and the one that touches correctness rather than cost. Today the
-  agent reports success on a tool's return code: a 200 proves the API accepted the
-  manifest, not that a pod started or a GPU was reserved. The system prompt asks for
+- [ ] **Extend post-action verification to the actions that still lack a proof** —
+  *(24/09: the mechanism itself shipped with ADR 0038 and runs by default; this entry
+  described it as absent, which it no longer is. What remains is coverage.)* The agent
+  otherwise reports success on a tool's return code: a 200 proves the API accepted the
+  manifest, not that a pod started or a GPU was reserved. **48 of 83 destructive actions
+  still declare no proof.** Twelve of them (Outscale, Scaleway) are blocked on the
+  agent having no path to the action itself rather than on any missing read —
+  exposing those connectors to the agent is the prerequisite, and a product call. — counted by `VERIFICATION_PENDING`, which CI forbids from
+  growing. The system prompt asks for
   verification (rule 2, "VERIFY VIA TOOLS, NEVER FROM MEMORY") but **line 34
   contradicts it** — "when all tools have returned status=success, the task is done,
   NEVER rerun ... on grounds of verifying". Nothing enforces it either way.

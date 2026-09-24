@@ -717,7 +717,7 @@ These require a cluster with NVIDIA GPU nodes (EKS/GKE p3/a2 instances, or on-pr
 **Prompt:**
 > *I just added a GPU node to the vibops-dev cluster. Set up the NVIDIA GPU Operator so the node is ready for inference workloads.*
 
-**Tools triggered:** `get_cluster_resources` (detect GPU node labels) → `helm_add_repo(nvidia)` → `helm_install(gpu-operator, namespace=gpu-operator)` → `accelerator_diagnose` (wait for driver + device-plugin + dcgm-exporter Running) → `accelerator_get_metrics` (confirm capacity visible)
+**Tools triggered:** `get_cluster_resources` (detect GPU node labels) → `helm_add_repo(nvidia)` → `helm_install(gpu-operator, namespace=gpu-operator)` — *gates for confirmation, show the preview, then confirm* → `accelerator_diagnose` (wait for driver + device-plugin + dcgm-exporter Running) → `accelerator_get_metrics` (confirm capacity visible)
 
 **What the agent produces:**
 - Detects the new GPU node via cluster resource scan
@@ -938,7 +938,7 @@ These require a cluster with NVIDIA GPU nodes (EKS/GKE p3/a2 instances, or on-pr
 **Step 2 prompt (after CI passes):**
 > *Tests passed. Deploy the api-server Helm release to staging on vibops-dev, set the image tag to main, and confirm the pods are healthy.*
 
-**Tools triggered:** `helm_upgrade(release: api-server, namespace: staging, cluster: vibops-dev, set: image.tag=main)` → `get_deployment_status`
+**Tools triggered:** `helm_upgrade(release: api-server, namespace: staging, cluster: vibops-dev, set: image.tag=main)` — *gates for confirmation first; a Helm upgrade replaces the running pods* → `get_deployment_status`
 
 **What the agent produces:**
 - Helm upgrade: revision 8 → `api-server` upgraded
