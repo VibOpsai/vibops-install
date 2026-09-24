@@ -9,6 +9,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.47.1] — 2026-09-24
+
+Fixes what CI caught on v0.47.0. Both failures were introduced by that release.
+
+### Fixed
+
+- **The Nutanix connector was classified nowhere in the gateway allowlist**, so
+  `connect` would have refused every `nutanix_*` action silently — a connector
+  registered, advertised and quietly inert. `test_every_named_connector_exists_
+  and_is_classified` caught it; I had run `connect/tests/test_hypervisor.py`
+  locally and not the rest of that suite.
+
+- **Nine lines of `docs/installation.md` and one of `docs/technical-architecture.md`
+  still named v0.46.6** — copy-pasteable commands installing the previous
+  release. `bump-version.sh` updates thirteen places and none of them is prose.
+
+  It does now, and only where it should: the same `ACTIONABLE` filter the docs
+  test uses decides which lines are instructions. "Until v0.46.6 the chart pulled
+  a Bitnami image" is history and stays; `ghcr.io/…/vibops-core:v0.46.6` is an
+  instruction and follows the release. The two patterns must agree, and the
+  script says so where it defines its own.
+
+### Not fixed here
+
+- The tagged E2E run reported 10 failures, all of them `test_agent_behavior`
+  answering `400 — Your credit balance is too low to access the Anthropic API`.
+  The functional suite passed 279. This is an account balance, not the code.
+
+---
+
 ## [0.47.0] — 2026-09-24
 
 ### Added
