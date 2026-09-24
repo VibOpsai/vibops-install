@@ -9,6 +9,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.47.2] — 2026-09-24
+
+### Fixed
+
+- **`get_db` now commits on a clean request and rolls back on any exception.**
+  It did neither, which is how eight write handlers came to report success and
+  persist nothing (v0.47.0). A refusal — an HTTPException raised for a 404 or a
+  409 — rolls back, so it leaves nothing behind.
+
+  The commit is a net, not a floor: `test_write_handlers_persist.py` still
+  requires each handler to commit for itself, against a session that does not
+  commit on its behalf.
+
+### Added
+
+- **A ratchet on write durability.** 143 write handlers, and until now nothing
+  asserted that any of them persisted: the `client` fixture points `get_db` at
+  the test's own session, so handler and test share an identity map and a flushed
+  row reads back perfectly right up to the rollback nobody observes. No test
+  crossed a transaction boundary, which is the only place the defect exists.
+
+  `test_write_handlers_persist.py` closes the class in two halves — a static
+  check on the exact signature (flush without commit) and a dynamic one that
+  writes through the API with a session per request, then reads back through a
+  session opened afterwards. Both were verified by putting the defect back.
+
+---
+
 ## [0.47.1] — 2026-09-24
 
 Fixes what CI caught on v0.47.0. Both failures were introduced by that release.
