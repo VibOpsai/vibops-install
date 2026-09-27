@@ -434,30 +434,27 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   Ingress objects, and `configure_gpu_timeslicing` a predicate that should not be
   written before seeing the real output of `get_gpu_timeslicing` on a GPU node.
 
-- [ ] **Twenty agent tools the PolicyEngine refuses** — found by the run above and
-  now guarded by `connectors/tests/test_agent_tools_are_known.py`. Ten were
-  dispatched by a connector with no `TOOL_CATALOG` entry and are fixed. Ten remain
-  dead: their action no longer exists under that name (`get_dcgm_metrics`,
-  `get_gpu_operator_status` → `accelerator_*`; `get_gke_credentials`,
-  `get_aks_credentials` → `update_kubeconfig_*`), plus node-pool scaling that GKE and
-  AKS never implemented, and `scale_deployment`, which the MCP exposes too and is
-  equally broken there.
+- [x] **Twenty agent tools the PolicyEngine refuses** — closed 18/09/2026, verified
+  again 25/09/2026. `connectors/tests/test_agent_tools_are_known.py` now holds
+  `DEAD_AGENT_TOOLS = set()` and `MAX_DEAD = 0`; measured independently the same day,
+  123 agent job tools all resolve into the 348 catalogued actions, and no blocklisted
+  action is dead either.
 
-  Three of the ten are already fixed: `get_mig_status`, `configure_mig` and
-  `disable_mig` are back on `NvidiaConnector`. MIG is the term the market asks for,
-  and the base class allows vendor connectors to carry their own tools beside the
-  portable ones — `AmdConnector` already did. Sprint 5 had rewired only the two
-  writes into `accelerator_partition_device` and left `_query_mig_state` with no
-  caller at all, so MIG could be partitioned and never inspected. Restoring the read
-  also gives the two writes their proof: `partitioning_enabled` /
-  `partitioning_disabled`, which takes them out of `VERIFICATION_PENDING`. Untested
-  on real NVIDIA hardware — the predicates are written against the exact shape
-  `_query_mig_state` returns, but no A100 has confirmed the node labels behave as
-  the connector assumes. Each is to be implemented under its current name or removed
-  from the agent's catalogue — they are advertised on every turn, cost tokens in
-  every request, and burn a turn when the model calls one. The system prompt already
-  forbids `get_gpu_operator_status` by name while the tool is still offered. ~1 day.
+  Ten were dispatched by a connector with no `TOOL_CATALOG` entry. Of the ten dead,
+  four were aliases the agent never followed (`get_dcgm_metrics` → `accelerator_get_metrics`,
+  `get_gpu_operator_status` → `accelerator_diagnose`, `get_gke_credentials` /
+  `get_aks_credentials` → `update_kubeconfig_*`), two were implemented because GKE and
+  AKS node-pool scaling did not exist to alias, and three MIG tools returned to
+  `NvidiaConnector` — restoring `get_mig_status` also gave the two MIG writes their
+  proof and took them out of `VERIFICATION_PENDING`.
 
+  The alias fix needed one more repair: `_TOOL_ACTION_ALIASES` was applied only in the
+  `_JOB_TIMEOUTS` branch of `_execute_tool`, so the four tools living in `_RUN_JOB_TOOLS`
+  would have kept dispatching under their old names — the alias written and inert.
+
+  Still true and not covered here: the MIG predicates are written against the exact
+  shape `_query_mig_state` returns, and no A100 has confirmed the node labels behave
+  as the connector assumes.
 - [ ] **Filter the tool catalogue per task** — `tools=self._effective_tools` sends all
   304 definitions on every turn, at three call sites in `agent_service.py`. A cost and
   accuracy problem, not a correctness one: tokens spent every turn, and selection
@@ -507,6 +504,28 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   Cloudflare Origin CA certificate (free, 15 years, no renewal to watch) plus SSL mode
   *Full (strict)*. Cloudflare itself flags Flexible mode as insecure. ~1 hour.
 
+  **Procedure written 26/09/2026: `docs/runbooks/origin-tls.md`.** Not executed —
+  it needs the Cloudflare dashboard and SSH to the origin, neither of which the
+  repository carries. Measured the same day from outside: `demo.vibops.ai` is the
+  proxied host and answers only through Cloudflare, so the firewall half is
+  confirmed working. The origin address is deliberately not recorded — it cannot
+  be read from outside, which is the point of the edge. The runbook carries the two
+  ways this goes wrong: switching to *Full (strict)* before the origin serves TLS
+  returns 502 to every visitor, and stopping at *Full* encrypts the leg without
+  authenticating it — which looks finished on the dashboard and leaves the
+  interception path open.
+
+  **Deferred on purpose, 26/09/2026.** `demo.vibops.ai` is a demonstration host,
+  not a customer-data production system, and the firewall already closed the leg
+  that mattered — the origin is unreachable except through Cloudflare, verified
+  the same day. Adding origin TLS now puts a certificate and a proxy change on the
+  critical path of the deployment packages going out, for a host whose exposure is
+  a demo session. It is an hour well spent later, not now.
+
+  **What flips this back on:** the day `demo.vibops.ai` carries real customer data,
+  or the day the same Cloudflare zone fronts a production host. Then the clear leg
+  stops being a demo concern.
+
 - [ ] **Enable Redis persistence before routing events through it** — production runs
   `appendonly no` with only spaced RDB snapshots (up to one hour). Harmless today
   (Redis is a Celery broker, data lives in PostgreSQL), material the day anomalies and
@@ -528,11 +547,22 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   be **changed**, not merely erased. History rewriting is possible but invalidates every
   clone; rotation is simpler. Decision, not development.
 
-- [ ] **Reconcile the figures in `docs/commercial/`** — the RFI responses and the
-  valuation document claim 130, 83 and 70 tools and 26 connectors, and contradict each
-  other between the FR and EN versions of the same dossier. Left untouched during the
-  audit because those documents may already have been sent: correcting the archive
-  would diverge from what was transmitted. To settle before the next client sendout.
+- [x] **Reconcile the figures in `docs/commercial/`** — settled 26/09/2026, and the
+  settlement is *not* to correct them. Seven documents contradict the product; two
+  dossiers contradict themselves between their FR and EN versions (RFI v3: 59 tools
+  in French, 130 in English; v5: 70 and 130), and the valuation document counts 195
+  actions against 348 — understating by 44% the product whose value it establishes.
+
+  They stay as they are, because they may already have been sent. Rewriting the
+  archive would diverge from the copy the recipient holds, which is worse than a
+  dated figure: nobody could then tell what was actually claimed.
+
+  What is closed is the recurrence. `tests/test_public_figures.py` freezes those
+  seven names and recomputes the figures from the code; any *new* document under
+  `docs/commercial/` that contradicts them fails CI. The list may shrink — a
+  document reworked or withdrawn comes off it — and may never grow, with a test
+  that refuses an entry which no longer contradicts anything, so the list cannot
+  quietly become a carpet.
 
 - [ ] **Choose between `STATUS.md` and `CHANGELOG.md`** — two parallel histories in
   different formats. `CHANGELOG.md` was brought up to date on 13/09 (177 commits);

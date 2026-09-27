@@ -34,7 +34,7 @@ Les actions ci-dessous nécessitent une intervention manuelle avant remise du do
 |---|--------|-------------|--------|
 | 2.1 | Activer MFA sur le compte GitHub (`davidmacamara-boop`) | David | ☐ |
 | 2.2 | Activer MFA sur la console Anthropic (gestion des clés API) | David | ☐ |
-| 2.3 | Activer MFA sur le provider cloud hébergeant `app.vibops.ai` | David | ☐ |
+| 2.3 | Activer MFA sur le compte Hetzner (héberge `demo.vibops.ai` et les autres machines) | David | ☐ |
 
 ---
 

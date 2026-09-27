@@ -9,6 +9,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.47.4] — 2026-09-26
+
+### Fixed — no default installation could accept a remote site
+
+The Caddyfile `install.sh` generates ended with a catch-all `reverse_proxy
+console:8003`, and every console route carries `Depends(get_current_user)`. A
+gateway presents a gateway token, not a user JWT, so Connect received 401 —
+indistinguishable from a bad token, while the same token worked against the
+internal address. Onboarding a remote site, the entire purpose of the component,
+was impossible on a stock install.
+
+Found by pointing the demo's own Connect at its public URL. Cloudflare's Bot
+Fight Mode challenged it first (403, HTML, `cf-mitigated: challenge`); with that
+off, the 401 underneath was this. The generated proxy now routes
+`/api/v1/gateways/*` to `core:8000` before the catch-all. Two tests pin it,
+including that the route precedes the catch-all that would otherwise swallow it.
+
+### Fixed — the agent could not say whether it had loaded its catalogue
+
+`_refresh_tools` logs "agent tools refreshed: N static + M dynamic" on success,
+at INFO, and the agent configured no logging at all — so under uvicorn the line
+fell through to `logging.lastResort`, which drops everything below WARNING. The
+only way to answer "can this agent act?" was to read *core's* access log. Logging
+is now configured, and `GET /health` returns the static/dynamic tool counts, the
+number of verifiable actions, and `catalog_loaded`.
+
+### Fixed — a restore onto a fresh cluster produced an unreachable database
+
+The backup service dumped `vibops_db` and nothing else. `pg_dump` exports GRANTs
+and never CREATE ROLE, so restoring onto a new cluster failed 57 times on
+`role "vibops_app" does not exist` — behind a zero exit code, with every table
+and row present and no privileges for the role the application connects as. The
+loop now writes `globals_<DATE>.sql.gz` beside the dump, and the healthcheck
+requires both. ADR 0048 carries the drill and the corrected procedure.
+
+### Removed
+
+- The `whisper` experiment from the installer: two Caddy routes, one relaying to
+  `host.docker.internal:30181`, plus an HTML page downloaded from vibops.ai into
+  every customer install.
+- `docs/security/responsible-disclosure-policy.md`, which scoped disclosure
+  around a SaaS at `app.vibops.ai` that was never built.
+
+### Added
+
+- `nvidia/llama-3.1-nemotron-nano-8b-v1` to the NIM catalogue — the only Nemotron
+  that fits a 24 GB card, and so the only one that makes "VibOps runs on NVIDIA
+  inference" testable on affordable hardware.
+- Nemotron provider tests: where the client points, and that a leftover
+  `LLM_API_KEY` is never forwarded to an on-premises NIM endpoint.
+- Ratchets on ORM `org_id` comparisons and on figures in `docs/commercial/`.
+
+---
+
 ## [0.47.3] — 2026-09-24
 
 ### Fixed — the agent started with no dynamic tools and no verification

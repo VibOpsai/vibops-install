@@ -387,6 +387,44 @@ would happen. They have been removed rather than left as decoration.
 
 **No inbound port.** Connect initiates every connection.
 
+### The edge in front of Core must let an API client through
+
+Measured on demo.vibops.ai, 26/09/2026. Pointing Connect at the public URL
+instead of an internal address produced **403 on every call** — ping, jobs,
+claim. Not a VibOps refusal: the response carried `server: cloudflare`,
+`cf-mitigated: challenge` and 5 640 bytes of HTML whose CSP referenced
+`challenges.cloudflare.com`.
+
+Cloudflare was serving a **browser challenge**. Connect is an HTTP client, not a
+browser; it cannot solve JavaScript, so it retries and fails forever. The
+symptom in its log is a clean `HTTP 403`, which reads like a bad token and is
+not one — the same token works against the internal address.
+
+This is the one configuration that breaks the outbound-only design without
+touching anything in this repository, and every instance behind a CDN with bot
+protection enabled by default has it. Before onboarding a site:
+
+- find what issued the challenge first — Cloudflare dashboard, **Security →
+  Events**, the **Service** column names it. The fix is not the same for all:
+  - **Bot Fight Mode** (free plan) does **not** run on the Ruleset Engine, so a
+    WAF Skip rule has no effect on it whatsoever. Either turn it off
+    (Security → Bots) or move to Super Bot Fight Mode, which does accept
+    exceptions. Writing a Skip rule here and watching it do nothing is the
+    second trap, after the 403 that looks like a bad token.
+  - **anything else** — Managed Rules, Security Level, a custom rule — is
+    skippable: WAF → Custom rules, expression
+    `http.request.uri.path starts_with "/api/v1/gateways/"`, action **Skip**.
+- verify from outside with the gateway's own token, not from a browser:
+
+```bash
+curl -si -X POST -H "Authorization: Bearer $TOKEN" \
+  https://vibops.example.com/api/v1/gateways/$GATEWAY_ID/ping \
+  -H 'Content-Type: application/json' -d '{}' | head -3
+```
+
+A `403` with `server: cloudflare` is the edge. A `403` with a JSON body is
+VibOps, and then the token really is wrong.
+
 ## 10. What data transits
 
 | Data | Example | Transits? |

@@ -1,6 +1,6 @@
 # VibOps — Upgrade & Migration Runbook
 
-_Last updated: 2026-08-07 · v0.28.0_
+_Last updated: 2026-09-26 · v0.47.3_
 
 ---
 
@@ -231,6 +231,86 @@ kubectl exec -it deploy/vibops-core -n vibops -- alembic downgrade -1
 ---
 
 ## 5. Breaking Changes by Version
+
+### v0.41.x → v0.47.x — two variables now refuse to start, and one migration rewrites rows
+
+Measured 26/09/2026 against a host running v0.41.4.
+
+**What stops the stack before anything else.** `GRAFANA_PASSWORD` and
+`REDIS_PASSWORD` became mandatory: v0.47.x spells them `${VAR:?...}`, so Compose
+refuses to start when either is missing, and it says so tersely. v0.41.x fell
+back to defaults — `REDIS_PASSWORD` to the literal `vibops-dev`, a password
+published in the compose file on the public site. Add both to `.env` *before*
+pulling anything:
+
+```bash
+grep -q '^REDIS_PASSWORD=' .env   || echo "REDIS_PASSWORD=$(openssl rand -hex 24)"    >> .env
+grep -q '^GRAFANA_PASSWORD=' .env || echo "GRAFANA_PASSWORD=$(openssl rand -base64 16)" >> .env
+```
+
+Setting `REDIS_PASSWORD` is safe in one step: the same variable feeds
+`--requirepass`, the healthcheck and every client's `REDIS_URL`, in both
+versions. Nothing can end up half-authenticated. Anyone still on the published
+default should treat this as a rotation, not a configuration change.
+
+**What changes data.** 26 migrations, including the `org_id` conversion to
+`uuid` (ADR 0045), Row Level Security in three groups (ADR 0047), `json` to
+`jsonb`, and deletion rules on every foreign key (ADR 0046).
+
+The conversion will not fail: each tenancy migration first sends to the reserved
+organisation every `org_id` that is NULL, does not match the uuid shape, or
+points at an organisation that no longer exists — anything, not merely the six
+sentinels that were known. Then it casts, then it adds the foreign key and
+validates it.
+
+That resilience is also the thing to be aware of: **it rewrites rows, and the
+rewrite is not reversible.** On a demonstration database filled over months of
+sessions, the number of rows moved to the system organisation can be large. Take
+the backup for this reason, not out of ritual — and know that this is the
+migration it protects you against, not a crash.
+
+**What does not change.** The eight volumes are identical between the two
+versions, same names, so data stays where it is. No service is added or removed.
+Migrations do not run at startup in this stack — nothing in the compose file
+calls Alembic — so the upgrade is not complete until `alembic upgrade head` has
+run explicitly, exactly as `install.sh` does at its step 7. The repository has a
+single head, so `head` in the singular is correct here.
+
+**Sequence for a Compose host:**
+
+```bash
+cd /path/to/vibops
+# 1. The two variables, first — a missing one stops everything below
+grep -q '^REDIS_PASSWORD=' .env   || echo "REDIS_PASSWORD=$(openssl rand -hex 24)"    >> .env
+grep -q '^GRAFANA_PASSWORD=' .env || echo "GRAFANA_PASSWORD=$(openssl rand -base64 16)" >> .env
+
+# 2. A fresh dump, and proof it is fresh
+docker compose exec backup ls -l /backups | tail -3
+docker compose exec -T postgres pg_dump -U vibops -d vibops_db | gzip > ~/pre-upgrade-$(date -u +%F).sql.gz
+ls -lh ~/pre-upgrade-*.sql.gz
+
+# 3. The new compose file and the new images
+curl -fsSLO https://vibops.ai/docker-compose.yml     # replaces the v0.41.x file
+docker compose pull
+
+# 4. Up, then migrate — in that order, the migration needs core running
+docker compose up -d
+docker compose exec -T core alembic current           # note it, for the rollback
+docker compose exec -T core alembic upgrade head
+
+# 5. Verify
+docker compose ps                                     # every service healthy
+curl -sI https://<host>/api/health | head -1
+docker compose exec -T core alembic current           # must read a7b8c9d0e1f4
+```
+
+**If it goes wrong.** The images are the easy half: `docker compose down`, put
+the old compose file back, `docker compose up -d`. The schema is the hard half —
+`alembic downgrade` exists for these revisions but does not restore the `org_id`
+values the conversion rewrote. Restoring the dump from step 2 is the honest
+rollback, and `backup-restore.md` carries the procedure that was exercised on
+25/09/2026, including the step people miss: restore the cluster globals first, or
+every GRANT lands on a role that does not exist.
 
 ### v0.45.7 — the chart runs its own PostgreSQL
 
