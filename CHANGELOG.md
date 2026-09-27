@@ -9,6 +9,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.47.5] — 2026-09-27
+
+### Fixed — a Connect-managed cluster reported no capacity at all
+
+Connect sent the capacity of each node and no sum. The console reads the
+cluster-level fields, so an online cluster with a node answering displayed
+"0 vCPU / 0 GB / 0 pods", and the node drawer "0 / 4 vCPU" — the allocatable
+figures were never sent either. The legacy worker heartbeat had computed all of
+this since always; the product path reported less than the path it replaced.
+
+Connect now sends the totals, the allocatable figures per node, and a running
+pod count (via `kubectl get pods -o name`, not the full pod JSON: it runs on
+customer clusters). `gpu_used` remains a hardcoded 0 — the same class of defect,
+left visible rather than fixed silently, because it needs the pod requests.
+
+### Fixed — one Celery worker became a new gateway at every restart
+
+The worker registers itself as a gateway and keeps its id in `gateway-id.json`
+under `VIBOPS_DATA_DIR`. Under Docker both defaults failed at once: the name
+defaults to the hostname, which is the container id, and the directory existed
+nowhere, so the write raised FileNotFoundError into `except Exception: pass`.
+Every `--force-recreate` therefore left a gateway row named after a dead
+container, still claiming the cluster names it had reported. Seven had
+accumulated on the demo, twenty-two in a development database.
+
+Both compose files now give the worker a stable name and a named volume, and
+the image creates `/var/lib/vibops` owned by the runtime user — without that
+last part the volume arrives owned by root, the write fails with EACCES, and
+the fix looks applied while changing nothing. The code creates the directory
+and warns instead of passing silently.
+
+### Fixed — the cluster removal endpoint documented the opposite of its behaviour
+
+`DELETE /gateways/{id}/clusters/{name}` claimed the cluster "will reappear" if a
+live gateway re-reports it. It has not been true since `removed_clusters` was
+added, and it described the endpoint as useful only for decommissioned clusters
+— the one case where it is not needed. Nothing tested the subtraction: removing
+it from the ping merge left the whole suite green.
+
+### Fixed — `tests/` was never run as a directory
+
+Every guard in it had to be named by hand in `ci.yml`, and one that was not
+never ran. `tests/test_installer_caddyfile.py` — which checks that a default
+install can onboard a remote site at all, written after the v0.47.4 failure —
+had never executed once. The harness job now runs the directory.
+
+---
+
 ## [0.47.4] — 2026-09-26
 
 ### Fixed — no default installation could accept a remote site
