@@ -709,26 +709,86 @@ measurements today is zero — so the order matters more than usual.
 - [x] **Prompt caching, then intent-based tool filtering** — outside the GreenOps scope and to
   be done first: 310 tools, roughly 43,800 tokens on every call. A cost and latency matter
   before an environmental one. ✓ v0.45.0
-- [ ] **Per-cluster measurement-sources page** — the first deliverable, before any collector.
+- [x] **Per-cluster measurement-sources page** — the first deliverable, before any collector.
   DCGM needs the GPU Operator; without it the collection returns nothing and "nothing" renders
   as zero. A footprint dashboard that silently under-reports is worse than none.
-- [ ] **`power_w` and `energy_wh` in `gpu_metrics_history`**, `PowerConsumedWatts` on the
-  Redfish connector. Two columns and one GET — plus partitioning and a purge task in the same
-  migration: per-GPU at one row a minute is ~460,000 rows a day on a forty-node fleet.
-- [ ] **Declared entry: `annual_kwh` on `cluster_rates`** — a `declared`-quality figure with no
+  ✓ 28/09/2026 — `GET /greenops/measurement-sources`, console section under FinOps. Produces
+  no kWh and no gCO2e by design; it names what each cluster can and cannot measure, and
+  distinguishes `absent` (a prerequisite is missing) from `not_applicable` (nothing to measure)
+  from `unsupported` (no field exists yet). On main, not yet tagged.
+- [x] **`power_w` and `energy_wh` in `gpu_metrics_history`** — the step that measures.
+  ✓ 28/09/2026 — four columns (`power_w`, `energy_wh`, `quality`, `source`), a DCGM collector
+  in `connect/worker.py` **disabled by default** (`VIBOPS_COLLECT_POWER=1`), and the ping
+  handler writing a time-series row only for the clusters that reported one. A cluster with no
+  sensor writes no row rather than a row of zeros. Retention already covered this table at 90
+  days since 22/09 — checked rather than assumed; what was missing is the `(org_id,
+  recorded_at)` index the nightly purge walks.
+- [ ] **`PowerConsumedWatts` on the Redfish connector** — the second sensor. Gateway-only
+  (ADR 0043 decision 6): a node with `gateway_id` null is refused and reported, never read by
+  core — that would be core opening a connection into the customer's management VLAN, which
+  the outbound-HTTPS-only architecture promises not to do.
+- [ ] **Publish the collection overhead before enabling anything by default** — forty BMC calls
+  a minute on a forty-node fleet, on equipment that is slow and fails often. A product that
+  sells discretion measures its own cost first.
+- [x] **Declared entry: `annual_kwh` on `cluster_rates`** — a `declared`-quality figure with no
   sensor at all, from a field operators already fill in.
-- [ ] **Factors** — grid intensity on the `llm_backend_rates` pattern, PUE per site,
+  ✓ 28/09/2026 — `annual_kwh` + `kwh_source` (declared / metered / estimated), settable
+  independently of the pricing formula because a kWh is a physical quantity and not a pricing
+  input. Taken before the two columns above on purpose: those without a collector are fields
+  nothing writes, which is the shape this ADR exists to refuse. On main, not yet tagged.
+- [x] **Factors** — grid intensity on the `llm_backend_rates` pattern, PUE per site,
   `carbon_method` as provenance. A missing factor yields `null`, never a default.
-- [ ] **Surfaces** — gCO2e beside `cost_usd` in the FinOps routes, the console and the waste
-  panel; energy attributed by utilisation-weighted GPU-seconds, not by request latency.
-- [ ] **`kwh` and `gco2e` in the monthly chargeback report** — beside `gpu_hours`, by team and
-  by vendor, idle share as a third figure. This is what the demand actually asked for, and it
-  appears in none of the incoming specification's seven phases.
-- [ ] **RGESN as framework #20** — 78 criteria, 10 automatic evaluators that propose while a
-  human confirms. Blocking before anything is published: the official Arcep wording, and the
-  priority split cross-checked against the official tool.
-- [ ] **Exports (NumEcoEval, SCI)** — feed the tool where the customer's reporting is
-  assembled rather than replace it.
+  ✓ 28/09/2026 — `grid_factors` (zone, year, gCO2e/kWh, required source) and `pue` /
+  `pue_source` / `grid_zone` on `cluster_rates`. The table **ships empty and stays empty**:
+  no bundled national average, because a factor is the number a gCO2e is multiplied by and
+  the product must not be the one that chose it. Versioned by year so a footprint computed
+  for 2025 gives the same answer when re-run in 2027. On main, not yet tagged.
+- [x] **Surfaces** — gCO2e beside `cost_usd` in the FinOps routes and the console.
+  ✓ 28/09/2026 — `energy` served on both chargeback routes, `GET /greenops/energy` for the
+  current period without waiting for the monthly report, and an ENERGY tile in the same KPI
+  grid as SPEND (decision 1: a second unit on the FinOps axis, not a parallel journey). The
+  tile shows `—` and never `0` when nothing is declared, carries its method, and names the
+  clusters that declare nothing.
+- [ ] **The waste panel, and attribution by utilisation-weighted GPU-seconds** — both wait on
+  per-cluster GPU-hours: idle energy is per cluster, and so is the weighting.
+- [x] **`kwh` and `gco2e` in the monthly chargeback report** — beside `gpu_hours`. This is what
+  the demand actually asked for, and it appears in none of the incoming specification's seven
+  phases.
+  ✓ 28/09/2026 — an `energy` block on `ChargebackReport` carrying the figure, its quality, the
+  method, the clusters counted and those left out. Computed in the upsert both entry points
+  share, so no month can look consumption-free because one path forgot.
+- [ ] **Per-cluster GPU-hours, so energy can be attributed** — the ADR assumed the hard part
+  was done because *cost* attribution is. It is not for energy: `VendorUsage` carries vendor,
+  accelerator type and GPU-hours, `Job` carries a gateway id, and neither carries a cluster —
+  while the declared consumption is per cluster. Until that field exists the energy figure is
+  an organisation total and says so; splitting it by GPU-hour share would assume every cluster
+  is equally efficient. One field on the usage rows, not a programme.
+- [ ] **Idle share as a third figure** — the energy detected as idle, beside the two above.
+  Needs the attribution item first: idle is per cluster.
+- [x] **RGESN as framework #20** — 78 criteria, 10 automatic evaluators that propose while a
+  human confirms.
+  ✓ 28/09/2026 — seeded and scored by the engine that already ran for nineteen referentials:
+  no new route, no new tool, one word in the agent prompt. Generated from
+  `config/rgesn/rgesn_criteria.yaml`, which the core image now ships; the weights, priorities
+  and evaluators stay in that file rather than becoming columns. The evaluators themselves are
+  **not** written yet — the 78 controls exist and are human-attested for now.
+  **Still blocking before anything is published**: the official Arcep wording (the titles are
+  summaries, the YAML says so in its own header) and the priority split cross-checked against
+  the official tool. On main, not yet tagged.
+- [x] **Exports (SCI)** — feed the tool where the customer's reporting is assembled rather
+  than replace it.
+  ✓ 28/09/2026 — `GET /greenops/export/sci` returns every component of
+  `((E x I) + M) / R` with its provenance, and **no score**: ISO/IEC 21031 requires all four
+  terms and M, the allocated manufacturing emissions, is collected nowhere in this product.
+  A number labelled SCI that dropped M silently is the first thing an auditor tests.
+- [ ] **Exports (NumEcoEval)** — blocked, and on their side of the fence.
+  `GET /greenops/export/numecoeval` ships the inventory VibOps can supply, flagged
+  `importable_as_is: false`: the specification's own annex A says to retrieve the official
+  integration kit and align the exact headers and reference values before emitting their four
+  CSVs, and a blank `modele` column is a known import failure. Guessing the schema would
+  produce files that fail to import, or import wrong. What remains is one session with the kit.
+- [ ] **Embodied carbon (M)** — the term that would make an SCI score possible at all. Needs
+  the hardware profiles the ADR parks: GWP per machine, lifetime, source.
 
 Not planned here, and named so nobody assumes otherwise: low-carbon scheduling (the
 specification's optional phase 6), a CSRD ESRS E1 export, VibOps's own footprint, and the

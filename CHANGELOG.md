@@ -9,6 +9,103 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.48.0] — 2026-09-28
+
+### Added — GreenOps: the product can hold an energy figure, and now measures one
+
+ADR 0043's eight steps, shipped in order and with the collectors **disabled by
+default**. A fleet that turns none of them on reads exactly as it did: every figure
+declared, and saying so.
+
+- **The measurement-sources page first, before any collector.** DCGM needs the GPU
+  Operator; on a cluster without it the collection returns nothing, and nothing renders
+  as zero. `GET /greenops/measurement-sources` names, per cluster, which sources are
+  present and which are missing — and the absences are not interchangeable: `absent`
+  (a prerequisite is missing), `not_applicable` (nothing to measure), `unsupported`
+  (no field exists yet).
+- **`annual_kwh` and `kwh_source` on `cluster_rates`.** The electricity cost had been
+  on file since Sprint 9 as kWh × tariff computed outside the product; only the product
+  came in, and the kWh — the one quantity carbon needs — were discarded at input.
+- **`grid_factors` and `pue`.** Versioned by year, `source` required, and the table
+  **ships empty**: no bundled national average, because a factor is the number a gCO2e
+  is multiplied by and the product must not be the one that chose it.
+- **Energy in the monthly chargeback and in the console**, beside the dollars — carbon
+  is a second unit on the FinOps axis, not a parallel journey.
+- **`power_w`, `energy_wh`, `quality`, `source` in `gpu_metrics_history`**, fed by a
+  DCGM collector in `connect/worker.py` riding the ping that already runs: no new port,
+  no new connection. A cluster with no sensor writes no row rather than a row of zeros.
+- **RGESN as the twentieth compliance framework** — 78 criteria in an engine that
+  already served nineteen: one word in the agent prompt, no new tool. Not publishable
+  as it stands: the titles are summaries, not the official Arcep labels.
+- **An SCI export (ISO/IEC 21031:2024) that produces no score.** The standard requires
+  four terms and the allocated manufacturing emissions are collected nowhere. Every
+  component is exported with its provenance and `sci` is null, naming each missing term.
+- **CSV import for both**, with an unknown column now **refused** rather than skipped:
+  a file carrying `annual_kwh` for eighteen sites used to report eighteen successes and
+  store none of it.
+
+### Added — the audit chain head is witnessed by someone who is not us
+
+ADR 0044 §3. Hourly, each organisation's chain head is published to its own SIEM — a
+system the customer already trusts, that already receives the audit exports, needing no
+new outbound destination and working air-gapped. An unchanged head is not republished, a
+failed push writes no row, and an organisation with no SIEM is skipped rather than
+failed. `/audit/verify` now says whether an anchor exists, on a broken chain too.
+
+### Fixed — the console had escaped its own layout box
+
+One `</div>` too many and one unclosed `<template>`, dating from the 15/08/2026 split
+into partials. The browser closed the scrolling container at the end of the Dashboard
+tab, so every tab after it — and the agent panel — rendered outside the `h-screen` box:
+the page grew past the viewport and showed a black band underneath. The templates are
+not self-contained, so no single file looked wrong; the new test assembles the document
+and walks it.
+
+### Fixed — Connect reported the capacity of each node and no sum
+
+The console reads the cluster-level fields, so an online cluster with a node answering
+displayed "0 vCPU / 0 GB / 0 pods". The legacy worker heartbeat had computed those totals
+since always; the product path reported less than the path it replaced.
+
+### Fixed — one Celery worker became a new gateway at every restart
+
+Its name defaulted to the container id and its identity file lived in a directory nothing
+mounted, so the write failed into `except Exception: pass`. Seven orphan gateway rows had
+accumulated on the demo. Both compose files now give it a stable name and a volume, and
+the image creates the directory owned by the runtime user — without that last part the
+volume arrives owned by root and the fix looks applied while changing nothing.
+
+### Fixed — the demo seed purged a tenant it had not authenticated as
+
+It created its data through the API, in the organisation of the account it logged in as,
+and resolved the organisation to purge as "the oldest non-system one". Run against a new
+organisation it emptied another: 19 gateways, 120 jobs, 485 rows of GPU metrics.
+
+### Changed — lint covers the platform, and the front end is parsed
+
+Six ruff invocations became nine: `console/app`, `mcp/vibops_mcp`, `connect`, `sdk`,
+`llm-proxy`, `scripts`, `core/scripts` and `core/alembic` were looked at by nothing. The
+71 findings were all cosmetic. And `node --check` now runs on every file under
+`console/static/js` — 6,163 lines that no tool had ever read.
+
+### Fixed — the dev stack refused to start once the referential shipped
+
+`docker-compose.override.yml` bind-mounts `./core:/app` for hot reload, which
+replaces the whole directory: the RGESN file the Dockerfile puts in `/app/config`
+was erased by the mount, and core raised `FileNotFoundError` at import. Every
+developer's `docker compose up` would have failed. The same shape the override
+already documents for `/connectors`, and now a test walks every `COPY` into
+`/app` and checks the mount brings it back.
+
+### Removed
+
+- `console/templates/base.html` — 906 KB, a full second copy of the console that no route
+  rendered, still being edited by style commits.
+- Five partials included from nowhere, and `extract_partials.py`, the one-shot split
+  script whose own header says it overwrites live templates from frozen line ranges.
+
+---
+
 ## [0.47.5] — 2026-09-27
 
 ### Fixed — a Connect-managed cluster reported no capacity at all
