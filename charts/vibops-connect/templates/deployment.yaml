@@ -39,6 +39,12 @@ spec:
             # sort immediatement s'il ne l'a pas.
             - name: VIBOPS_GATEWAY_ID
               value: {{ .Values.gateway.id | required "gateway.id is required — create the gateway in the console first" | quote }}
+            {{- if .Values.powerCollection.enabled }}
+            # Volontaire : la collecte ajoute une lecture DCGM et un appel par
+            # BMC a chaque cycle, sur le materiel du client.
+            - name: VIBOPS_COLLECT_POWER
+              value: "1"
+            {{- end }}
             {{- if .Values.networkScan.enabled }}
             {{- if .Values.networkScan.subnet }}
             # Sans sous-reseau, connect deduit le sien : dans un pod, le reseau

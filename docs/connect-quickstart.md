@@ -101,20 +101,21 @@ which returns a dry-run summary until you pass `?confirmed=true`.
 Copy the command the console shows you. It already carries the id and the
 token.
 
-**Helm** (inside a Kubernetes cluster). The chart is published as a GitHub
-release asset — there is no public Helm repository yet, so fetch the chart
-rather than adding a repo:
+**Helm** (inside a Kubernetes cluster). The chart is published to a public OCI
+registry — nothing to add, nothing to download first, and no credentials:
 
 ```bash
-gh release download vibops-connect-0.27.1 \
-  --repo davidmacamara-boop/vibops --pattern '*.tgz'
-
-helm upgrade --install vibops-connect ./vibops-connect-0.27.1.tgz \
+helm upgrade --install vibops-connect \
+  oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --namespace vibops-connect --create-namespace \
   --set gateway.id="3f2a…-…-…" \
   --set vibops.coreUrl="https://vibops.example.com" \
   --set vibops.token="kR7…"
 ```
+
+Until 29/09/2026 this section told you to fetch a release asset from a private
+repository, which nobody outside VibOps could do. If a tutorial or an older
+console still shows `gh release download`, ignore it and use the line above.
 
 **Docker** (anywhere else — a hypervisor host, a jump box, a VM on the
 management VLAN):
@@ -172,7 +173,7 @@ gateway.
 kubectl create secret generic vibops-kubeconfig \
   --from-file=config=$HOME/.kube/config -n vibops-connect
 
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz \
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --set kubeconfig.secretName=vibops-kubeconfig
 ```
 
@@ -217,7 +218,7 @@ connection.
 
 ```bash
 # Proxmox VE
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz \
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --set proxmox.url="https://pve.paris.local:8006" \
   --set proxmox.user="root@pam" \
   --set proxmox.tokenId="vibops" \
@@ -225,14 +226,14 @@ helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz \
   --set gateway.hypervisorName="pve-paris"
 
 # VMware vCenter
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz \
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --set vsphere.host="vcenter.lyon.local" \
   --set vsphere.username="svc-vibops@vsphere.local" \
   --set vsphere.password="xxxxx" \
   --set gateway.hypervisorName="vc-lyon"
 
 # Xen Orchestra (XCP-ng / Vates)
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz \
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --set xenOrchestra.url="https://xo.paris.local" \
   --set xenOrchestra.token="xxxxxxxx" \
   --set gateway.hypervisorName="xo-paris"
@@ -268,7 +269,7 @@ hypervisors:
 ```
 
 ```bash
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz -f values-paris.yaml
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect -f values-paris.yaml
 ```
 
 **The name is the key.** Alert rules and pricing target a hypervisor by name,
@@ -295,7 +296,7 @@ runs, finds nothing, and reports zero servers — which reads as "this customer
 has no bare metal" and means "I could not look".
 
 ```bash
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz \
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --set networkScan.subnet="10.20.0.0/24" \
   --set networkScan.timeoutMs=500
 ```
@@ -327,7 +328,7 @@ execution — VibOps never stores the credential itself.
 Scanning a customer's network is opt-out, and opting out costs one flag:
 
 ```bash
-helm upgrade vibops-connect ./vibops-connect-0.27.1.tgz --set networkScan.enabled=false
+helm upgrade vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect --set networkScan.enabled=false
 ```
 
 Nodes are then declared by hand. Nothing else changes.

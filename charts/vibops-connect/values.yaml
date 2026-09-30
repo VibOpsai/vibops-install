@@ -48,6 +48,19 @@ kubeconfig:
 # ── Platform type ─────────────────────────────────────────────────────────────
 # "kubernetes" (default), "hypervisor", "slurm", "hybrid"
 # ── Network discovery ─────────────────────────────────────────────────────────
+# ── Mesure de la consommation ────────────────────────────────────────────────
+# Lire DCGM et interroger les BMC coute quelque chose sur le materiel du client,
+# et l'ADR 0043 exige que ce surcout soit publie avant d'activer la collecte par
+# defaut. Elle est donc volontaire.
+#
+# Sans ce drapeau, connect ne persiste aucune puissance et VibOps affiche des
+# valeurs declarees. Jusqu'au 30/09/2026 le chart ne l'exposait pas du tout :
+# la seule facon d'allumer la mesure etait de modifier le deploiement a la main,
+# ce qu'un `helm upgrade` effacait.
+powerCollection:
+  # true -> VIBOPS_COLLECT_POWER=1
+  enabled: false
+
 networkScan:
   # Scanning a customer's network is opt-out, and turning it off must need no
   # other configuration.
