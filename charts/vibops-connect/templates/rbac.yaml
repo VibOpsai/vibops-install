@@ -19,6 +19,18 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  # La mesure de consommation lit dcgm-exporter a travers le proxy du serveur
+  # d'API, ce qui est une ressource distincte de `services` : lister le service
+  # ne donne pas le droit de le traverser. Sans cette ligne, le collecteur
+  # recevait « cannot get resource services/proxy » et rendait None — la meme
+  # valeur que « pas d'exporteur ». La fonctionnalite etait donc inatteignable
+  # telle qu'installee par le chart. Constate le 30/09/2026 sur une L4.
+  #
+  # En lecture seule, et seulement sur le proxy : le gateway ne peut ni creer
+  # ni modifier de service.
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
