@@ -28,6 +28,18 @@ gateway:
   # is the key alert rules and pricing target, so it must be stable and chosen
   # deliberately. Defaults to the hypervisor type.
   hypervisorName: ""
+  # Name this cluster declares itself under. A cluster name is a routing
+  # address, not a label: it is how a job finds its gateway, so it must be
+  # unique within the organisation — core refuses a name another gateway
+  # already declares, and the cluster then shows up with no name at all.
+  #
+  # Empty means "in-cluster", which is fine for the first Kubernetes site and
+  # collides on every one after it. Set it per site (gra11-prod, par1-prod);
+  # the console fills it with the gateway name in the command it prints.
+  #
+  # Only used for the in-cluster ServiceAccount path. With kubeconfig.secretName
+  # set, the context names in that kubeconfig are what gets declared.
+  clusterName: ""
 
 # ── Connection to VibOps Core API ─────────────────────────────────────────────
 vibops:

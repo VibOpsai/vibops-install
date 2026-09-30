@@ -5,10 +5,10 @@ description: >
   Deploys the connector agent that bridges client Kubernetes clusters
   to the central VibOps platform.
 type: application
-version: 0.28.0
+version: 0.29.1
 # Suit la version de l image vibops-connect, puisque le tag vide retombe
 # dessus. Un appVersion en retard tirait une image d il y a vingt versions.
-appVersion: "0.48.2"
+appVersion: "0.48.3"
 keywords:
   - kubernetes
   - gpu

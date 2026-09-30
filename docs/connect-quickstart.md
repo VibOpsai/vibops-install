@@ -109,6 +109,7 @@ helm upgrade --install vibops-connect \
   oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
   --namespace vibops-connect --create-namespace \
   --set gateway.id="3f2a…-…-…" \
+  --set gateway.clusterName="gra11-prod" \
   --set vibops.coreUrl="https://vibops.example.com" \
   --set vibops.token="kR7…"
 ```
@@ -116,6 +117,20 @@ helm upgrade --install vibops-connect \
 Until 29/09/2026 this section told you to fetch a release asset from a private
 repository, which nobody outside VibOps could do. If a tutorial or an older
 console still shows `gh release download`, ignore it and use the line above.
+
+**`gateway.clusterName` is not cosmetic.** A cluster name is the address a job
+is routed to, so the platform refuses a name another gateway in the same
+organisation already declares. Left empty, an in-cluster install declares
+itself as `in-cluster` — fine for the first Kubernetes site, and taken on every
+one after it. The second site then reports its nodes, its pods and its GPUs,
+and shows up in the fleet with no cluster at all; Connect logs the conflict and
+names the gateway holding the name. Chart 0.29.0 and later. Name it after the
+site (`gra11-prod`, `par1-prod`); the console fills it with the gateway name in
+the command it prints.
+
+The name only applies to the in-cluster ServiceAccount path. With
+`kubeconfig.secretName` set, the context names in that kubeconfig are what gets
+declared, and they are already yours to choose.
 
 **Docker** (anywhere else — a hypervisor host, a jump box, a VM on the
 management VLAN):

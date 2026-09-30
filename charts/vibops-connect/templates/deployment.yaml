@@ -39,6 +39,12 @@ spec:
             # sort immediatement s'il ne l'a pas.
             - name: VIBOPS_GATEWAY_ID
               value: {{ .Values.gateway.id | required "gateway.id is required — create the gateway in the console first" | quote }}
+            {{- if .Values.gateway.clusterName }}
+            # Le nom sous lequel ce cluster se declare, donc l'adresse par
+            # laquelle les jobs le trouvent. Unique par organisation.
+            - name: VIBOPS_CLUSTER_NAME
+              value: {{ .Values.gateway.clusterName | quote }}
+            {{- end }}
             {{- if .Values.powerCollection.enabled }}
             # Volontaire : la collecte ajoute une lecture DCGM et un appel par
             # BMC a chaque cycle, sur le materiel du client.

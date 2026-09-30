@@ -118,7 +118,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.2
+  ghcr.io/davidmacamara-boop/vibops-core:v0.48.3
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -176,12 +176,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.2 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.2 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.48.2 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.2 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.2 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.2 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.48.3 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.3 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.48.3 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.3 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.3 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.3 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -317,7 +317,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.48.2` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.48.3` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -546,7 +546,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.2 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.3 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
@@ -729,14 +729,27 @@ kubectl create secret generic vibops-connect-token \
 helm upgrade --install vibops-connect ./charts/vibops-connect \
   --namespace vibops-connect \
   --set gateway.id="$GATEWAY_ID" \
+  --set gateway.clusterName="$SITE_NAME" \
   --set vibops.coreUrl="https://vibops.mycompany.com" \
   --set vibops.existingSecret="vibops-connect-token" \
   --wait
 ```
 
+`gateway.clusterName` (chart 0.29.0 and later) is the name this cluster
+declares itself under, and a cluster name is a routing address: the platform
+refuses a name another gateway in the same organisation already holds. Left
+empty, every in-cluster install declares `in-cluster`, so the second Kubernetes
+site collides with the first and appears in the fleet with no cluster — its
+metrics arriving all the while. Name it after the site.
+
 ### Verify the gateway is online
 
 In the console, open the **Fleet** tab (second tab in the navigation bar). The gateway should appear in the **Gateways** sub-tab with status **Online** within 30 seconds. The Fleet sub-tab will show the cluster and its GPU metrics.
+
+A gateway that reads **Online** with no cluster beside it has usually hit that
+name conflict. `kubectl logs -n vibops-connect deploy/vibops-connect` names the
+gateway already holding the name; reinstall with a different
+`gateway.clusterName`.
 
 The agent will automatically discover namespaces, deployments and GPU resources on the next
 discovery cycle (triggered manually via the status bar or automatically every 5 minutes).
