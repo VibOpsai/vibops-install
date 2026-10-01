@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.4
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.5
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.4 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.4 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.49.4 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.4 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.4 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.4 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.5 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.5 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.49.5 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.5 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.5 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.5 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -415,7 +415,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.49.4` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.49.5` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -738,7 +738,7 @@ minute, HTTPS 200 with verification passing, and a 308 from HTTP to HTTPS.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.4 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.5 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -907,11 +907,45 @@ If you skipped the wizard or need to add more sites, use one of these methods:
 
 ### Method A — Via the console (recommended)
 
-1. Click **"+ Connect Gateway"** from the Fleet tab (or any tab) — a modal overlay opens
-2. Choose **Kubernetes Cluster** or **Virtual Machines**
-3. For K8s: enter a name, select environment, click **Register Gateway** — copy the token and Helm deploy command
-4. For VMs: select hypervisor type (Proxmox VE / Xen Orchestra / VMware vSphere), enter API URL and credentials, click **Connect Hypervisor**
-5. The modal polls for the gateway heartbeat — it auto-detects the connection within 30 seconds
+1. Open the **Fleet** tab and click **"+ Connect Infrastructure"**. The button is
+   on that tab only — it is not on the Dashboard.
+2. The modal asks *what do you want to connect?* and offers **four** paths:
+   **Kubernetes** (on-prem or managed — EKS, GKE, AKS, OKS), **Hypervisor**
+   (Proxmox VE, Xen Orchestra, VMware vSphere), **Bare metal server** (iDRAC,
+   iLO, XCC over Redfish) and **HPC / Slurm**.
+3. For Kubernetes: type a gateway name, pick an environment (`prod`, `staging`,
+   `dev`), then click **Connect**. The console registers the gateway and shows
+   the `helm install` line to run on the target cluster, with the token and the
+   gateway id already filled in.
+4. For a hypervisor: enter the API URL and credentials, then **Connect
+   Hypervisor**.
+5. The modal then polls for the gateway's first heartbeat.
+
+Until 01/10/2026 this section named a button that does not exist
+(**"+ Connect Gateway"**), said it was on any tab, offered two choices instead of
+four, and called the final button **"Register Gateway"** instead of **Connect**.
+Corrected by driving the console in a browser.
+
+> **Check `vibops.coreUrl` in the generated command before running it.** The
+> console builds that value from the address *you* are using. With the default
+> Helm install the chart creates no ingress, so the console is usually reached
+> through `kubectl port-forward` — and the command then reads
+> `--set vibops.coreUrl=http://localhost:8003`, which no pod can reach. Replace
+> it with the address the gateway will use:
+>
+> - same cluster as VibOps: `http://vibops-core.vibops.svc.cluster.local:8000`
+> - a remote site: your public ingress host, e.g. `https://vibops.mycompany.com`
+
+> **The command passes the token as `--set vibops.token=…`**, which leaves it in
+> your shell history and in `helm get values`. Method C below creates a
+> Kubernetes Secret and references it with `vibops.existingSecret` instead;
+> prefer that for anything beyond a test.
+
+> **The onboarding wizard covers the same ground, and step 1 cannot be skipped.**
+> On a fresh install with no gateway, logging in opens the five-step wizard, and
+> its step 1 (AI provider) offers only **Save & Next** — pick `Ollama (local)` if
+> you have no API key, since it needs none. Steps 3 and 4 do have **Skip**. Its
+> step 3 registers a gateway exactly as this method does.
 
 ### Method B — Via the setup script (local dev)
 
