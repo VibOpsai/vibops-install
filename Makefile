@@ -22,13 +22,19 @@ quickstart:
 		JWT=$$(openssl rand -hex 32); \
 		PGPASS=$$(openssl rand -hex 16); \
 		GRAFPASS=$$(openssl rand -hex 12); \
+		REDISPASS=$$(openssl rand -hex 24); \
 		sed -i.bak "s/change-me-in-production/$$SECRET/" .env; \
 		sed -i.bak "s/change-me-jwt-secret-in-production/$$JWT/" .env; \
 		sed -i.bak "s/^POSTGRES_PASSWORD=$$/POSTGRES_PASSWORD=$$PGPASS/" .env; \
 		sed -i.bak "s|\$${POSTGRES_PASSWORD}|$$PGPASS|g" .env; \
 		sed -i.bak "s/^GRAFANA_PASSWORD=$$/GRAFANA_PASSWORD=$$GRAFPASS/" .env; \
+		sed -i.bak "s/^REDIS_PASSWORD=$$/REDIS_PASSWORD=$$REDISPASS/" .env; \
+		sed -i.bak "s|\$${REDIS_PASSWORD}|$$REDISPASS|g" .env; \
 		rm -f .env.bak; \
-		echo "→ SECRET_KEY, JWT_SECRET_KEY, POSTGRES_PASSWORD and GRAFANA_PASSWORD generated"; \
+		if [ ! -f Caddyfile ]; then cp Caddyfile.example Caddyfile; \
+			echo "→ Caddyfile created from Caddyfile.example (HTTP on :80 — set your domain for HTTPS)"; \
+		fi; \
+		echo "→ SECRET_KEY, JWT_SECRET_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD and GRAFANA_PASSWORD generated"; \
 		echo ""; \
 		echo "  Edit .env and set:"; \
 		echo "    LLM_PROVIDER + LLM_API_KEY  (or set LLM_PROVIDER=ollama for local LLM)"; \
@@ -84,7 +90,12 @@ check:
 
 hash:
 	@test -n "$(PASSWORD)" || (echo "Usage: make hash PASSWORD=yourpassword"; exit 1)
-	@docker compose run --rm core python -c \
+	@# --entrypoint python : l'entrypoint de l'image n'accepte que api, worker
+	@# ou beat, et prenait « python » pour un mode inconnu — `make hash`
+	@# repondait « Mode inconnu : python » et sortait en erreur. C'est l'etape 5
+	@# du manuel, celle qui genere le hash sans lequel l'authentification reste
+	@# desactivee. Constate le 01/10/2026 en deroulant Option B.
+	@docker compose run --rm --entrypoint python core -c \
 		"from app.auth import hash_password; print(hash_password('$(PASSWORD)'))"
 
 # ── Pilot Onboarding ───────────────────────────────────────────────────────────

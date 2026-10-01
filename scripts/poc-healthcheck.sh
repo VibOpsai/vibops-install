@@ -116,11 +116,16 @@ fi
 # ── 7. Console ────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}6. Console${NC}"
-CONSOLE_URL="${BASE_URL%:8000}:8080"
+# La console n'est pas publiee sur un port : Caddy la sert sur :80, et c'est la
+# seule facon de l'atteindre dans une installation par defaut. Ce script
+# cherchait le port 8080, qui n'apparait dans aucun fichier compose du produit —
+# donc l'avertissement « Console not reachable » tombait sur chaque installation
+# saine. Constate le 01/10/2026 en deroulant Option B sur un hote amd64.
+CONSOLE_URL="${BASE_URL%:8000}"
 if curl -sf --max-time 5 "${CONSOLE_URL}/" &>/dev/null; then
-  ok "Console reachable at ${CONSOLE_URL}"
+  ok "Console reachable at ${CONSOLE_URL} (through the reverse proxy)"
 else
-  warn "Console not reachable at ${CONSOLE_URL} — check docker compose ps console"
+  warn "Console not reachable at ${CONSOLE_URL} — is caddy running? (docker compose ps caddy)"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────

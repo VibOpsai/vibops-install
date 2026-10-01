@@ -52,14 +52,29 @@ provisioned beside them.
 
 | Resource | Requirement |
 |----------|-------------|
-| Kubernetes | 1.27+, any number of nodes, `linux/amd64` |
-| StorageClass | one marked `(default)` — the chart claims 31 Gi across three volumes |
+| Kubernetes | 1.27+, `linux/amd64` |
+| Schedulable capacity | **2 vCPU and 2 GiB free**, on one node or several |
+| StorageClass | one marked `(default)`, whatever its name — the chart claims 31 Gi across three volumes |
 | PostgreSQL | bundled |
 | Redis | bundled |
 
-Measured on 01/10/2026: installed on a two-node Scaleway Kapsule — one of the
-two nodes a 1.8 vCPU / 2.2 GiB instance — with the bundled datastores and 31 Gi
-of block storage. Seven pods Ready in 65 seconds.
+The chart requests **1200m of CPU and 1280 Mi** in total. Add the node's own
+system pods and 2 vCPU / 2 GiB of *free* capacity is the floor — the figure to
+check is what `kubectl describe node` reports as unallocated, not the instance
+size.
+
+Measured on 01/10/2026, on two providers:
+
+- **Scaleway Kapsule**, two nodes, bundled datastores, `sbs-default`: seven pods
+  Ready in 65 seconds.
+- **OVH Managed Kubernetes**, one `d2-4` node (1.84 vCPU / 1.93 GiB
+  allocatable), default class `csi-cinder-high-speed-gen2`: the three volumes
+  bound, migrations ran, core answered healthy — and the console stayed
+  `Pending` on `Insufficient cpu, Insufficient memory`. Six of seven pods fit.
+  That node is below the floor, and it is what established the floor.
+
+The second run is also what proves the storage fix travels: a default class
+named nothing like `standard` binds all three volumes without configuration.
 
 The row below was the only Helm sizing this guide offered until then, and it is
 a production recommendation, not a floor. Quoted as a prerequisite it asks a
@@ -141,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.7
+  ghcr.io/davidmacamara-boop/vibops-core:v0.48.8
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -199,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.7 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.7 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.48.7 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.7 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.7 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.7 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.48.8 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.8 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.48.8 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.8 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.8 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.8 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -400,7 +415,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.48.7` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.48.8` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -442,17 +457,23 @@ needs to be opened in your firewall.
 Recommended for: local development, demos, POC with a client.
 Everything runs in Docker on a single machine. No Kubernetes required.
 
-#### Step 1 — Clone and authenticate
+#### Step 1 — Clone
 
 ```bash
 git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install
-
-# Authenticate to the VibOps container registry (token provided by VibOps)
-make login VIBOPS_REGISTRY_TOKEN=<your-token>
 ```
 
-> **Registry token:** VibOps Docker images are hosted on a private registry. You will receive a `VIBOPS_REGISTRY_TOKEN` from VibOps alongside your installation package. This token is required to pull the Docker images. Contact david@vibops.ai if you did not receive one.
+That is the whole step. **The images are public** — no registry login, no token,
+nothing to request. `scripts/check-connect-artifacts-public.sh` in the product
+repository verifies it by pulling anonymously.
+
+This section used to say the images were on a private registry and to run
+`make login VIBOPS_REGISTRY_TOKEN=<your-token>`, asking the reader to contact us
+for a credential. There is no `login` target in the Makefile: the command
+answered `make: *** No rule to make target 'login'` on the very first line a
+prospect typed, after they had waited for a token they never needed. Removed on
+01/10/2026 after running this path from a fresh clone.
 
 #### Step 2 — Run quickstart
 
@@ -462,9 +483,15 @@ make quickstart
 
 `make quickstart` does the following automatically:
 - Copies `.env.example` → `.env`
-- Generates `SECRET_KEY` and `JWT_SECRET_KEY` via `openssl rand -hex 32`
+- Generates `SECRET_KEY`, `JWT_SECRET_KEY`, `POSTGRES_PASSWORD`,
+  `REDIS_PASSWORD` and `GRAFANA_PASSWORD`
 - Starts the full stack with `docker compose up -d`
 - Runs `make check` to verify all services are healthy
+
+Until 01/10/2026 it generated every one of those **except `REDIS_PASSWORD`**,
+which the compose file requires. `docker compose up` therefore refused to start
+with five interpolation errors — the documented happy path failed on a fresh
+clone, at the second command.
 
 #### Step 3 — Set your LLM provider
 
@@ -495,15 +522,23 @@ make check
 # or: curl http://localhost:8000/api/v1/health
 ```
 
-Open **http://localhost:8003** in your browser (or **http://SERVER_IP:8003** if installing on a remote server). You should see the VibOps console.
+Open **http://localhost** in your browser — or **http://SERVER_IP** on a remote
+server, or your domain once you have set one in `Caddyfile`.
 
-Services started by the stack:
+**The console is not on a port of its own.** Caddy serves it on 80 and 443, and
+that is the only way in: the compose file publishes nothing for core or console
+except core's health port on the loopback. This section said to open port 8003
+until 01/10/2026 — the port the console listens on *inside* its container, and
+which nothing maps. It never answered.
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `console` | **8003** | Web UI — open this in your browser |
-| `core` | 8000 | REST API + job engine (Swagger: `/docs`) |
-| `agent` | 8001 | LLM agent |
+Services started by the stack, and how each is reached:
+
+| Service | Reached at | Description |
+|---------|------------|-------------|
+| `caddy` | **80 / 443** | The only published entry point — serves the console and relays the gateway routes |
+| `console` | through Caddy, on `/` | Web UI — open this in your browser |
+| `core` | `127.0.0.1:8000` | REST API + job engine (Swagger: `/docs`) — loopback only |
+| `agent` | `127.0.0.1:8001` | LLM agent — loopback only |
 | `llm-proxy` | 8004 | LLM inference proxy — per-agent GPU cost attribution |
 | `worker` | — | Celery worker (job execution) |
 | `beat` | — | Celery Beat (scheduled tasks) |
@@ -628,7 +663,7 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.7 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.8 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
