@@ -10,7 +10,7 @@
 #   make pilot-create-client ORG=acme EMAIL=admin@acme.com PASSWORD=s3cr3t
 #   make pilot-create-client ORG=acme EMAIL=admin@acme.com PASSWORD=s3cr3t BUDGET=5000
 
-.PHONY: up down logs quickstart check update debug hash pilot-create-client backup-now backup-list help
+.PHONY: up down logs quickstart check update debug hash wait-healthy pilot-create-client backup-now backup-list help
 
 # ── Stack ──────────────────────────────────────────────────────────────────────
 
@@ -51,8 +51,8 @@ quickstart:
 	fi
 	docker compose up -d
 	@echo ""
-	@echo "→ Stack starting — waiting for core to be healthy..."
-	@sleep 8
+	@echo "→ Stack starting — waiting for the healthchecks to settle..."
+	@$(MAKE) wait-healthy --no-print-directory
 	@$(MAKE) check --no-print-directory
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -86,6 +86,24 @@ quickstart:
 	echo "           Contact david@vibops.ai to obtain a key."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Attendre que les healthchecks se soient prononces, plutot qu'un delai fixe.
+#
+# `make update` enchainait `up -d` et `check` sans rien attendre : sur la demo, le
+# 01/10/2026, la verification a declare la console et l'agent injoignables alors
+# que les deux repondaient 200 quinze secondes plus tard. Caddy et l'agent
+# demarrent apres core, et `up -d` ne les attend pas. `quickstart` avait un
+# `sleep 8`, qui est le meme pari sur une machine plus lente.
+#
+# Tous les services du compose declarent un healthcheck, donc « plus aucun
+# health: starting » est une condition de repos fiable. Bornee a 90 s : au-dela,
+# on verifie quand meme et `check` dira ce qu'il voit.
+wait-healthy:
+	@echo "→ Waiting for the healthchecks to settle..."
+	@for i in $$(seq 1 45); do \
+		if ! docker compose ps --format '{{.Status}}' 2>/dev/null | grep -q 'health: starting'; then break; fi; \
+		sleep 2; \
+	done
+
 # Section 13 du manuel, « Upgrading / Docker Compose », qui tient en une ligne :
 # `make update`. La cible n'existait pas — `No rule to make target 'update'` —
 # donc le chemin de mise a jour documente echouait a sa premiere commande, de la
@@ -98,6 +116,7 @@ update:
 	docker compose pull
 	@echo "→ Recreating the services..."
 	docker compose up -d
+	@$(MAKE) wait-healthy --no-print-directory
 	@echo ""
 	@$(MAKE) check --no-print-directory
 
