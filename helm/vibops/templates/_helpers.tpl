@@ -289,3 +289,39 @@ imagePullSecrets:
 {{- printf "%s:%s" $img.repository $tag -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+  La StorageClass a demander : celle qu'on impose, sinon celle que le cluster
+  declare par defaut — resolue ici, pas laissee au cluster.
+
+  Le champ etait fixe a « standard », un nom qu'aucun fournisseur gere n'utilise :
+  les PVC restaient Pending indefiniment. Le rendre vide a corrige l'installation
+  et casse toutes les mises a jour : Kubernetes inscrit le defaut dans le PVC a la
+  creation, le manifeste rendu n'a plus le champ, et `helm upgrade` tente de le
+  remettre a null sur un objet immuable —
+
+    cannot patch "vibops-agent-training" with kind PersistentVolumeClaim:
+    spec: Forbidden: spec is immutable after creation
+
+  Mesure le 01/10/2026 sur k3s, a la premiere mise a jour qui ait jamais ete
+  jouee : installation reussie, puis sortie 1 et release en « failed ».
+
+  En resolvant le nom au rendu, le manifeste porte ce que le cluster porte, donc
+  il n'y a plus de difference a reconcilier. `lookup` rend un dict vide hors
+  cluster (`helm template`, `--dry-run`) et si l'appelant n'a pas le droit de
+  lister les StorageClass : on retombe alors sur le champ omis, c'est-a-dire le
+  comportement d'avant, qui installe.
+*/}}
+{{- define "vibops.storageClassName" -}}
+{{- if .explicit -}}
+{{- .explicit -}}
+{{- else -}}
+{{- $found := "" -}}
+{{- range (lookup "storage.k8s.io/v1" "StorageClass" "" "").items -}}
+{{- if eq (dig "metadata" "annotations" "storageclass.kubernetes.io/is-default-class" "" .) "true" -}}
+{{- $found = .metadata.name -}}
+{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end -}}
+{{- end -}}

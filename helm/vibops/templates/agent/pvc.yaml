@@ -10,7 +10,9 @@ metadata:
 spec:
   accessModes:
     - {{ .Values.agent.persistence.accessMode }}
-  storageClassName: {{ .Values.agent.persistence.storageClassName }}
+  {{- with include "vibops.storageClassName" (dict "explicit" .Values.agent.persistence.storageClassName) }}
+  storageClassName: {{ . }}
+  {{- end }}
   resources:
     requests:
       storage: {{ .Values.agent.persistence.size }}

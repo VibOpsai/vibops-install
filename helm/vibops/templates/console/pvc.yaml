@@ -25,7 +25,7 @@ spec:
   resources:
     requests:
       storage: {{ dig "persistence" "size" "1Gi" .Values.console | quote }}
-  {{- with dig "persistence" "storageClass" "" .Values.console }}
+  {{- with include "vibops.storageClassName" (dict "explicit" (dig "persistence" "storageClass" "" .Values.console)) }}
   storageClassName: {{ . }}
   {{- end }}
 {{- end }}

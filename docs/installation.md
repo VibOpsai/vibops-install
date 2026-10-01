@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.2
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.3
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.2 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.2 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.49.2 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.2 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.2 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.2 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.3 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.3 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.49.3 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.3 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.3 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.3 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -415,7 +415,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.49.2` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.49.3` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -623,12 +623,19 @@ file and this guide. There is no Helm *repository* to add — no chart index is
 served — so take the charts from the source tree.
 
 ```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami   # PostgreSQL/Redis dependencies
-helm repo update
-
 git clone https://github.com/VibOpsai/vibops-install.git
 cd vibops-install        # contains helm/vibops and charts/vibops-connect
 ```
+
+That is the whole step: `helm/vibops` declares **no chart dependencies**, so
+there is no `helm dependency update` to run and no repository to add. PostgreSQL
+and Redis are deployed from the official `postgres` and `redis` images, not from
+subcharts.
+
+This step opened with `helm repo add bitnami … # PostgreSQL/Redis dependencies`
+until 01/10/2026. Those dependencies do not exist: the two commands added a
+repository nothing reads, and the comment asserted a chart structure the chart
+does not have. Removed after installing the chart on k3s.
 
 In an air-gapped installation, the same two charts are inside the delivery
 archive produced by `scripts/package-delivery.sh`; no clone and no outbound flow
@@ -685,6 +692,7 @@ core:
 #     redisUrl:    "redis://:pass@my-redis-host:6379/0"
 
 # ── Ingress + TLS ─────────────────────────────────────────────
+# Two prerequisites, neither installed by this chart — see below.
 ingress:
   enabled: true
   className: nginx    # or alb, traefik…
@@ -696,11 +704,41 @@ ingress:
       hosts: [vibops.mycompany.com]
 ```
 
+**`ingress.enabled: true` needs two things the chart does not provide**, and it
+fails silently without them:
+
+1. **An ingress controller** whose class matches `className` — ingress-nginx,
+   AWS ALB, Traefik. The chart creates an `Ingress` object; something has to act
+   on it.
+2. **cert-manager, and a `ClusterIssuer` actually named as in the annotation.**
+   The annotation is a reference, not an instruction: with no cert-manager, no
+   one reads it.
+
+Also check the DNS record for `host` resolves to the controller's external
+address, and that ports 80 and 443 reach it — an HTTP-01 challenge is validated
+over port 80.
+
+This block was documented with no mention of either prerequisite until
+01/10/2026. Installed as written on a bare Scaleway Kapsule, it gives:
+
+```
+helm install …                       → exit 0, STATUS: deployed
+kubectl get ingress -n vibops        → created, NO address assigned
+kubectl get secret vibops-tls        → Error: secrets "vibops-tls" not found
+kubectl get events (Ingress)         → No resources found
+curl http://host/  curl https://host/ → 000 and 000
+```
+
+A green install that serves nothing, and not one message anywhere saying why.
+With ingress-nginx and cert-manager installed and a `letsencrypt-prod` issuer,
+the same values file produced a real Let's Encrypt certificate in under a
+minute, HTTPS 200 with verification passing, and a 308 from HTTP to HTTPS.
+
 **Generate a password hash for the admin user:**
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.2 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.3 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -746,12 +784,33 @@ kubectl exec -n vibops deploy/vibops-core -- \
 
 #### Step 5 — Verify
 
+**If you configured `ingress` in your values file**, use your host:
+
 ```bash
 curl https://vibops.mycompany.com/api/v1/health
 # → {"status": "ok"}
 ```
 
-Open `https://vibops.mycompany.com` in your browser.
+**If you did not** — and Step 2 says a values file is optional, so this is the
+default — the chart creates **no Ingress and no LoadBalancer**: every service is
+`ClusterIP`. Nothing is reachable from outside the cluster, by design. Reach it
+through the API server instead:
+
+```bash
+kubectl -n vibops port-forward svc/vibops-core 8000:8000 &
+curl http://localhost:8000/api/v1/health
+# → {"status":"ok","environment":"production", …}
+
+kubectl -n vibops port-forward svc/vibops-console 8003:8003 &
+# then open http://localhost:8003
+```
+
+This step gave only the ingress URL until 01/10/2026. A reader who had followed
+Steps 1 to 4 exactly — a correct, working install — had no way to verify it and
+no way to open the console: the only command offered pointed at a host no
+resource served.
+
+Open the console, then continue with section 5 below.
 
 #### Optional: use the automated onboarding script
 
@@ -897,6 +956,21 @@ helm upgrade --install vibops-connect ./charts/vibops-connect \
   --set vibops.existingSecret="vibops-connect-token" \
   --wait
 ```
+
+**`vibops.coreUrl` when Connect runs in the same cluster as VibOps.** The value
+above is an ingress host, which is right for a *remote* site. For the cluster
+that hosts VibOps itself — the usual first site, and the only one a
+single-cluster customer has — there is no need to leave the cluster, and with
+the default install there is no ingress to leave through:
+
+```bash
+  --set vibops.coreUrl="http://vibops-core.vibops.svc.cluster.local:8000" \
+```
+
+Only the ingress form was documented until 01/10/2026, so the first site a
+reader connects was the one case the step did not cover. Verified on k3s: the
+gateway reported `online`, declared its cluster and sent metrics within forty
+seconds.
 
 `gateway.clusterName` (chart 0.29.0 and later) is the name this cluster
 declares itself under, and a cluster name is a routing address: the platform
