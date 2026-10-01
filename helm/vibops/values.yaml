@@ -30,17 +30,17 @@ images:
   core:
     repository: ghcr.io/davidmacamara-boop/vibops-core
     tag: ""
-    digest: "sha256:868ea124680f2a64e043f61e68958f1684b40b9ddd42c1c6eea6000b1e1dd9a5"
+    digest: "sha256:edc2c0aa660255324904f13c2caafc4e32acbefa0c4b05c6e4f68d0a4d563c9c"
     pullPolicy: IfNotPresent
   agent:
     repository: ghcr.io/davidmacamara-boop/vibops-agent
     tag: ""
-    digest: "sha256:bc4626796e0ddd7365a2e3fbce694f42ce928085ebd71c72914d44642183daf6"
+    digest: "sha256:046148beb28a554dde7112625c816d03c20d48c1c742b500c1857a34b2a51f39"
     pullPolicy: IfNotPresent
   console:
     repository: ghcr.io/davidmacamara-boop/vibops-console
     tag: ""
-    digest: "sha256:7a082fe5bbda6f73c2dbc93f4dd12186ef12e78164e6714c7320327591225db1"
+    digest: "sha256:dd5104e1a908a781a91744d7486850a7ea1327d8fc89874606a21023a87564f5"
     pullPolicy: IfNotPresent
 
 # ── Namespace ─────────────────────────────────────────────────────────────────
@@ -79,8 +79,21 @@ core:
   secret:
     secretKey: ""          # generated — signs the audit chain, pinned once set
     jwtSecretKey: ""       # generated — the agent reads this same Secret
-    authUsername: "admin"
     authPasswordHash: ""   # vide = auth désactivée
+
+    # ── Email / SMTP ─────────────────────────────────────────────────────────
+    # Requis pour la reinitialisation de mot de passe en mode multi-utilisateur.
+    # Core lit `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`,
+    # `smtp_from` depuis toujours ; le chart ne les posait nulle part et le
+    # manuel d'installation demandait pourtant de les renseigner ici. Un client
+    # qui suivait le manuel configurait un SMTP que rien ne lisait, et
+    # decouvrait le probleme au premier « mot de passe oublie ». Corrige le
+    # 01/10/2026, meme forme que la cle de licence une heure plus tot.
+    smtpHost: ""
+    smtpPort: "587"
+    smtpUser: ""
+    smtpPassword: ""
+    smtpFrom: ""
     databaseUrl: ""        # only when postgresql.enabled=false
     redisUrl: ""           # only when redis.enabled=false
     vaultKey: ""           # generated Fernet key — pinned once set
@@ -132,7 +145,14 @@ agent:
   persistence:
     enabled: true
     size: 10Gi
-    storageClassName: standard   # remplacer par efs-sc (AWS) ou nfs-client (GCP)
+    # Vide = la classe par defaut du cluster, comme pour les deux autres volumes
+    # du chart. La valeur etait « standard » en dur : ce nom n'existe que sur
+    # certains clusters (minikube, GKE historique). Sur Scaleway, OVH, EKS ou
+    # tout cluster dont la classe par defaut porte un autre nom, le PVC restait
+    # Pending et le pod agent ne demarrait jamais — sans message ailleurs que
+    # dans `kubectl get pvc`. Constate le 01/10/2026 en deroulant le manuel sur
+    # un Kapsule, ou la classe par defaut s'appelle `sbs-default`.
+    storageClassName: ""
     accessMode: ReadWriteOnce    # ReadWriteMany si plusieurs replicas (EFS)
 
   env:

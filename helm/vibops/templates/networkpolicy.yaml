@@ -23,6 +23,30 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: console
+    # Les passerelles Connect, ou qu'elles soient dans le cluster.
+    #
+    # Un `podSelector` sans `namespaceSelector` ne vaut que pour le namespace de
+    # la politique. Connect s'installe dans le sien — c'est ce que dit le manuel
+    # — donc aucune des deux regles ci-dessus ne l'admettait, et le pod appelait
+    # core jusqu'au timeout en journalisant « core injoignable ? ». Une
+    # passerelle **dans le cluster qui heberge VibOps** ne pouvait pas joindre
+    # core, ce qui est pourtant la premiere installation que fait un client qui
+    # deploie VibOps sur sa propre flotte GPU.
+    #
+    # Constate le 01/10/2026 sur un cluster Scaleway, en branchant une
+    # passerelle sur l'installation fraiche du meme cluster.
+    #
+    # L'ouverture est etroite : le port de core, et uniquement des pods portant
+    # le nom du chart vibops-connect. Une passerelle distante, elle, passe par
+    # l'Ingress et n'est pas concernee.
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vibops-connect
+      ports:
+        - port: {{ .Values.core.service.port }}
+          protocol: TCP
 {{- if .Values.ingress.enabled }}
     # The Ingress publishes this service, and an Ingress controller lives in its
     # own namespace: no podSelector above admits it. Enabling `ingress.enabled`

@@ -200,15 +200,25 @@ imagePullSecrets:
       url = os.environ["DATABASE_URL"].replace("postgresql+asyncpg", "postgresql+psycopg2")
       engine = create_engine(url, isolation_level="AUTOCOMMIT")
       with engine.connect() as conn:
-          conn.execute(
-              text("SELECT set_config('vibops.app_pw', :pw, false)"),
-              {"pw": os.environ["APP_ROLE_PASSWORD"]},
+          # ALTER ROLE n'accepte pas de parametre lie pour le mot de passe, d'ou
+          # le detour par un litteral. Il passait par un bloc de guillemets-dollar
+          # et `format(%L)` cote serveur — correct en SQL, impossible ici :
+          # **Kubernetes remplace un double dollar par un dollar unique** dans
+          # les `args` d'un conteneur, c'est son echappement documente pour un
+          # dollar litteral. (Ce commentaire evite donc d'en ecrire un.)
+          # Postgres recevait donc `DO $ BEGIN ... END $;` et rendait
+          # « syntax error at or near "$" ». Le conteneur d'init echouait, core
+          # ne demarrait jamais, et **aucune installation Helm neuve ne pouvait
+          # aboutir**. Constate le 01/10/2026 en deroulant le manuel sur un
+          # cluster Scaleway.
+          #
+          # `QuotedString` est l'echappement de psycopg2 lui-meme : meme surete
+          # que `%L`, sans aucun dollar dans la requete.
+          from psycopg2.extensions import QuotedString
+          password = QuotedString(os.environ["APP_ROLE_PASSWORD"]).getquoted().decode()
+          conn.exec_driver_sql(
+              "ALTER ROLE vibops_app WITH LOGIN PASSWORD " + password
           )
-          conn.execute(text(
-              "DO $$ BEGIN EXECUTE format("
-              "'ALTER ROLE vibops_app WITH LOGIN PASSWORD %L',"
-              " current_setting('vibops.app_pw')); END $$;"
-          ))
           row = conn.execute(text(
               "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles"
               " WHERE rolname = 'vibops_app'"

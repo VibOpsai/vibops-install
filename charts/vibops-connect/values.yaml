@@ -166,6 +166,18 @@ serviceAccount:
 rbac:
   create: true
   clusterRole: true
+  # Le ClusterRole livre est en lecture seule — `get`, `list`, `watch`. Bon pour
+  # une revue securite, et une impasse des qu'on attend du produit qu'il agisse :
+  # deployer, scaler, redemarrer ou supprimer sont refuses par l'API server, pas
+  # par VibOps. Jusqu'au 01/10/2026 la seule facon d'y remedier etait d'ecrire un
+  # ClusterRole a la main, hors de Helm — qu'un `helm upgrade` ne gere pas et que
+  # personne ne retrouve six mois plus tard.
+  #
+  # A `true`, les verbes d'ecriture sont ajoutes sur les ressources que l'agent
+  # manipule. Volontaire, et nomme : un operateur qui l'active sait ce qu'il
+  # accorde. Les secrets n'y sont pas, et les ressources RBAC non plus : une
+  # passerelle qui pourrait s'accorder des droits n'aurait plus de limite.
+  allowWrite: false
 
 # ── Extra environment variables ───────────────────────────────────────────────
 env: {}

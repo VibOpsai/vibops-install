@@ -70,7 +70,6 @@ core:
   secret:
     secretKey: ""
     jwtSecretKey: ""
-    authUsername: "admin"
     authPasswordHash: ""
     vaultKey: ""
     licenceKey: ""

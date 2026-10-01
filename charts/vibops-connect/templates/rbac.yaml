@@ -31,6 +31,47 @@ rules:
   - apiGroups: [""]
     resources: ["services/proxy"]
     verbs: ["get"]
+{{- if .Values.rbac.allowWrite }}
+  # ── Ecriture (rbac.allowWrite) ──────────────────────────────────────────────
+  #
+  # Volontaire et nomme. Sans ces verbes, VibOps observe et n'agit pas : un
+  # `kubectl scale` ou un `helm upgrade` lance par un job est refuse par l'API
+  # server, et le job echoue sur « forbidden » — ce qui ressemble a un defaut du
+  # produit et n'en est pas un.
+  #
+  # Trois choses restent volontairement absentes, et ce sont les trois qui
+  # transformeraient une passerelle en pivot :
+  #   * `secrets` — lire les secrets du cluster n'est pas necessaire pour
+  #     deployer, et une passerelle compromise les exfiltrerait toutes ;
+  #   * `rbac.authorization.k8s.io` — une passerelle qui peut s'accorder des
+  #     droits n'a plus de limite, et ce plafond-la ne se rattrape pas ;
+  #   * `nodes` en ecriture — cordon et drain touchent la capacite du site, pas
+  #     une charge de travail. A accorder a la main si le besoin apparait.
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -61,6 +102,18 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets"]
     verbs: ["get", "list", "watch"]
+{{- if .Values.rbac.allowWrite }}
+  # Meme intention qu'au-dessus, bornee au namespace du release.
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update", "patch"]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -45,11 +45,34 @@ VibOps runs on a Linux server — not on a workstation. The server must be reach
 **RAM breakdown:** core 512 MB · worker 512 MB · agent 512 MB · console 256 MB · PostgreSQL 1 GB · Redis 256 MB · Prometheus + Grafana 512 MB · OS headroom 2 GB = ~6 GB total. 8 GB minimum, 16 GB comfortable.
 
 
-### Production (Helm, multi-tenant, multiple clients)
+### Pilot (Helm, on an existing cluster)
+
+What the chart actually needs. PostgreSQL and Redis are bundled, so nothing is
+provisioned beside them.
 
 | Resource | Requirement |
 |----------|-------------|
-| Kubernetes | 3 nodes minimum, 4 vCPU / 16 GB each |
+| Kubernetes | 1.27+, any number of nodes, `linux/amd64` |
+| StorageClass | one marked `(default)` — the chart claims 31 Gi across three volumes |
+| PostgreSQL | bundled |
+| Redis | bundled |
+
+Measured on 01/10/2026: installed on a two-node Scaleway Kapsule — one of the
+two nodes a 1.8 vCPU / 2.2 GiB instance — with the bundled datastores and 31 Gi
+of block storage. Seven pods Ready in 65 seconds.
+
+The row below was the only Helm sizing this guide offered until then, and it is
+a production recommendation, not a floor. Quoted as a prerequisite it asks a
+prospect for roughly three times what a pilot uses, which is how an evaluation
+gets postponed.
+
+### Production (Helm, multi-tenant, multiple clients)
+
+Recommended once the installation carries real tenants and real traffic.
+
+| Resource | Recommendation |
+|----------|----------------|
+| Kubernetes | 3 nodes, 4 vCPU / 16 GB each |
 | PostgreSQL | Managed service (RDS, CloudSQL, AlloyDB) — 2 vCPU / 8 GB |
 | Redis | Managed service (ElastiCache, Memorystore) |
 | Storage | 200 GB+ for PostgreSQL data + backups |
@@ -118,7 +141,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.6
+  ghcr.io/davidmacamara-boop/vibops-core:v0.48.7
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -176,12 +199,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.6 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.6 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.48.6 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.6 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.6 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.6 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.48.7 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.7 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.48.7 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.7 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.7 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.7 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -241,30 +264,90 @@ Allow outbound HTTPS (port 443) → your-vibops-server.com
 
 ## 3. Get a licence
 
-VibOps starts a **14-day trial** automatically with Starter limits (32 GPU / 5 users / 2 clusters).
-No key required — skip to step 3 to install and come back here when ready to activate.
+VibOps starts a **14-day trial** automatically, with trial limits: **10 GPU, 5
+users, 5 clusters**. No key required — skip to step 3 to install and come back
+here when ready to activate.
+
+| Plan | GPU | Users | Clusters |
+|---|---|---|---|
+| trial (no key) | 10 | 5 | 5 |
+| starter | 10 | 5 | 2 |
+| pro | 50 | 20 | 10 |
+| enterprise | unlimited | unlimited | unlimited |
+
+**"Clusters" counts gateways, not clusters.** `check_clusters` is called on
+gateway creation with the number of `Gateway` rows in the organisation
+(`core/app/api/v1/gateways.py`), so one site is one unit however many clusters
+its gateway reports. The column keeps the name the plan uses; this is what it
+measures. GPU is the sum reported by every gateway of the organisation, checked
+on each heartbeat — a fleet that crosses it keeps running and the ping answers
+`gpu_limit_exceeded` rather than dropping the metrics.
+
+These are `PLAN_LIMITS` in `core/app/licence.py`, and `tests/test_licence_limits_documented.py`
+fails if this table and that dictionary disagree. Until 01/10/2026 this
+paragraph read "Starter limits (32 GPU / 5 users / 2 clusters)": it named the
+wrong plan, and two of its three numbers were wrong — 32 appears nowhere in the
+product. A prospect sizing a pilot against it would have planned for three
+times the GPUs the trial allows.
 
 ### Activate a paid licence
 
-Once you receive your `VIBOPS_LICENCE_KEY` from VibOps:
+Three routes. **Prefer the first** — it is the only one that needs no restart.
 
-**Docker Compose:** add it to your `.env` file:
+**Console** (recommended) — **Admin (⚙) → Licence**, paste the key, save. It is
+validated, applied **hot**, and written to the database so it survives the next
+restart. The page then shows which licence is active, where it came from, and
+when the trial started.
+
+**Docker Compose** — in `.env`:
 ```bash
-VIBOPS_LICENCE_KEY=eyJ...
+LICENCE_KEY=eyJ...
 ```
 
-**Helm:** add it to your `my-values.yaml`:
+**Helm** — in `my-values.yaml`:
 ```yaml
 core:
   secret:
     licenceKey: "eyJ..."
 ```
 
-The licence is a self-contained RS256 JWT — no network call is made to validate it.
-Plan limits (GPU, users, clusters) are enforced directly in the product.
+Precedence is **database → environment → trial**. The database wins
+deliberately: an operator who activates a licence in the console acts *after*
+deployment, and an environment variable winning would silently undo that at the
+first restart.
 
-You can check your licence status at any time in the console: **Admin (⚙) → Licence**.
-A countdown banner appears in the header as the trial or licence approaches expiry.
+> **`LICENCE_KEY`, and `VIBOPS_LICENCE_KEY` also works.** Until 01/10/2026 the
+> guide, the chart and `onboard-client.sh` all set `VIBOPS_LICENCE_KEY` while
+> the setting is named `licence_key` — so pydantic dropped it (`extra="ignore"`)
+> and **a licence installed through Helm never reached the product**. The
+> deployment stayed on trial limits, in silence. Both spellings are accepted
+> now, and `tests/test_deployment_env_names.py` fails if a deployment file sets
+> a variable nothing reads.
+
+The licence is a self-contained RS256 JWT, verified offline against a public key
+compiled into the product. No activation call, no licence server, no telemetry —
+and therefore **no revocation**: a key is valid until its `exp`.
+
+### What happens when it expires
+
+Expiry is checked in exactly three places, all returning **402**:
+
+- creating a gateway
+- creating a user
+- sending an organisation invite
+
+Everything else keeps running — gateways ping, metrics are stored, energy is
+measured, the console works. **You can no longer add; you can still see.** The
+countdown banner in the header is the only warning, so plan the renewal rather
+than waiting for a refusal.
+
+The GPU ceiling is separate and checked on every heartbeat. Crossing it does not
+stop anything being recorded: the ping answers `gpu_limit_exceeded`, the gateway
+logs it at the site, and the Licence page shows the real count against the
+limit. Only *actions* are refused — a GPU deployment past quota returns 429.
+
+Nothing renews itself: there is no reminder, no job, no mail. Contact
+david@vibops.ai before the end date.
 
 ---
 
@@ -317,7 +400,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.48.6` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.48.7` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -502,7 +585,6 @@ agent:
 # the release. Set one of them only to impose your own value.
 core:
   secret:
-    authUsername:     "admin"
     authPasswordHash: ""               # generate below; empty = auth disabled
 
     # Licence — leave empty for 14-day trial
@@ -546,13 +628,22 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.6 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.7 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → $2b$12$...
 # Paste the result in authPasswordHash above
 ```
 
 #### Step 3 — Install
+
+The chart claims three volumes — 20 Gi for PostgreSQL, 10 Gi for the agent's
+training data, 1 Gi for the console — from your **default StorageClass**. Check
+you have one before installing; the pods stay `Pending` without it, and nothing
+else says why:
+
+```bash
+kubectl get storageclass          # one line must be marked (default)
+```
 
 ```bash
 helm install vibops ./helm/vibops \
@@ -888,7 +979,7 @@ pre-filled in the UI. Do not use in production.
 
 | Category | Variable | Auto-generated | Required |
 |----------|----------|:--------------:|:--------:|
-| **Licence** | `VIBOPS_LICENCE_KEY` | | optional (trial without) |
+| **Licence** | `LICENCE_KEY` | | optional — 14-day trial without |
 | **Database** | `POSTGRES_PASSWORD`, `DATABASE_URL` | ✓ `make quickstart` | |
 | **Security** | `SECRET_KEY`, `JWT_SECRET_KEY`, `VAULT_KEY` | ✓ `make quickstart` | |
 | **Auth** | `AUTH_PASSWORD_HASH` | | ✓ `make hash PASSWORD=…` |
@@ -919,9 +1010,8 @@ pre-filled in the UI. Do not use in production.
 | `SECRET_KEY` | `change-me` | AES key for the secrets vault — **change in prod** |
 | `JWT_SECRET_KEY` | `change-me` | JWT signing key — shared with Agent — **change in prod** |
 | `JWT_EXPIRE_HOURS` | `24` | Access token lifetime in hours |
-| `AUTH_USERNAME` | `admin` | Legacy single-user login (dev mode only) |
-| `AUTH_PASSWORD_HASH` | `""` | bcrypt hash — empty disables password auth |
-| `VIBOPS_LICENCE_KEY` | `""` | RS256 JWT licence key — omit for 14-day trial |
+| `AUTH_PASSWORD_HASH` | `""` | bcrypt hash — empty disables password auth (dev mode) |
+| `LICENCE_KEY` | `""` | RS256 JWT licence key — omit for the 14-day trial. `VIBOPS_LICENCE_KEY` is accepted as an alias |
 | `VAULT_KEY` | `""` | Fernet key for secret encryption — generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `APP_ENV` | `development` | `development` \| `production` |
 | `LOG_LEVEL` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
@@ -932,19 +1022,35 @@ pre-filled in the UI. Do not use in production.
 | `SMTP_PASSWORD` | `""` | SMTP password or API key |
 | `SMTP_FROM` | `""` | Sender address (e.g. `noreply@yourcompany.com`) |
 
+`AUTH_USERNAME` was listed here, and in the chart, and in the installer, and was
+read by no line of the product — only a comment in `tenant.py` mentions it.
+A setting an operator could change to no effect, with no way to find out.
+Removed on 01/10/2026; `tests/test_deployment_env_names.py` now fails if a
+deployment file or this guide names a variable nothing reads.
+
 ### Agent environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `claude` | `claude` \| `openai` (on-prem) \| `ollama` |
-| `LLM_MODEL` | `claude-sonnet-4-6` | Model name — interpreted by the active provider |
+| `LLM_MODEL` | `claude-sonnet-5` | Model name — interpreted by the active provider |
 | `LLM_API_KEY` | `""` | API key — required for `claude` and `openai`, leave empty for `ollama` |
-| `LLM_BASE_URL` | `""` | On-prem endpoint when `LLM_PROVIDER=openai` (e.g. `http://vllm:8000/v1`) |
-| `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint when `LLM_PROVIDER=ollama` |
-| `CORE_API_URL` | `http://core:8000` | Internal URL of the Core service |
-| `JWT_SECRET_KEY` | `change-me` | Must match Core's value |
-| `AGENT_MAX_HISTORY` | `20` | Max conversation turns kept in context |
-| `AGENT_BUDGET_TOKENS` | `5000` | Max thinking tokens per turn (Anthropic only) |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | On-prem endpoint when `LLM_PROVIDER=openai` (e.g. `http://vllm:8000/v1`) |
+| `OLLAMA_BASE_URL` | `http://ollama:11434` | Ollama endpoint when `LLM_PROVIDER=ollama` |
+| `NEMOTRON_BASE_URL` | `http://nim:8000/v1` | NVIDIA NIM endpoint |
+| `CORE_API_URL` | `http://localhost:8000` | Internal URL of the Core service |
+| `INTERNAL_API_KEY` | `""` | Service-to-service auth — must match Core's value |
+| `JWT_SECRET_KEY` | `change-me-jwt-secret-in-production` | Must match Core's value |
+| `THINKING_MODE` | `auto` | `auto` \| `adaptive` \| `enabled` \| `disabled` — extended thinking, Claude only |
+| `THINKING_EFFORT` | `high` | Effort level when thinking is adaptive |
+| `THINKING_BUDGET_TOKENS` | `10000` | Thinking budget. **Rejected by Sonnet 5, Opus 5/4.8/4.7 and Fable** — a 400 if sent; those models use `THINKING_MODE=adaptive` |
+| `VERIFY_DESTRUCTIVE_ACTIONS` | `true` | Dry-run preview before a destructive action |
+
+`AGENT_MAX_HISTORY` and `AGENT_BUDGET_TOKENS` were documented here until
+01/10/2026 with defaults of 20 and 5000. Neither exists anywhere in the product.
+An operator who set them changed nothing, and had no way to find out — which is
+the worst kind of documented knob. The real thinking settings are the three
+`THINKING_*` rows above, and there is no history cap to configure.
 
 ### Optional connector variables
 
