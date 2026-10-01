@@ -4,11 +4,13 @@
 #   make up                           # start the full stack
 #   make down                         # stop the stack
 #   make check                        # verify the stack is healthy
+#   make update                       # pull the published images and recreate
+#   make debug                        # collect a support bundle (.tar.gz)
 #   make logs SERVICE=core            # tail logs for a service
 #   make pilot-create-client ORG=acme EMAIL=admin@acme.com PASSWORD=s3cr3t
 #   make pilot-create-client ORG=acme EMAIL=admin@acme.com PASSWORD=s3cr3t BUDGET=5000
 
-.PHONY: up down logs quickstart check pilot-create-client backup-now backup-list help
+.PHONY: up down logs quickstart check update debug hash pilot-create-client backup-now backup-list help
 
 # ── Stack ──────────────────────────────────────────────────────────────────────
 
@@ -68,8 +70,10 @@ quickstart:
 	@echo "  3. Create your organisation:"
 	@echo "       make pilot-create-client ORG=\"My Company\" EMAIL=you@company.com PASSWORD=yourpassword"
 	@echo ""
-	@echo "  4. Restart the agent after editing .env:"
-	@echo "       docker compose restart agent"
+	@echo "  4. Apply your .env changes to the agent:"
+	@echo "       docker compose up -d agent"
+	@echo "       (up -d, not restart: restart reuses the container's old"
+	@echo "        environment and does not re-read .env)"
 	@echo ""
 	@HOST=$$(hostname -I 2>/dev/null | awk '{print $$1}' || echo "localhost"); \
 	echo "  Console: http://$$HOST"; \
@@ -81,6 +85,43 @@ quickstart:
 	echo "           Add VIBOPS_LICENCE_KEY to .env to activate your licence."; \
 	echo "           Contact david@vibops.ai to obtain a key."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Section 13 du manuel, « Upgrading / Docker Compose », qui tient en une ligne :
+# `make update`. La cible n'existait pas — `No rule to make target 'update'` —
+# donc le chemin de mise a jour documente echouait a sa premiere commande, de la
+# meme facon que `make login` avant lui. Mesure le 01/10/2026.
+#
+# `up -d` et non `restart` : il faut recreer les conteneurs pour que les
+# nouvelles images ET le .env courant soient pris.
+update:
+	@echo "→ Pulling the published images..."
+	docker compose pull
+	@echo "→ Recreating the services..."
+	docker compose up -d
+	@echo ""
+	@$(MAKE) check --no-print-directory
+
+# Section 14 du manuel, « Troubleshooting », qui decrit precisement l'archive que
+# cette cible produit — et qui n'existait pas non plus. Rien n'est envoye nulle
+# part : l'archive reste sur la machine, a l'operateur de la transmettre.
+debug:
+	@BUNDLE="vibops-debug-$$(date -u +%Y-%m-%d-%H%M%S)"; \
+	mkdir -p "$$BUNDLE"; \
+	{ echo "# System"; uname -a; echo; \
+	  echo "# CPU/RAM"; nproc 2>/dev/null; free -h 2>/dev/null || true; echo; \
+	  echo "# Disk"; df -h . ; echo; \
+	  echo "# Docker"; docker version --format "{{.Server.Version}}" 2>/dev/null; \
+	  docker compose version 2>/dev/null; } > "$$BUNDLE/system.txt" 2>&1; \
+	docker compose ps > "$$BUNDLE/containers.txt" 2>&1; \
+	docker stats --no-stream > "$$BUNDLE/stats.txt" 2>&1 || true; \
+	for svc in $$(docker compose config --services); do \
+	  docker compose logs --tail 500 --no-color "$$svc" > "$$BUNDLE/log-$$svc.txt" 2>&1; \
+	done; \
+	sed -E "s/=(.+)/=<redacted>/" .env > "$$BUNDLE/env-keys.txt" 2>/dev/null || true; \
+	tar czf "$$BUNDLE.tar.gz" "$$BUNDLE" && rm -rf "$$BUNDLE"; \
+	echo "→ $$BUNDLE.tar.gz"; \
+	echo "  Les valeurs du .env sont remplacees par <redacted> — seuls les noms"; \
+	echo "  de variables partent. Relisez l'archive avant de la transmettre."
 
 # Meme garde-fou qu'au quickstart : `make up` est le chemin de celui qui a deja
 # son .env, donc precisement celui que l'imbrication laissait sans Caddyfile.
@@ -141,14 +182,21 @@ pilot-create-client:
 	@test -n "$(EMAIL)"    || (echo "Erreur : EMAIL est requis. Usage: make pilot-create-client ORG=acme EMAIL=... PASSWORD=..."; exit 1)
 	@test -n "$(PASSWORD)" || (echo "Erreur : PASSWORD est requis."; exit 1)
 	$(eval _BUDGET_ARG := $(if $(filter-out ,$(BUDGET)),--budget $(BUDGET),))
+	@# SLUG, SOFT_CAP et HARD_CAP etaient passes vides quand l'appelant ne les
+	@# donnait pas — et le manuel ne les mentionne pas. `--soft-cap ""` fait
+	@# sortir argparse sur « invalid float value: '' » : la commande documentee
+	@# pour creer une organisation echouait telle qu'elle est ecrite. Mesure le
+	@# 01/10/2026. Le slug se derive de ORG, les caps ne sont passes que si on
+	@# les fournit.
+	$(eval _SLUG := $(if $(SLUG),$(SLUG),$(shell echo "$(ORG)" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//; s/-$$//')))
+	$(eval _SOFT_ARG := $(if $(filter-out ,$(SOFT_CAP)),--soft-cap $(SOFT_CAP),))
+	$(eval _HARD_ARG := $(if $(filter-out ,$(HARD_CAP)),--hard-cap $(HARD_CAP),))
 	docker compose exec core python -m scripts.pilot_provision \
 		--org      "$(ORG)" \
-		--slug     "$(SLUG)" \
+		--slug     "$(_SLUG)" \
 		--email    "$(EMAIL)" \
 		--password "$(PASSWORD)" \
-		--soft-cap "$(SOFT_CAP)" \
-		--hard-cap "$(HARD_CAP)" \
-		$(_BUDGET_ARG)
+		$(_SOFT_ARG) $(_HARD_ARG) $(_BUDGET_ARG)
 
 # ── Backup ─────────────────────────────────────────────────────────────────────
 

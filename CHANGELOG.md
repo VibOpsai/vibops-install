@@ -9,6 +9,224 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.49.0] — 2026-10-01
+
+Consolidates the 0.48.1 → 0.48.9 releases, which were tagged and published without
+a CHANGELOG entry. Three themes, and they are the same thread: a licence nobody
+could issue, an installation manual nobody had executed, and a measurement that
+rendered as a legitimate absence.
+
+### Added — VibOps can now issue the licences it already knew how to read
+
+`scripts/onboard-client.sh` had pointed at `scripts/gen_licence.py` since it was
+written. The file never existed in the history, and the private half of the old
+keypair was held by nobody. So the product could verify a licence that no one
+could produce, and everything after the 14-day trial was blocked at step one, at
+every customer.
+
+- **A new RSA 4096 signing keypair**, and `scripts/gen_licence.py` to sign with it.
+  A licence is a self-contained RS256 JWT verified offline against the public key
+  embedded in `core/app/licence.py` — no licence server, no telemetry. That is a
+  sovereignty argument and also its constraint: **an issued key cannot be revoked**,
+  only expire. The generator refuses a world-readable private key, and refuses more
+  than 400 days without an explicit override.
+- **The generator needs only PyJWT and cryptography.** It first read `PLAN_LIMITS`
+  by importing `app.licence`, which pulls in pydantic: an environment with no
+  product installed could not issue a licence, and the CI job died on
+  `No module named 'pydantic'`. The plans are now parsed out of the *text* of
+  `core/app/licence.py`.
+- **`docs/runbooks/licence-issuance.md`** — issuing, installing, renewing, and what
+  expiry does and does not block.
+
+### Fixed — a licence ceiling was blinding the product instead of bounding it
+
+The ping's error branch returned before `gw.cluster_metrics = new_metrics`. Past
+the GPU limit the gateway stayed *online*, `cluster_metrics` and `clusters` were
+never written — the console showed "(no cluster)" — and no time-series row was
+produced, so no energy was measured either.
+
+The trap inside the trap: `gpu_current`, the counter on the Licence page, is
+computed *from* `cluster_metrics` — the field the refusal prevented from being
+written. **A 64-GPU fleet on a 10-GPU trial displayed "0 / 10", under the limit,
+in green.** The ceiling concealed itself.
+
+A licence bounds actions, and actions were already bounded elsewhere:
+`_check_gpu_quota` refuses a GPU deployment with 429, gateway and user creation
+return 402. Blinding observation protected nothing and removed the one datum that
+cannot be reconstructed afterwards. The overrun is now reported — in the ping
+response, in core's log, and by Connect in the customer's own logs — and nothing
+is dropped.
+
+### Fixed — a licence did not survive a restart, and neither did the trial anchor
+
+`PATCH /licence` validated the key and replaced the in-memory singleton; nothing
+wrote it down, so the next boot read `VIBOPS_LICENCE_KEY` from the environment and
+the operator's key was gone, with no message. And `_trial_start` was anchored at
+module import, so every restart reopened fourteen days — the trial measured the
+container's lifetime, not the time since installation.
+
+`platform_licence` holds one row: the key and the installation date. Precedence is
+**database > environment > trial**. A licence installed through Helm also never
+reached the product: `core/app/config.py` accepts both `licence_key` and
+`vibops_licence_key`, where `extra="ignore"` had been dropping the chart's spelling
+in silence.
+
+### Fixed — the installation manual, executed on real hardware for the first time
+
+Three Helm installs (Scaleway Kapsule twice, OVH once) and one Docker Compose
+install on an amd64 host. Every defect below stopped a documented command on a
+machine that met the stated prerequisites.
+
+**Helm — a fresh install could not start, and could not create its admin.**
+
+- `DO $$ … END $$;` in the role-creation hook: Kubernetes collapses `$$` to `$` in
+  container args, so the block reached PostgreSQL malformed and core crash-looped.
+  Replaced with psycopg2's `QuotedString`.
+- `agent.persistence.storageClassName: standard` — a name no managed Kubernetes
+  provider uses. The PVC stayed `Pending` forever. Now empty, so each cluster's
+  default class is used; proved by OVH, whose default is `csi-cinder-high-speed-gen2`.
+- The bootstrap script was refused by Row Level Security (ADR 0047). Wrapped in
+  `system_scope()`.
+- **No gateway could authenticate**: a valid token returned 401 with a hash verified
+  identical in the database, because the token-authenticated routes ran outside any
+  tenant scope. `gateway_scope()` now applies to the four of them.
+- The NetworkPolicy admitted no Connect pod from another namespace.
+- **And Connect logged `Ping envoyé` on a 401.** The success line did not depend on
+  the status code — the clearest instance of this release's recurring failure, in the
+  line that had been treated as proof.
+- The guide promised SMTP the chart never passed on, and `AUTH_USERNAME` was removed
+  everywhere: a setting nothing read.
+
+**Docker Compose — eleven defects across three passes, each one fatal.**
+
+- `make login` does not exist and never did: the first command a prospect typed
+  answered `No rule to make target 'login'`, after waiting for a registry token they
+  never needed. The images are public.
+- `make` was absent from the prerequisites, which listed Docker, Python and curl.
+- `REDIS_PASSWORD` was not generated, so `docker compose up` refused to start with
+  five interpolation errors.
+- **No `Caddyfile` shipped.** The compose bind-mounts `./Caddyfile`; with the source
+  missing Docker creates a *directory* and the container dies on "Are you trying to
+  mount a directory onto a file?". `install/Caddyfile.example` now ships and is
+  installed by `make quickstart` — and creating it no longer sits inside the
+  `if [ ! -f .env ]` guard, where any second run or hand-copied `.env` skipped it.
+- **Core was published on no port at all**, so step 4 of the guide and `make check`
+  both failed on a healthy installation. It now publishes `127.0.0.1:8000`, the same
+  treatment postgres, agent, prometheus and grafana already had.
+- `make check` looked for the console on port 8080, a number in no compose file.
+- `make hash` could not run: the image entrypoint accepts only `api`, `worker` or
+  `beat` and answered "Mode inconnu : python" — the step that generates the hash
+  without which authentication stays off.
+- The guide told readers to open port **8003**, the port the console listens on
+  *inside* its container, which nothing maps. Measured: 000. The console is on 80,
+  through Caddy — and `make quickstart`'s closing summary said 8003 too.
+- The summary announced "2 clusters" for the trial; `PLAN_LIMITS["trial"]` allows 5.
+  Two is Starter's. The ceiling is enforced at runtime, so a pilot sized against it
+  stops in front of the customer.
+- The guide showed `$2b$12$...` as the output of `make hash`. That is bcrypt;
+  `hash_password` is scrypt and returns `<salt hex>:<digest hex>`. A reader who cut
+  at the colon would store a value `verify_password` rejects, with no message.
+- A dead `./static` bind mount on Caddy — a vestige of an experiment removed on
+  26/09 — made Docker create an empty directory in every customer's clone.
+
+**The published install repository shipped short, and said nothing.**
+`publish-install-repo.sh` carries an allow-list, and a declared-but-absent file was
+only a warning before a `continue`: the script exited zero and the repository left
+without the file. That is how v0.48.8 published a Makefile that copies
+`Caddyfile.example` and no `Caddyfile.example`. It is now fatal, and
+`tests/test_install_repo_is_complete.py` checks that every file the shipped Makefile
+copies, every script it calls and every compose bind-mount source is published.
+
+**Sizing is now measured, not guessed.** The guide separates a pilot's requirement
+from a production recommendation, and states the floor the OVH run established:
+2 vCPU / 2 GiB free against chart requests of 1200m / 1280Mi.
+
+### Fixed — only the gateway-token routes may bypass the console
+
+The generated Caddyfile sent every `/api/v1/gateways/*` request straight to core.
+That prefix also covers `GET /gateways/{id}`, `POST /{id}/scan` and
+`/gateways/gpu-utilization/live`, which authenticate by **user session**: the console
+relays those and adds the operator's identity, and sent direct they reached core with
+no identity at all. Under `APP_ENV=development` no identity resolves to system scope.
+
+Found on the demo while checking the fleet: the GPU % column read the system
+organisation instead of the operator's, so the only cluster with a real GPU showed
+"—" and a GPU-less one showed 0%. **The same URL answered from the public internet
+with no authentication.** The route now matches exactly the four paths Connect calls,
+and the ratchet reads them from Connect's own source.
+
+### Added — GreenOps: the measured path reaches the screen
+
+ADR 0043's collectors existed; nothing carried a measurement to the console.
+
+- `EnergyService` distinguishes **measured** from **declared** per cluster, sums only
+  `quality == "measured"`, and states which it used.
+- **The console can finally declare what carbon needs**: grid factors (CRUD plus CSV
+  import) and the per-cluster energy fields. The GreenOps endpoints had been returning
+  404 — they were missing from the console's relay list, and `r.ok ? … : null` rendered
+  the 404 as "—".
+- **A real measurement rounded to zero.** A gateway on a Scaleway Kapsule with an L4:
+  cluster discovered with no kubeconfig, 1 GPU on 2 nodes, 16.44 W from DCGM, four rows
+  at `quality=measured` — and the console would have shown **0.0 kWh**, because
+  `as_dict` rounded to three decimals and an L4's first hour is 0.0004 kWh. The zero
+  this service exists to refuse, produced by the rounding rather than by missing data.
+  Precision now follows magnitude. Found fifteen minutes after plugging the gateway in.
+- The long `method` sentence moved behind a "?" so it stops stretching the KPI row.
+
+### Fixed — Connect: a cluster name must be choosable, and energy counted once
+
+- Every in-cluster Connect declared itself `in-cluster`, so several sites contested one
+  name and `ovh-gra11` displayed "(no cluster)". `gateway.clusterName` now sets it, and
+  a refused name is logged rather than swallowed.
+- **Energy was under-reported by a factor of two**: it integrated over `POLL_INTERVAL`
+  (15 s) while the reading happens in the ping loop every 30 s. It now integrates over
+  real monotonic elapsed time.
+- The DCGM namespace was assumed, so a working exporter read as absent. It is now read
+  from the pod, via the API server's `services/proxy`.
+- `rbac.allowWrite` (chart 0.29.5) grants the verbs an action needs and deliberately
+  withholds the three that would turn a gateway into a pivot: the cluster's `secrets`,
+  the `rbac.authorization.k8s.io` group, and write on `nodes`. Before it, the only way
+  to let the agent act was a hand-written ClusterRole outside Helm.
+
+### Fixed — accessibility, and a compliance report that denied a shipped feature
+
+axe-core now runs against a real browser on a seeded instance, which found four
+contrast failures that no static check could see. The GDPR report claimed a feature
+the product ships, and the console had regions no screen reader could announce.
+
+### Security
+
+- **PyJWT 2.13.0 → 2.14.0** (CVE-2026-102274, CVSS 5.9). From 2.9.0 to 2.14.0,
+  `PyJWKSet` does not catch the plain `ValueError` that `RSAAlgorithm.from_jwk` raises
+  on a malformed RSA component, so one bad key aborts the whole set — an authentication
+  outage caused by a key nobody uses. **This product was not exposed**, and that is
+  worth stating rather than only bumping: `sso.py` never builds a `PyJWKSet`; it walks
+  `jwks["keys"]` itself and calls `from_jwk` per key inside `try … except: continue`,
+  which is exactly the behaviour 2.14.0 adds upstream.
+
+### Documentation
+
+- `docs/poc-oreus.md` — GPU Kubernetes, local install, local LLM, on their own GPUs.
+- `docs/poc-tersedia.md` — local prerequisites for a remote or on-premise pilot.
+- A commercial two-pager that printed on four pages with broken accents.
+- Two figures that would have reached a customer were wrong, and the guard on public
+  figures was counting a third of the catalogue.
+
+### Known and not fixed
+
+- Two Connect releases cannot coexist in one cluster: the ClusterRole name derives from
+  the release name and they collide.
+- `ADMIN_PASSWORD` sits in plaintext in every `.env`.
+- `gpu_model` is not collected from DCGM's `modelName`, and `gpu_used` is always 0.
+- Option A (`install.sh`) on a fresh machine, the Ingress + TLS path with a real
+  certificate, and attaching a **remote** site are still unverified end to end — only
+  in-cluster attachment has been proved.
+- `E2E Pipeline Tests` fails on the last three tags for a reason outside the code: the
+  ten behavioural tests (ADR 0009 L3) call the live Anthropic API and receive
+  `400 — credit balance is too low`. That gate is blind until the account is topped up.
+
+---
+
 ## [0.48.0] — 2026-09-28
 
 ### Added — GreenOps: the product can hold an energy figure, and now measures one

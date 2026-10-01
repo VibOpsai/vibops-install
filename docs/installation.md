@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.0
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.1
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.0 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.0 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.49.0 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.0 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.0 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.0 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.1 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.1 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.49.1 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.1 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.1 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.1 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -415,11 +415,12 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.49.0` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.49.1` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
 | `--admin-email` | `admin@vibops.local` | Console administrator account |
+| `--admin-org` | `My Organisation` | Name of the organisation that account belongs to |
 | `--admin-password` | *(generated)* | Random and printed at the end if omitted |
 | `--dir` | `/opt/vibops` | Installation directory |
 
@@ -434,6 +435,24 @@ redirects HTTP to HTTPS. Nothing else to configure. Two prerequisites:
 - the DNS record for that domain points to this machine;
 - ports 80 and 443 are reachable from the internet (Let's Encrypt validates over
   port 80).
+
+#### What it creates, and what it does not
+
+The script creates the administrator **account** — an organisation, a user and the
+password hash — by calling the product's own provisioning, and prints the password
+if you did not pass one. You can log in as soon as it finishes.
+
+Until 01/10/2026 it did not. It wrote an `AUTH_PASSWORD_HASH` into `.env`, which is
+what *enables* authentication but creates no account, and it computed that hash with
+PBKDF2-SHA512 while the product verifies with scrypt. `POST /auth/login`
+authenticates against the `users` table only. So the install finished on
+"Installation complete", announced `Admin: admin@vibops.local`, served a login page —
+and the `users` table was empty. Nobody could get in. Found by running it.
+
+**If you omit `--llm-key`**, the agent will restart in a loop and keep doing so: the
+script sets `APP_ENV=production`, and in production the agent refuses to start with
+no key when the provider is `claude`. That is deliberate. Set the key in `.env` and
+run `docker compose up -d agent` — `up -d`, not `restart`, see Step 3 below.
 
 **Without `--domain`**, the install falls back to plain HTTP on port 80 and says so.
 That is acceptable behind a TLS-terminating proxy such as Cloudflare, or on a private
@@ -510,7 +529,16 @@ LLM_BASE_URL=http://your-llm-endpoint:8000/v1
 LLM_PROVIDER=ollama
 ```
 
-Then restart the agent: `docker compose restart agent`
+Then apply it: `docker compose up -d agent`
+
+**`up -d`, not `restart`.** This said `docker compose restart agent` until
+01/10/2026. `restart` stops and starts the *existing* container, which keeps the
+environment it was created with — it does not re-read `.env`. Measured on a
+validation host: after setting `LLM_PROVIDER=ollama` and running `restart`, the
+container still reported `LLM_PROVIDER=claude` and the agent kept failing on
+`LLM_API_KEY missing`; `up -d agent` picked the new value up and the agent came
+up healthy. So the documented way to install your own API key did nothing, and
+the symptom was indistinguishable from an invalid key.
 
 > **POC mode:** `AUTH_PASSWORD_HASH` is empty by default — the console opens without a login
 > screen. Suitable for a controlled POC environment. See Step 5 to enable auth.
@@ -556,8 +584,11 @@ To enable login, generate a password hash and add it to `.env`:
 make hash PASSWORD=yourpassword
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, into AUTH_PASSWORD_HASH in .env, then:
-docker compose restart core
+docker compose up -d core
 ```
+
+Again `up -d`, for the same reason as Step 3: `restart core` keeps the container's
+old `AUTH_PASSWORD_HASH`, so the password you just set would still be refused.
 
 This example said `$2b$12$...` until 01/10/2026. That is a bcrypt hash, and the
 product does not use bcrypt: `hash_password` is scrypt and returns a hex salt
@@ -668,7 +699,8 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.49.0 python -c \
+docker run --rm --entrypoint python \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.1 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -1243,7 +1275,7 @@ make update   # pulls latest images, restarts services, runs healthcheck
 ### Helm (quick reference)
 
 ```bash
-helm repo update vibops
+git -C vibops-install pull          # refresh the chart you installed from
 helm upgrade vibops ./helm/vibops -n vibops -f my-values.yaml --wait
 ```
 
@@ -1274,9 +1306,9 @@ Send this file to **david@vibops.ai** for support. No secrets are included.
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `make check` fails on core | Database not ready or migration error | `docker compose logs core` — check for Alembic errors |
-| Agent returns empty responses | `LLM_API_KEY` not set or invalid | Check `.env`, then `docker compose restart agent` |
+| Agent returns empty responses, or restarts in a loop | `LLM_API_KEY` not set or invalid | Check `.env`, then `docker compose up -d agent` — `restart` does not re-read `.env` |
 | Console loads but chat doesn't work | Agent not healthy | `docker compose logs agent` — check LLM provider connectivity |
-| `docker compose pull` fails with 401 | Registry token expired or missing | `make login VIBOPS_REGISTRY_TOKEN=<token>` |
+| `docker compose pull` fails with 401 | The images are public, so this is not a missing token: either the tag does not exist, or your Docker is sending stale ghcr.io credentials | Check the tag against the [releases](https://github.com/VibOpsai/vibops-install/tags), then `docker logout ghcr.io` and retry |
 | GPU cluster not appearing in Fleet | Gateway not connected | Check gateway logs on the cluster side, verify outbound HTTPS to VibOps server |
 
 ---
