@@ -12,7 +12,16 @@
 
 # ── Stack ──────────────────────────────────────────────────────────────────────
 
+# Le Caddyfile d'abord, et hors du garde-fou sur .env. Il y etait imbrique :
+# un second `make quickstart`, ou un .env copie a la main comme le manuel le
+# decrivait avant, sautait la copie entiere. Le compose monte alors un
+# ./Caddyfile absent, Docker cree un REPERTOIRE a sa place et caddy meurt sur
+# « Are you trying to mount a directory onto a file ». Reproduit le 01/10/2026
+# sur l'hote de validation : `make: *** [quickstart] Error 1`.
 quickstart:
+	@if [ ! -f Caddyfile ]; then cp Caddyfile.example Caddyfile; \
+		echo "→ Caddyfile created from Caddyfile.example (HTTP on :80 — set your domain for HTTPS)"; \
+	fi
 	@if [ -f .env ]; then \
 		echo "→ .env already exists — skipping copy. Edit it manually if needed."; \
 	else \
@@ -31,9 +40,6 @@ quickstart:
 		sed -i.bak "s/^REDIS_PASSWORD=$$/REDIS_PASSWORD=$$REDISPASS/" .env; \
 		sed -i.bak "s|\$${REDIS_PASSWORD}|$$REDISPASS|g" .env; \
 		rm -f .env.bak; \
-		if [ ! -f Caddyfile ]; then cp Caddyfile.example Caddyfile; \
-			echo "→ Caddyfile created from Caddyfile.example (HTTP on :80 — set your domain for HTTPS)"; \
-		fi; \
 		echo "→ SECRET_KEY, JWT_SECRET_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD and GRAFANA_PASSWORD generated"; \
 		echo ""; \
 		echo "  Edit .env and set:"; \
@@ -66,17 +72,22 @@ quickstart:
 	@echo "       docker compose restart agent"
 	@echo ""
 	@HOST=$$(hostname -I 2>/dev/null | awk '{print $$1}' || echo "localhost"); \
-	echo "  Console: http://$$HOST:8003"; \
+	echo "  Console: http://$$HOST"; \
 	if [ "$$HOST" != "localhost" ] && [ "$$HOST" != "127.0.0.1" ]; then \
-		echo "           (or http://localhost:8003 from this machine)"; \
+		echo "           (or http://localhost from this machine)"; \
 	fi; \
 	echo ""; \
-	echo "  Licence: trial mode — 14 days, 10 GPUs, 5 users, 2 clusters."; \
+	echo "  Licence: trial mode — 14 days, 10 GPUs, 5 users, 5 clusters."; \
 	echo "           Add VIBOPS_LICENCE_KEY to .env to activate your licence."; \
 	echo "           Contact david@vibops.ai to obtain a key."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Meme garde-fou qu'au quickstart : `make up` est le chemin de celui qui a deja
+# son .env, donc precisement celui que l'imbrication laissait sans Caddyfile.
 up:
+	@if [ ! -f Caddyfile ] && [ -f Caddyfile.example ]; then cp Caddyfile.example Caddyfile; \
+		echo "→ Caddyfile created from Caddyfile.example"; \
+	fi
 	docker compose up -d
 
 down:

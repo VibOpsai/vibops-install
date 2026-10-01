@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.9
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.0
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.48.9 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.48.9 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.48.9 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.48.9 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.48.9 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.48.9 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.0 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.0 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.49.0 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.0 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.0 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.0 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -415,7 +415,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.48.9` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.49.0` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -554,10 +554,15 @@ To enable login, generate a password hash and add it to `.env`:
 
 ```bash
 make hash PASSWORD=yourpassword
-# → $2b$12$...
-# Paste the output into AUTH_PASSWORD_HASH in .env, then:
+# → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
+# Paste the whole line, colon included, into AUTH_PASSWORD_HASH in .env, then:
 docker compose restart core
 ```
+
+This example said `$2b$12$...` until 01/10/2026. That is a bcrypt hash, and the
+product does not use bcrypt: `hash_password` is scrypt and returns a hex salt
+and a hex digest joined by a colon. A reader comparing the two would conclude
+the command had misbehaved, and might truncate at the colon.
 
 Create the first org + admin user:
 
@@ -663,10 +668,10 @@ ingress:
 **Generate a password hash for the admin user:**
 
 ```bash
-docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.48.9 python -c \
+docker run --rm ghcr.io/davidmacamara-boop/vibops-core:v0.49.0 python -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
-# → $2b$12$...
-# Paste the result in authPasswordHash above
+# → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
+# Paste the whole line, colon included, in authPasswordHash above
 ```
 
 #### Step 3 — Install
