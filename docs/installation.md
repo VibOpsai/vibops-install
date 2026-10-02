@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.6
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.7
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.6 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.6 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.49.6 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.6 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.6 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.6 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.7 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.49.7 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.49.7 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.49.7 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.49.7 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.49.7 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -415,7 +415,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.49.6` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.49.7` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -567,7 +567,7 @@ Services started by the stack, and how each is reached:
 | `console` | through Caddy, on `/` | Web UI — open this in your browser |
 | `core` | `127.0.0.1:8000` | REST API + job engine (Swagger: `/docs`) — loopback only |
 | `agent` | `127.0.0.1:8001` | LLM agent — loopback only |
-| `llm-proxy` | 8004 | LLM inference proxy — per-agent GPU cost attribution |
+| `llm-proxy` | `127.0.0.1:8004` | LLM inference proxy — per-agent GPU cost attribution; loopback only, it has no authentication of its own (see section 12) |
 | `worker` | — | Celery worker (job execution) |
 | `beat` | — | Celery Beat (scheduled tasks) |
 | `postgres` | 5432 | Database (internal) |
@@ -738,7 +738,7 @@ minute, HTTPS 200 with verification passing, and a 308 from HTTP to HTTPS.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.49.6 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.49.7 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -1036,7 +1036,16 @@ Try these prompts to verify everything works:
 ```
 List all Kubernetes namespaces
 ```
-→ The agent calls `list_namespaces` and returns the list. You should see tool cards appear.
+→ The agent resolves your clusters, then proposes `kubectl get namespaces` **and
+waits for your confirmation** — the policy engine (ADR 0001) gates `run_kubectl`,
+read-only commands included. Confirm, and you get the list. Tool cards appear at
+each step.
+
+This said "the agent calls `list_namespaces` and returns the list" until
+02/10/2026. There is no `list_namespaces` action anywhere in the product, and the
+confirmation step was not mentioned — so the very first prompt a reader types
+looked like it had stalled. Corrected by running the four prompts against a live
+agent.
 
 ```
 Show me the GPU status of the cluster
@@ -1300,6 +1309,16 @@ agent:
 
 - **Extended thinking** (chain-of-thought) is Claude-only — disabled automatically for other providers
 - **Tool-use quality** varies significantly by model — Claude Sonnet/Opus outperforms open models on complex multi-tool tasks; validate your target model before go-live
+- **Raise the timeout on CPU-only inference.** The agent sends a system prompt
+  carrying several hundred tool definitions, and processing that prompt alone
+  exceeds a minute on a small model without a GPU. Measured on 02/10/2026 with
+  `qwen2.5:3b` on four vCPUs: the agent gave up with `openai.APITimeoutError`,
+  while the same model answered a bare prompt in four seconds. Set
+  `LLM_TIMEOUT_SECONDS` (`.env`) or `agent.env.LLM_TIMEOUT_SECONDS` (Helm) —
+  default `120`. Until that release the value was fixed in the code, so this
+  path had nothing to adjust.
+- **A GPU is the real answer** for an on-prem model driving this many tools; the
+  timeout makes CPU inference possible, not comfortable.
 
 ---
 
@@ -1349,10 +1368,10 @@ Point your AI agents (n8n, LangChain, CrewAI, Dify, or any OpenAI-compatible cli
 
 ```bash
 # Change your agent's base URL
-OPENAI_BASE_URL=http://SERVER_IP:8004/v1
+OPENAI_BASE_URL=http://127.0.0.1:8004/v1   # see “reaching it” below
 
 # Add headers for agent attribution
-curl -X POST http://SERVER_IP:8004/v1/chat/completions \
+curl -X POST http://127.0.0.1:8004/v1/chat/completions \
   -H "X-VibOps-Agent-Id: pricing-agent-v2" \
   -H "X-VibOps-Team: supply-chain" \
   -d '{"model": "mistral:7b", "messages": [...]}'
@@ -1363,12 +1382,31 @@ Results are visible in the console under **FinOps → Agent LLM Usage**.
 ### Verify
 
 ```bash
-curl http://SERVER_IP:8004/health
-# → {"status": "ok", "backend": "http://ollama:11434"}
+curl http://127.0.0.1:8004/health
+# → {"status":"ok","backend":"http://ollama:11434"}
 
-curl http://SERVER_IP:8004/v1/models
+curl http://127.0.0.1:8004/v1/models
 # → lists available models from all backends
 ```
+
+### Reaching it from another machine
+
+The proxy is published on **`127.0.0.1:8004` only**, and that is deliberate:
+**it does not authenticate its callers.** It relays to your inference servers and
+attributes cost from an `X-VibOps-Agent-Id` header it takes on trust. Exposed to
+the network, anyone could spend your inference budget under any agent's name.
+
+So an agent on another machine reaches it one of two ways, both your decision:
+
+- **A route on the reverse proxy**, with whatever authentication you put in front
+  of it — Caddy supports basic auth, mTLS and forward-auth.
+- **An SSH tunnel** from the machine running the agent:
+  `ssh -L 8004:127.0.0.1:8004 user@SERVER_IP`.
+
+Until 02/10/2026 this section said `http://SERVER_IP:8004` and the service was
+published on no port at all: all four commands above returned 000, on a healthy
+installation. Only `http://llm-proxy:8004/health` answered, from inside the
+Docker network. Measured on an amd64 host.
 
 ---
 
