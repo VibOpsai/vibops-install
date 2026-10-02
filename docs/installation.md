@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.2
+  ghcr.io/davidmacamara-boop/vibops-core:v0.51.3
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.2 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.51.2 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.51.2 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.51.2 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.51.2 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.51.2 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.51.3 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.51.3 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.51.3 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.51.3 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.51.3 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.51.3 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -233,6 +233,55 @@ done
 Then, for Helm, override the repositories in your values file (`images.core.repository`,
 `images.agent.repository`, `images.console.repository`, `postgresql.image.repository`,
 `redis.image.repository`); for Compose, set the image lines to your registry.
+
+**Or take the archive instead of the loop above.** `scripts/package-delivery.sh
+<client> <version>`, run on a machine with network access, asks the two charts
+which images they deploy, pulls each one for `linux/amd64`, and writes a folder
+you copy to the site:
+
+```
+images/            one tarball per image            images.txt
+load-images.sh     loads them, retags and pushes to $REGISTRY
+helm/              vibops and vibops-connect, packaged
+values.example.yaml  SHA256SUMS  README-delivery.md
+```
+
+On site: `shasum -a 256 -c SHA256SUMS`, then
+`REGISTRY=registry.internal ./load-images.sh`, then `helm install` with your
+values. The script refuses to finish if an image a chart references is not in the
+archive — the check that matters, because a missing image on an air-gapped site
+shows up as `ImagePullBackOff` on a cluster that cannot go and fetch it.
+
+It pulls the published images rather than rebuilding them, for three reasons and
+the first one settles it: the chart's own Kyverno policy refuses an unsigned
+`vibops-*` image, a rebuild is not what CI tested, and the published images are
+amd64 only — a rebuild on an arm64 machine produces tarballs the client's nodes
+cannot execute. Until 02/10/2026 it did rebuild, under names neither the chart nor
+its own README agreed with, and without `postgres`, `redis` or `vibops-connect`:
+the archive could not install anywhere.
+
+**One thing the archive gives up**: images pushed to your own registry get new
+digests, so the chart's digest pins no longer apply. `SHA256SUMS` is what
+establishes integrity instead — verify it before loading.
+
+**Installed from an archive on 02/10/2026**, on a managed OVH cluster (amd64),
+through a registry running inside that cluster and fed by nothing but the
+archive. The packaged chart and the archive's own values file brought up all
+seven pods, every image reference resolved through the internal registry, and
+`login` / `refresh` answered 200.
+
+Then, with a NetworkPolicy cutting every route out of the cluster —
+`api.anthropic.com`, `ghcr.io` and `registry-1.docker.io` all unreachable from
+the pods — all seven pods were deleted and came back Ready, the API answered, the
+console reached core, and the licence resolved to its trial limits. Nothing in
+the running product needs an outbound connection.
+
+Two honest limits of that run. The node already had `postgres` and `redis` in its
+image cache from an earlier install, and their content digests are identical to
+the archive's, so containerd resolved both manifests from the internal registry
+but reused the cached layers — the archive's copies of those two were not
+transferred. And a node with a cold cache *and* no route to the internet cannot
+be arranged on managed Kubernetes, where the nodes are not yours to configure.
 
 > **On PostgreSQL.** Until v0.46.6 the chart pulled a Bitnami image that existed
 > only under `bitnamilegacy` — a copy that works and receives no updates,
@@ -415,7 +464,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.51.2` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.51.3` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -427,6 +476,19 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 Every option also reads its environment variable of the same name
 (`VIBOPS_DOMAIN`, `LLM_API_KEY`…), which is what you want for unattended installs.
 
+**One install per host.** The Compose file fixes its container names
+(`vibops_core`, `vibops_caddy`…), so two VibOps installations cannot run side by
+side on the same machine whatever `--dir` says — and Compose derives its project
+name from the directory name, so a `--dir` ending in `vibops` lands on the same
+project as an existing install and **recreates its containers** with the new
+configuration. The script now refuses that case, names the directory the existing
+install lives in, and stops before downloading anything. Re-running it in the
+*same* directory is still the documented way to repair or complete an install.
+
+Found on 02/10/2026 by doing it: `--dir /root/essai/vibops` adopted the stack in
+`/opt/vibops`, recreated its Caddy, and stopped on `Bind for 127.0.0.1:8000
+failed: port is already allocated`.
+
 #### HTTPS
 
 **With `--domain`**, Caddy obtains a Let's Encrypt certificate on first start and
@@ -435,6 +497,60 @@ redirects HTTP to HTTPS. Nothing else to configure. Two prerequisites:
 - the DNS record for that domain points to this machine;
 - ports 80 and 443 are reachable from the internet (Let's Encrypt validates over
   port 80).
+
+**"Points to this machine" excludes a proxied record.** Behind Cloudflare's orange
+cloud the name resolves to Cloudflare, which terminates TLS itself: the
+certificate a browser sees is Cloudflare's, Caddy never gets a working challenge,
+and `--domain` buys you nothing. Either set that record to DNS-only for the
+install, or stay on `:80` and let the proxy do the TLS — which is a legitimate
+choice, and the one `vibops.ai`'s own demo makes.
+
+If you have no name to spare, a Hetzner server already has one: the default
+reverse DNS, `static.<reversed-ip>.clients.your-server.de`, resolves forward to
+the server and Let's Encrypt will certify it.
+
+**"Reachable" includes your provider's firewall, not just the host's.** On the
+machine this was verified on, `ufw` was inactive and the host's `INPUT` policy was
+`ACCEPT`, Caddy was listening on 80 and 443 — and from the internet the port
+simply timed out (`code=000` after 10 s), because a cloud firewall in front of the
+server admitted only Cloudflare. ACME then hangs with nothing to read: the
+challenge request never arrives. Check from somewhere else, not from the host:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 10 http://your-host/   # must not be 000
+```
+
+There is no way around it: HTTP-01 needs inbound 80, TLS-ALPN-01 needs inbound
+443, and DNS-01 needs a DNS-provider plugin that the `caddy:2-alpine` image does
+not carry.
+
+**Measured on 02/10/2026** on an amd64 host, with the Caddyfile `install.sh`
+generates for `--domain`:
+
+```
+served key authentication  challenge=http-01  (four Let's Encrypt validators)
+authorization finalized    authz_status=valid
+certificate obtained successfully   issuer=acme-v02.api.letsencrypt.org-directory
+
+issuer=C=US, O=Let's Encrypt, CN=YE2
+subject=CN=<the requested name>        notAfter=Dec 31 12:50:32 2026 GMT
+HTTP → 308 to https://<the requested name>/
+```
+
+Recreating the container against the same `caddy_data` volume produced **no new
+ACME order** and served the same certificate — which is what that volume is for,
+and why removing it would eventually hit Let's Encrypt's five-identical-per-week
+limit.
+
+If you have no name to spare, note that the certificate above was issued for a
+Hetzner server's default reverse DNS
+(`static.<reversed-ip>.clients.your-server.de`), which resolves forward to the
+server and needs no DNS change.
+
+`tests/test_install_sh_serves_https_for_a_domain.py` keeps the configuration
+honest between runs: it has Caddy itself adapt the generated Caddyfile and fails
+unless a domain yields `listen: [":443"]` with a host-matching rule, unless `:80`
+yields no 443, and unless the deployment publishes both ports and keeps `/data`.
 
 #### What it creates, and what it does not
 
@@ -639,7 +755,9 @@ does not have. Removed after installing the chart on k3s.
 
 In an air-gapped installation, the same two charts are inside the delivery
 archive produced by `scripts/package-delivery.sh`; no clone and no outbound flow
-are required.
+are required. That archive also carries every image the two charts deploy, a
+`load-images.sh` that pushes them to your registry under the names the charts
+expect, a values file that only sets keys the charts declare, and `SHA256SUMS`.
 
 Wherever the steps below reference a chart, use its path in that tree.
 
@@ -776,7 +894,7 @@ with a disposable pod that the cluster really does drop what a policy denies.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.2 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.51.3 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above

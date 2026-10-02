@@ -9,6 +9,190 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.51.3] — 2026-10-02
+
+### Added — the client guide is produced by the repository, not by hand
+
+`scripts/declutter.py` and `scripts/build.py` turn `docs/installation.md` into
+the document a prospect receives: the archaeology removed, the instructions kept,
+rendered as a standalone page with the version `helm/vibops/Chart.yaml` declares.
+They lived in a scratch directory until now, which meant the next release would
+have had to reinvent them.
+
+Every removal is anchored on an exact passage and fails loudly when the manual
+moves under it, rather than silently dropping something else.
+`tests/test_client_guide_can_be_produced.py` runs the chain in every suite, so a
+broken anchor — or a newly added paragraph naming a test file, a source path or
+an ADR — surfaces then instead of on the day of delivery. Both failure modes were
+verified against a doctored manual.
+
+The chain reproduces the delivered v0.51.2 document byte for byte.
+
+### Fixed — `Deploy` reported six deployments it never made
+
+Its `Helm Deploy` job guarded every step with
+`if: steps.cluster.outputs.available == 'true'`, and that flag was `false`
+because no `KUBECONFIG` secret is set. Every step was skipped — and the job
+exited **successful**.
+
+So the workflow announced six successful deployments (v0.49.8, v0.49.9, v0.50.0,
+v0.51.0, v0.51.1, v0.51.2) while the demonstration host stayed on v0.49.2, with a
+`beat` container marked `unhealthy` that v0.51.0 had fixed. Nobody had a reason to
+look: the column was green.
+
+The job is now gated on an upstream job's output, so it is **skipped** (grey)
+rather than successful, and that job posts a warning annotation and a run summary
+saying no deployment took place and that the host is a Docker Compose machine
+updated by hand. `tests/test_deploy_does_not_claim_what_it_skipped.py` fails if a
+step goes back to guarding itself, or if the absence stops being announced.
+
+`docs/runbooks/update-the-demo-host.md` writes the manual procedure down —
+including the host's deliberate differences from the published Compose file, which
+a wholesale copy would destroy: the `./static` mount its Caddyfile serves
+`/whisper` from, and the separate container that forwards `127.0.0.1:8000`.
+
+The host now runs v0.51.2: served version `0.51.2`, all fourteen containers
+`healthy` (`beat` included), 41 gateways / 3 organisations / 4 users unchanged,
+and 200 from the internet. The release carried no migration, so the database was
+untouched.
+
+### Verified — `install.sh --domain` obtains a real Let's Encrypt certificate
+
+Run on an amd64 host, with the Caddyfile the script generates:
+
+```
+served key authentication  challenge=http-01  (four Let's Encrypt validators)
+authorization finalized    authz_status=valid
+certificate obtained successfully   issuer=acme-v02.api.letsencrypt.org-directory
+
+issuer=C=US, O=Let's Encrypt, CN=YE2     notAfter=Dec 31 12:50:32 2026 GMT
+HTTP → 308 to https://<name>/
+```
+
+Recreating the container against the same `caddy_data` volume produced **no new
+ACME order** and served the same certificate — the reason that volume exists, and
+why dropping it would eventually hit Let's Encrypt's five-identical-per-week
+limit.
+
+Two things the run taught that the manual did not say:
+
+- **"Ports 80 and 443 reachable" includes the provider's firewall.** On that host
+  `ufw` was inactive, `INPUT` was `ACCEPT`, Caddy was listening — and from the
+  internet the port timed out, because a cloud firewall in front of the server
+  admitted only Cloudflare. ACME then hangs with nothing to read. There is no way
+  around inbound 80: TLS-ALPN-01 needs 443 and DNS-01 needs a plugin
+  `caddy:2-alpine` does not carry.
+- **A Hetzner server's default reverse DNS is a usable name.**
+  `static.<reversed-ip>.clients.your-server.de` resolves forward to the server, so
+  no DNS change is needed to test HTTPS. The certificate above was issued for one.
+
+### Fixed — `install.sh` adopted a VibOps install that lived elsewhere on the host
+
+The Compose file fixes its container names, so two installations cannot coexist on
+one machine whatever `--dir` says — and Compose derives its project name from the
+directory name, so a `--dir` ending in `vibops` lands on the same project as an
+existing install and **recreates its containers** with the new configuration.
+
+Found by doing it: `--dir /root/essai/vibops` adopted the stack in `/opt/vibops`,
+recreated its Caddy, and stopped on `Bind for 127.0.0.1:8000 failed: port is
+already allocated`. The repository had anticipated re-runs — an existing
+`docker-compose.yml` or `Caddyfile` is kept — but not the neighbour case, which is
+the one where something is lost.
+
+The script now reads the existing container's
+`com.docker.compose.project.working_dir`, refuses when it differs from the target,
+names that directory and the three ways forward, and stops before downloading
+anything. Re-running in the same directory stays allowed, because repairing an
+install that way is documented.
+
+### Added — `install.sh --domain` is now checked against Caddy itself
+
+The last documented path nobody had exercised. `caddy adapt` is run on the
+generated Caddyfile, in the image the deployment uses, and
+`tests/test_install_sh_serves_https_for_a_domain.py` fails unless a domain
+produces `listen: [":443"]` with a host-matching rule — the pair that turns
+Caddy's automatic HTTPS on — unless `:80` produces no 443, and unless the Compose
+file publishes both ports and keeps `caddy_data:/data`. Each check was verified
+against the broken shape it exists to catch.
+
+That volume matters more than it looks: without it Caddy re-requests a
+certificate on every container recreation, and Let's Encrypt allows five
+identical certificates per week — so the failure arrives later, on an install
+that used to work.
+
+Also documented: "the DNS record points to this machine" excludes a record
+proxied through Cloudflare, where the name resolves to Cloudflare and the
+certificate a browser sees is Cloudflare's — `--domain` then buys nothing. That
+is the configuration `vibops.ai`'s own demo runs, legitimately, on `:80`.
+
+**Not verified**: Caddy obtaining a real certificate. That needs a public name
+pointing at a reachable machine and a machine free to take ports 80 and 443. The
+equivalent chain was verified end to end on the Kubernetes path on 01/10/2026,
+through cert-manager rather than Caddy.
+
+### Fixed — the air-gapped delivery archive could not install anywhere
+
+`scripts/package-delivery.sh` had never been run. It rebuilt three images from
+source and named them `ghcr.io/<owner>/<component>:<version>`, while the chart
+shipped in the same archive references
+`ghcr.io/<owner>/vibops-<component>:v<version>` — neither the name nor the tag
+matched. `postgres`, `redis` and the `vibops-connect` chart were absent. The
+README told the operator to retag an image that does not exist after
+`docker load`. The example values set `core.secret.authUsername` (removed from
+the chart on 01/10/2026) and `postgresql.auth.password` (never declared — the
+password is generated and preserved), both silently ignored, and asked for a
+**bcrypt** hash where the product reads scrypt.
+
+An air-gapped site has no recourse: what is missing is missing for good, and it
+surfaces as `ImagePullBackOff` on a cluster that cannot go and fetch the image.
+
+The script now asks the two charts which images they deploy — so the list cannot
+drift from what the charts reference — pulls each one for `linux/amd64`, checks
+the architecture of every one, and refuses to finish if an image a chart
+references is not in the archive. It ships the **published** images rather than
+rebuilding, for three reasons and the first settles it: the chart's own Kyverno
+policy refuses an unsigned `vibops-*` image, a rebuild is not what CI tested, and
+the published images are amd64 only — a rebuild on an arm64 machine produces
+tarballs the client's nodes cannot execute.
+
+The archive now carries a generated `load-images.sh` (so no name is ever written
+by hand twice), `images.txt`, both charts, `SHA256SUMS`, and example values that
+only set keys the charts declare.
+
+Measured on 02/10/2026: 603 MB, six images all verified amd64, checksums verify,
+every tarball loads under the name `images.txt` declares, and the packaged chart
+rendered with the archive's own values references the internal registry only.
+
+`Install smoke` gained a third job that builds the archive on every tag, verifies
+the checksums, loads every image from the archive alone, and fails if the packaged
+chart still references anything outside the mirrored registry.
+
+### Verified — an archive installed through an in-cluster registry on amd64
+
+Not only built: installed. On the managed OVH cluster, a `registry:2` bound to the
+node's loopback was fed from the archive alone, and the archive's packaged chart
+and values file brought up all seven pods with every image reference resolving
+through that registry. `login` and `refresh` answered 200, and core announced
+`Isolation : connecte en « vibops_app », RLS applicable.`
+
+Then every route out of the cluster was cut — `api.anthropic.com`, `ghcr.io` and
+`registry-1.docker.io` unreachable from the pods — and all seven pods were
+deleted. They came back Ready, the API answered, the console reached core, and the
+licence resolved to its trial limits. The "nothing phones home" claim is now
+measured rather than asserted.
+
+Two limits stated rather than glossed: the node already held `postgres` and
+`redis` layers with digests identical to the archive's, so containerd resolved
+their manifests from the internal registry but reused the cache — the archive's
+copies of those two never crossed the wire. And a cold cache with no route out
+cannot be arranged on managed Kubernetes, where the nodes are not yours to
+configure.
+
+Also fixed: the script used `mapfile`, which does not exist in the bash 3.2 macOS
+ships — it exited 127 on the machine that builds the archive.
+
+---
+
 ## [0.51.2] — 2026-10-02
 
 ### Fixed — a Secret changed by `helm upgrade` did not reach the pods
