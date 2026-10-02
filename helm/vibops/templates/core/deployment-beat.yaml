@@ -17,6 +17,10 @@ spec:
       app.kubernetes.io/component: beat
   template:
     metadata:
+      annotations:
+        # Change quand l'operateur change une valeur du Secret, pour que la
+        # mise a jour recree le pod — voir `vibops.secretChecksum`.
+        checksum/secret: {{ include "vibops.secretChecksum" (dict "ctx" $ "component" "core") }}
       labels:
         {{- include "vibops.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: beat

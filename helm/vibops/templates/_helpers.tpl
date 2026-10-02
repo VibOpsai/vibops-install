@@ -325,3 +325,29 @@ imagePullSecrets:
 {{- $found -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Empreinte de ce que l'operateur a fourni, pour qu'un changement redemarre le pod.
+
+`helm upgrade` met le Secret a jour et s'arrete la : un pod garde l'environnement
+avec lequel il a ete cree. L'operateur pose `core.secret.smtpHost`, lance la mise
+a jour, lit « STATUS: deployed » — et core continue de tourner sans SMTP. La
+demande de reinitialisation rend alors 200 sans rien envoyer, parce que c'est la
+reponse prevue quand aucun serveur n'est configure. Rien, nulle part, ne dit que
+le reglage n'a pas pris.
+
+C'est l'analogue exact du piege `docker compose restart` que le manuel documente
+deja : « restart garde l'environnement avec lequel le conteneur a ete cree ».
+
+Mesure le 02/10/2026 dans Install smoke : upgrade a 12:28:07, demande a 12:28:10,
+boite vide — et le pod core journalisait son demarrage a 12:27:12, donc l'ancien.
+
+On hache les valeurs fournies, pas le Secret rendu : celui-ci contient des
+`randAlphaNum` pour les secrets generes, dont deux rendus successifs ne donnent
+pas la meme chose avant que `vibops.preserved` ne trouve la valeur vivante. Hacher
+le rendu ferait donc recreer les pods a la premiere mise a jour, sans raison.
+*/}}
+{{- define "vibops.secretChecksum" -}}
+{{- $values := index .ctx.Values .component -}}
+{{- toYaml (dict "secret" (default dict $values.secret)) | sha256sum -}}
+{{- end -}}

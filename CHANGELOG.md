@@ -9,6 +9,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.51.2] — 2026-10-02
+
+### Fixed — a Secret changed by `helm upgrade` did not reach the pods
+
+`helm upgrade` updates the Secret and stops there; a pod keeps the environment it
+was created with. So an operator could add `core.secret.smtpHost` to an existing
+release, read `STATUS: deployed`, and core would still run without SMTP — the
+password reset request then answers `200` and sends nothing, because that is the
+intended answer when no server is configured. Nothing anywhere says the setting
+did not take.
+
+The same trap as `docker compose restart`, which the manual already documents.
+
+Found by the `Install smoke` step added in 0.51.1: upgrade at 12:28:07, request at
+12:28:10, empty mailbox — and the core pod had logged its startup at 12:27:12.
+
+The core, worker, beat and agent pod templates now carry a `checksum/secret`
+annotation, so a changed value recreates the pod. The checksum is taken over the
+values the operator supplies, not over the rendered Secret: that one contains
+`randAlphaNum` fallbacks for generated secrets, and hashing it would recreate
+every pod on the first upgrade for no reason.
+
+The smoke step now also reads `SMTP_HOST` back out of the running pod, so it
+diagnoses a stale pod instead of only reporting an empty mailbox.
+
+### Verified by HTTP on a Helm install with row level security enforced
+
+The 0.51.1 fixes, confirmed in CI rather than by reasoning:
+
+```
+POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"event": "Isolation : connecte en « %s », RLS applicable.",
+ "positional_args": ["vibops_app"], "level": "info"}
+```
+
+---
+
 ## [0.51.1] — 2026-10-02
 
 ### Fixed — three authentication paths that row level security turned off
