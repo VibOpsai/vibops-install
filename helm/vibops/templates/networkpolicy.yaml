@@ -78,6 +78,22 @@ spec:
     # Found on 20/09/2026 by installing the chart on a cluster whose CNI
     # enforces NetworkPolicy. `helm template` and `--dry-run=server` both pass:
     # neither evaluates a selector against a running pod.
+    #
+    # Et la portee de cette regle depend de qui heberge la base.
+    #
+    # Un `podSelector` sans `namespaceSelector` ne vaut que pour le namespace de
+    # la release. Avec la base embarquee c'est exactement ce qu'on veut. Avec une
+    # base managee — `postgresql.enabled=false`, le chemin que le manuel
+    # documente pour les deploiements entreprise — la base vit ailleurs, et cette
+    # regle la rendait injoignable : l'init de migration mourait sur
+    # « connection to server at … », et les quatre pods qui attendent core avec
+    # lui. Mesure le 02/10/2026 sur k3s, avec un PostgreSQL dans un autre
+    # namespace : policy retiree, les cinq pods demarrent aussitot.
+    #
+    # Quand l'operateur fournit sa propre base, il a choisi une dependance hors
+    # de ce namespace et la politique n'a pas a deviner ou elle se trouve — c'est
+    # deja le traitement que recoit Redis, dont la regle n'a jamais porte de `to`.
+    {{- if .Values.postgresql.enabled }}
     - to:
         - podSelector:
             matchLabels:
@@ -85,6 +101,11 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+    {{- else }}
+    - ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
     # Redis (Celery broker + backend)
     - ports:
         - port: 6379

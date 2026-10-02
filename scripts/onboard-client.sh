@@ -53,7 +53,7 @@ REDIS_URL=""
 ANTHROPIC_KEY=""
 ADMIN_PASSWORD="vibops-admin"
 SLACK_WEBHOOK=""
-VERSION="${VIBOPS_VERSION:-0.50.0}"
+VERSION="${VIBOPS_VERSION:-0.51.0}"
 NAMESPACE="vibops"
 CHART_REPO="https://davidmacamara-boop.github.io/vibops"
 LICENCE_KEY=""    # JWT RS256 fourni par VibOps — omit pour trial 14j
@@ -140,6 +140,22 @@ run() {
   fi
 }
 
+# Un essai a blanc doit rendre un verdict, pas un echo.
+#
+# `--dry-run` se contentait d'afficher la commande helm, puis le script annoncait
+# « VibOps deploye avec succes ! ». C'etait un succes qui ne prouvait rien : la
+# commande affichee, passee a helm, echouait. Un essai a blanc passe maintenant
+# `--dry-run` a helm, qui rend les gabarits et applique les garde-fous du chart.
+run_helm() {
+  if [[ "$DRY_RUN" == true ]]; then
+    echo -e "  ${YELLOW}[dry-run]${NC} $*"
+    "$@" --dry-run >/dev/null || die "le chart refuse ces valeurs — voir ci-dessus"
+    success "Le chart accepte ces valeurs (essai a blanc)"
+  else
+    "$@"
+  fi
+}
+
 # ── 1. Namespace ──────────────────────────────────────────────────────────────
 section "Namespace"
 run kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | \
@@ -152,62 +168,67 @@ section "Génération des secrets"
 info "JWT secret..."
 JWT_SECRET=$(openssl rand -hex 32)
 
-info "Hash bcrypt du mot de passe admin..."
-AUTH_HASH=$(python3 -c \
-  "import bcrypt; print(bcrypt.hashpw('${ADMIN_PASSWORD}'.encode(), bcrypt.gensalt()).decode())" \
-  2>/dev/null || true)
+# Le hash est calcule par le produit, pas reimplemente ici.
+#
+# Ce bloc faisait un bcrypt. `verify_password` fait un scrypt et decoupe sur un
+# deux-points qu'un hash bcrypt n'a pas : il rend donc toujours False, et
+# l'administrateur ainsi cree ne pouvait jamais se connecter. Sur le chemin
+# d'onboarding des clients CSP et entreprise. Constate le 02/10/2026.
+info "Hash du mot de passe admin (scrypt, par l'image du produit)..."
+AUTH_HASH=$(docker run --rm --entrypoint python \
+  "ghcr.io/davidmacamara-boop/vibops-core:${VERSION}" -c \
+  "from app.auth import hash_password; print(hash_password('${ADMIN_PASSWORD}'))" 2>/dev/null | tail -1)
 if [[ -z "$AUTH_HASH" ]]; then
   if [[ "$DRY_RUN" == true ]]; then
-    warn "bcrypt non disponible — hash placeholder utilisé en dry-run"
-    AUTH_HASH='$2b$12$PLACEHOLDER_INSTALL_BCRYPT'
+    warn "image indisponible — hash fictif en dry-run"
+    AUTH_HASH="0000000000000000000000000000000f:placeholder"
   else
-    die "bcrypt non disponible — installer: pip3 install bcrypt"
+    die "Impossible de calculer le hash : l'image ${VERSION} est-elle tirable ?"
   fi
 fi
 
-# ── 3. Secret K8s ─────────────────────────────────────────────────────────────
-section "Secret Kubernetes"
-
-SECRET_ARGS=(
-  kubectl create secret generic vibops-secrets
-  -n "$NAMESPACE"
-  "--from-literal=jwt-secret=${JWT_SECRET}"
-  "--from-literal=auth-password-hash=${AUTH_HASH}"
-)
-[[ -n "$LICENCE_KEY"   ]] && SECRET_ARGS+=("--from-literal=licence-key=${LICENCE_KEY}")
-[[ -n "$ANTHROPIC_KEY" ]] && SECRET_ARGS+=("--from-literal=anthropic-api-key=${ANTHROPIC_KEY}")
-[[ -n "$SLACK_WEBHOOK" ]] && SECRET_ARGS+=("--from-literal=slack-webhook-url=${SLACK_WEBHOOK}")
-
-if [[ "$DRY_RUN" == false ]]; then
-  if kubectl get secret vibops-secrets -n "$NAMESPACE" &>/dev/null; then
-    warn "Secret vibops-secrets existe déjà — mise à jour..."
-    kubectl delete secret vibops-secrets -n "$NAMESPACE"
-  fi
-fi
-run "${SECRET_ARGS[@]}" --dry-run=client -o yaml | \
-  { [[ "$DRY_RUN" == true ]] && cat || kubectl apply -f -; }
-success "Secret vibops-secrets créé"
-
-# ── 4. Helm repo ──────────────────────────────────────────────────────────────
-section "Helm"
-info "Ajout du repo VibOps..."
-run helm repo add vibops "$CHART_REPO" || true
-run helm repo update vibops
+# ── 3. Secrets ────────────────────────────────────────────────────────────────
+#
+# Plus de Secret `vibops-secrets` fabrique a cote.
+#
+# Il portait le JWT, le hash admin, la licence et la cle LLM, et il etait passe au
+# chart par `secrets.existingSecret` — une valeur que le chart ne declare nulle
+# part. Rien ne le lisait donc : le deploiement partait avec des secrets generes
+# par le chart, et ceux-ci dormaient dans le cluster sans emploi. Les valeurs
+# passent desormais par celles que le chart lit vraiment, plus bas.
 
 # ── 5. Helm install vibops ────────────────────────────────────────────────────
 info "Déploiement VibOps ${VERSION}..."
 
+# Les valeurs que le chart lit reellement.
+#
+# Cette liste a ete ecrite contre une forme de chart qui n'existe pas :
+#   * `secrets.existingSecret` n'est declare nulle part — le Secret Kubernetes
+#     fabrique plus haut n'etait donc lu par personne, et le JWT comme le hash
+#     admin n'atteignaient jamais les pods ;
+#   * `ingress.tls` est une LISTE, pas un objet : `ingress.tls.enabled` faisait
+#     « destination for vibops.ingress.tls is a table. Ignoring non-table value »
+#     et le bloc TLS demande disparaissait en silence ;
+#   * `--db-url` et `--redis` etaient exiges en entree et passes a rien, alors
+#     que `postgresql.enabled=false` desactivait la base embarquee. L'installation
+#     s'arretait sur « core.secret.databaseUrl is required when
+#     postgresql.enabled=false » — le chart se defendait, le script ne le savait
+#     pas. Mesure le 02/10/2026 contre un vrai cluster.
+#   * `--version` ne s'applique qu'a un chart tire d'un depot, pas a un chemin.
 HELM_ARGS=(
   # Aucun depot Helm public n'est servi : le chart est celui du paquet.
   helm upgrade --install vibops ./helm/vibops
   --namespace "$NAMESPACE"
-  --version "$VERSION"
-  --set "secrets.existingSecret=vibops-secrets"
   --set "postgresql.enabled=false"
+  --set "redis.enabled=false"
+  --set "core.secret.databaseUrl=${DB_URL}"
+  --set "core.secret.redisUrl=${REDIS_URL}"
+  --set "core.secret.jwtSecretKey=${JWT_SECRET}"
+  --set "core.secret.authPasswordHash=${AUTH_HASH}"
+  --set "agent.secret.jwtSecretKey=${JWT_SECRET}"
   --set "ingress.enabled=true"
   --set "ingress.host=${HOST}"
-  --set "ingress.tls.enabled=true"
-  --set "ingress.tls.secretName=vibops-tls"
+  --set-json "ingress.tls=[{\"secretName\":\"vibops-tls\",\"hosts\":[\"${HOST}\"]}]"
   --set "images.core.tag=${VERSION}"
   --set "images.agent.tag=${VERSION}"
   --set "images.console.tag=${VERSION}"
@@ -215,11 +236,13 @@ HELM_ARGS=(
   --timeout 10m
 )
 
+[[ -n "$ANTHROPIC_KEY" ]] && HELM_ARGS+=("--set" "agent.secret.llmApiKey=${ANTHROPIC_KEY}")
+
 [[ -n "$LICENCE_KEY" ]] && HELM_ARGS+=("--set" "core.secret.licenceKey=${LICENCE_KEY}")
 [[ -z "$ANTHROPIC_KEY" ]] && warn "Pas de clé Anthropic — configurer LLM_PROVIDER manuellement"
 
-run "${HELM_ARGS[@]}"
-success "Stack VibOps déployée"
+run_helm "${HELM_ARGS[@]}"
+[[ "$DRY_RUN" == false ]] && success "Stack VibOps déployée"
 
 # ── 6. Vérification ───────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == false ]]; then
@@ -252,29 +275,46 @@ if [[ "$SEGMENT" == "csp" ]]; then
   echo ""
   cat <<CONNECT
   # Sur le cluster GPU du client final — utiliser le token généré dans la console :
-  # https://${HOST} → Fleet tab → "Add a gateway"  (ou ⚙ Admin → Gateways → New Gateway)
+  # https://${HOST} → onglet Fleet → "+ Connect Infrastructure" → Kubernetes
+
+  kubectl create namespace vibops-connect
+  kubectl create secret generic vibops-connect-token \\
+    --namespace vibops-connect --from-literal=token="<jeton-depuis-console>"
 
   helm upgrade --install vibops-connect ./charts/vibops-connect \\
-    --namespace vibops-connect --create-namespace \\
-    --set gateway.name="<nom-cluster>" \\
+    --namespace vibops-connect \\
+    --set gateway.id="<id-depuis-console>" \\
+    --set gateway.clusterName="<nom-du-cluster>" \\
     --set vibops.coreUrl="https://${HOST}" \\
-    --set vibops.token="<token-depuis-console>" \\
-    --set prometheus.url="http://prometheus-operated.monitoring.svc.cluster.local:9090"
+    --set vibops.existingSecret=vibops-connect-token
 CONNECT
 
 else
   echo -e "${YELLOW}Pour connecter vos clusters GPU internes (vibops-connect) :${NC}"
   echo ""
-  echo -e "  1. Créer un gateway : ${CYAN}https://${HOST}${NC} → Fleet tab → 'Add a gateway'  (ou ⚙ Admin → Gateways → New Gateway)"
+  echo -e "  1. Créer un gateway : ${CYAN}https://${HOST}${NC} → onglet Fleet → '+ Connect Infrastructure' → Kubernetes"
+  echo -e "     La console affiche l'id, le jeton et la commande prête à coller."
   echo -e "  2. Déployer sur chaque cluster GPU :"
   echo ""
+  # La commande ci-dessous est celle qui fonctionne, verifiee contre un cluster.
+  #
+  # Celle qui etait imprimee ici ne pouvait pas marcher : `gateway.name` n'existe
+  # pas dans le chart — les cles sont `gateway.id` et `gateway.clusterName` — donc
+  # l'identifiant n'etait jamais pose et connect s'arretait a sa premiere ligne.
+  # Et `prometheus.url` n'est declare nulle part : aucun template ne le rend, la
+  # valeur partait dans le vide. Prometheus se saisit sur la passerelle, dans la
+  # console.
   cat <<ENTERPRISE_CONNECT
+  kubectl create namespace vibops-connect
+  kubectl create secret generic vibops-connect-token \\
+    --namespace vibops-connect --from-literal=token="<jeton-depuis-console>"
+
   helm upgrade --install vibops-connect ./charts/vibops-connect \\
-    --namespace vibops-connect --create-namespace \\
-    --set gateway.name="<nom-cluster-gpu>" \\
+    --namespace vibops-connect \\
+    --set gateway.id="<id-depuis-console>" \\
+    --set gateway.clusterName="<nom-du-cluster-gpu>" \\
     --set vibops.coreUrl="https://${HOST}" \\
-    --set vibops.token="<token-depuis-console>" \\
-    --set prometheus.url="http://prometheus-operated.monitoring.svc.cluster.local:9090"
+    --set vibops.existingSecret=vibops-connect-token
 ENTERPRISE_CONNECT
 fi
 
