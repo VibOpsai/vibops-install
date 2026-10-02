@@ -2,6 +2,6 @@ apiVersion: v2
 name: vibops
 description: VibOps — Intent-driven MLOps platform
 type: application
-version: 0.49.9
-appVersion: "0.49.9"
+version: 0.50.0
+appVersion: "0.50.0"
 
