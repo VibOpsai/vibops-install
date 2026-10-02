@@ -9,6 +9,81 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.51.1] — 2026-10-02
+
+### Fixed — three authentication paths that row level security turned off
+
+Measured on 02/10/2026 by installing the chart on a managed OVH Kubernetes
+cluster. Two things had to be true at once for any of this to be visible, and no
+earlier test had both: the CNI must enforce NetworkPolicies (OVH runs Canal, so
+Calico enforces them), and core must connect as a role without `BYPASSRLS` —
+which is what a default Helm install does and a Docker Compose install does not.
+
+- **`POST /auth/refresh` returned `401 User not found or inactive.`** for a
+  refresh token issued seconds earlier. The token carries only `sub`, so the row
+  must be read before the tenant is known; under ADR 0047 a transaction with no
+  scope matches no policy branch and reads nothing. **No session could be renewed
+  on a Helm install**, and the message blamed the account.
+- **`POST /auth/forgot-password` answered `200` and never sent anything.** Same
+  cause — and `200` is also the intended answer for an unknown account, so the
+  failure was indistinguishable from the normal case.
+- **`POST /auth/reset-password` rejected valid codes** with `400 Invalid or
+  expired reset code.`, again by failing to find the user.
+
+All three now open `system_scope()` before their first query, as `login`,
+`/auth/setup` and gateway authentication already did — the fourth, fifth and
+sixth occurrence of the same defect class. `core/tests/test_pre_tenant_lookups_are_scoped.py`
+fails if a pre-tenant handler forgets the scope, or opens it after the
+transaction has already begun.
+
+### Fixed — core could not reach SMTP or any notification provider under the chart's own policy
+
+Core's egress allowed 5432, 6379 and 53. But core sends notification tests from
+the API (Slack, webhook, PagerDuty) and opens its SMTP connection inside the
+request handler, so both were dropped on a policy-enforcing CNI. The worker was
+unaffected because no policy selects it — which is why scheduled alerts went out
+while the "Test" button in the interface timed out silently.
+
+Control, same destination at the same instant: `core -> mailpit:1025` timed out
+after 10.1 s, `worker -> mailpit:1025` connected in 0.1 s.
+
+The chart now allows outbound 443, and the port declared in
+`core.secret.smtpPort` whenever `core.secret.smtpHost` is set.
+
+**Password reset is now verified end to end** — request, delivery, subject and
+reset code read back out of the relay's mailbox. It had never been executed.
+
+### Fixed — the isolation posture core announces was invisible in production
+
+`APP_ENV=production` sets the log level to `WARNING`, and the healthy case is a
+`log.info`, so `Isolation : connecte en « vibops_app », RLS applicable.` never
+printed where it matters. Only the dangerous case — a role that bypasses RLS —
+was a warning and came out. A silent log did not mean "all good"; it meant
+nothing, and no functional test tells the two postures apart. Startup facts now
+survive production filtering.
+
+### Verified on a managed OVH cluster (Canal / Calico)
+
+Enforcement was confirmed first with a disposable pod — reachable without a
+policy, dropped with one — so that a green result would mean something:
+
+- the full chart installs, seven pods Running, three Cinder volumes bound;
+- the chart's `grant-app-role` init container really gives core `vibops_app`
+  (`rolsuper = f`, `rolbypassrls = f`), so ADR 0047 is active;
+- the database egress rule follows where the database lives: with the restricted
+  rule a PostgreSQL in another namespace times out after 12 s, with the managed
+  branch core completes a real asyncpg handshake in 0.1 s;
+- a Connect gateway in **another namespace** registers, pings `200`, polls jobs
+  and runs a network scan;
+- two consecutive `helm upgrade` runs succeed against a provider whose default
+  StorageClass has a real name (`csi-cinder-high-speed-gen2`), not k3d's
+  `local-path`.
+
+`Install smoke` now also checks that a session renews and that a password reset
+reaches its relay — the two steps that would have caught the defects above.
+
+---
+
 ## [0.49.0] — 2026-10-01
 
 Consolidates the 0.48.1 → 0.48.9 releases, which were tagged and published without

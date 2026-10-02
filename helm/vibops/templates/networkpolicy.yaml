@@ -110,6 +110,41 @@ spec:
     - ports:
         - port: 6379
           protocol: TCP
+    # Les canaux de notification, qui partent de core et pas seulement du worker.
+    #
+    # Core n'avait aucune sortie au-dela de sa base, son broker et le DNS. Or le
+    # panneau Notifications envoie ses essais depuis l'API — Slack, un webhook,
+    # PagerDuty — et la reinitialisation de mot de passe ouvre une connexion SMTP
+    # dans le handler lui-meme. Les deux etaient bloquees par cette politique.
+    #
+    # Mesure le 02/10/2026 sur le Kubernetes manage OVH, dont le CNI applique
+    # les politiques. Controle A/B sur la meme destination au meme instant :
+    #
+    #   core   -> mailpit.mail:1025   BLOQUE TimeoutError (10,1 s)
+    #   worker -> mailpit.mail:1025   OUVERT (0,1 s)
+    #
+    # Le worker passe parce qu'aucune politique ne le selectionne — ce qui
+    # explique que les alertes periodiques partaient et que les essais depuis
+    # l'interface, eux, expiraient sans un mot. Et le SMTP de core est un appel
+    # bloquant de 10 s : chaque tentative gelait la boucle d'evenements.
+    #
+    # 443 sans `to` restreint, comme pour l'agent : la destination est le
+    # fournisseur que l'operateur a configure, et une politique ne peut pas la
+    # deviner.
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- with .Values.core.secret.smtpHost }}
+    # Le port SMTP n'est ouvert que si un serveur est configure, et c'est celui
+    # que l'operateur a declare — 587, 465, 25 ou 1025 selon le relais. Un
+    # `smtpHost` rempli sans cette regle donne un manuel qui documente un
+    # reglage que la politique interdit.
+    - to: []
+      ports:
+        - port: {{ $.Values.core.secret.smtpPort | default "587" | int }}
+          protocol: TCP
+    {{- end }}
     # DNS resolution
     - to: []
       ports:

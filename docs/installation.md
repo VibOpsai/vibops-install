@@ -156,7 +156,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.0
+  ghcr.io/davidmacamara-boop/vibops-core:v0.51.1
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +214,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.0 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.51.0 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.51.0 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.51.0 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.51.0 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.51.0 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.51.1 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.51.1 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.51.1 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.51.1 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.51.1 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.51.1 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -415,7 +415,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.51.0` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.51.1` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -674,6 +674,8 @@ core:
     smtpUser:     "apikey"
     smtpPassword: "SG.xxx"
     smtpFrom:     "noreply@yourcompany.com"
+    # The chart's NetworkPolicy opens `smtpPort` for core only when `smtpHost`
+    # is set, so a relay on 465, 25 or 1025 works without editing the policy.
 
 # ── Database and broker ───────────────────────────────────────
 # Bundled by default, with generated passwords. Nothing to supply.
@@ -744,11 +746,32 @@ With ingress-nginx and cert-manager installed and a `letsencrypt-prod` issuer,
 the same values file produced a real Let's Encrypt certificate in under a
 minute, HTTPS 200 with verification passing, and a 308 from HTTP to HTTPS.
 
+#### Network policies
+
+The chart installs NetworkPolicies and they are **enabled by default**
+(`networkPolicy.enabled`). Whether they do anything depends on your CNI: Calico,
+Cilium and Canal enforce them, plain flannel ignores them silently. Check before
+you rely on them — and before you blame them:
+
+```bash
+kubectl get pods -n kube-system | grep -Ei 'calico|cilium|canal'
+```
+
+What they allow for core: its database, Redis, DNS, outbound HTTPS for
+notification channels, your SMTP port when you set one, plus inbound from the
+agent, the console, an ingress controller, and Connect gateways running anywhere
+in the same cluster. A gateway reaching core from **another namespace of the same
+cluster** is allowed by name (`app.kubernetes.io/name: vibops-connect`); a remote
+gateway comes in through the Ingress and is not concerned.
+
+Verified on 02/10/2026 on a managed OVH cluster running Canal, after confirming
+with a disposable pod that the cluster really does drop what a policy denies.
+
 **Generate a password hash for the admin user:**
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.0 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.51.1 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -1170,6 +1193,30 @@ pre-filled in the UI. Do not use in production.
 > **Tip:** always set the `email` field when creating users (see above) — it is the only
 > way to receive a password reset link in production.
 
+**Verified end to end on 02/10/2026** against a Mailpit relay on a managed OVH
+Kubernetes cluster: request sent, message delivered, subject
+`[VibOps] Reset your password`, reset code in the body.
+
+Two defects were in the way until that measurement, both invisible from a
+healthy-looking install:
+
+* Core looked the account up without opening the system scope, so under row
+  level security (ADR 0047) it found no row and answered `200` with
+  `{"dev_token": null}` — which is also the intended answer for an account that
+  does not exist, so nothing distinguished the failure from the normal case. No
+  email was ever sent on a Helm install. The same cause stopped
+  `POST /auth/refresh` from renewing a session (`401 User not found or
+  inactive.` for a token issued seconds earlier) and `POST /auth/reset-password`
+  from accepting a valid code.
+* Core opens its SMTP connection in the request handler, and the chart's
+  NetworkPolicy allowed egress only to 5432, 6379 and 53. On a CNI that enforces
+  policies the connection simply timed out. The chart now opens the port
+  declared in `core.secret.smtpPort` whenever `core.secret.smtpHost` is set, and
+  443 for the notification channels core sends from the API.
+
+Neither appears on a Docker Compose install, where core connects as a superuser
+the policies do not constrain, nor on a cluster whose CNI ignores NetworkPolicy.
+
 ---
 
 ## 9. Configuration reference
@@ -1503,5 +1550,22 @@ helm uninstall vibops -n vibops
 kubectl delete namespace vibops
 ```
 
-> This does **not** delete the PostgreSQL data if you used an external database.
-> Drop the `vibops` database manually if needed.
+**The two lines do different things, and the first one deliberately keeps your
+data.** `helm uninstall` removes the release but leaves
+`data-vibops-db-0` — the database volume comes from the StatefulSet's
+`volumeClaimTemplate`, which Kubernetes does not delete with its owner. That is
+the right default: an uninstall must not destroy a database. It also means the
+volume keeps being billed on a cloud provider until you remove it.
+
+Measured on 02/10/2026 on a managed OVH cluster: three claims before
+(20 Gi database, 10 Gi agent training data, 1 Gi console), one after. Deleting
+the namespace is what releases it:
+
+```bash
+kubectl -n vibops get pvc            # before deleting the namespace — check what you keep
+kubectl delete namespace vibops      # releases the remaining volume
+kubectl get pv | grep vibops         # must print nothing
+```
+
+> With an **external** database, neither command touches it. Drop the `vibops`
+> database yourself if you want it gone.
