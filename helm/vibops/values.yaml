@@ -30,17 +30,17 @@ images:
   core:
     repository: ghcr.io/davidmacamara-boop/vibops-core
     tag: ""
-    digest: "sha256:d0ae4af4d88ed29372f49dd519439807f46b8bdd60295273fe88473dbddeb751"
+    digest: "sha256:1d7cca9ce28e9258597229862b5a5f61dfbd5d853fd8af8032242675b786a9dc"
     pullPolicy: IfNotPresent
   agent:
     repository: ghcr.io/davidmacamara-boop/vibops-agent
     tag: ""
-    digest: "sha256:69981850142f03571ec2f6af95ee9287c094d1b13688ecc1becbb83fd61d420c"
+    digest: "sha256:9dc9fa04b107db517e23779de0c85c33a817433bb2f5e10a677d65814b123d56"
     pullPolicy: IfNotPresent
   console:
     repository: ghcr.io/davidmacamara-boop/vibops-console
     tag: ""
-    digest: "sha256:e61b82805889593c7b154c9348b523700132315c4bbd16719192aa2ba375b419"
+    digest: "sha256:4230575654db9d13c34a52f2fdf934c0b137690f936dbcb111b5855b0f9c95b0"
     pullPolicy: IfNotPresent
 
 # ── Namespace ─────────────────────────────────────────────────────────────────
@@ -275,8 +275,9 @@ postgresql:
     database: vibops
 
   # Row level security (ADR 0047). The application connects as `vibops_app`, a
-  # role with no superuser and no BYPASSRLS, so the forty-six tenant policies
-  # actually apply to it. Migrations keep the owner connection — they need DDL,
+  # role with no superuser and no BYPASSRLS, so the tenant policies actually
+  # apply to it — forty-seven tables at the time of writing, and the list the
+  # code owns is `core/app/models/_rls.py`, not this comment. Migrations keep the owner connection — they need DDL,
   # and a data migration has to reach every tenant.
   #
   # Set to false to put the application back on the owner role. That does not
@@ -293,6 +294,148 @@ postgresql:
   persistence:
     size: 20Gi
     storageClass: ""   # empty = the cluster default
+
+  # Backups of the bundled database. Enabled by default, because a database
+  # with no backup is not a default anyone chooses deliberately — and that is
+  # what this chart shipped until v0.51.3: `postgresql.enabled: true` deployed
+  # a StatefulSet and nothing dumped it. The manual's enterprise path sets
+  # `postgresql.enabled: false` and delegates to a managed database that backs
+  # itself up; every other install had no backup at all.
+  #
+  # A nightly dump on a volume of its own, kept 30 days, verified to contain
+  # tables before the old ones are pruned. It covers human error and logical
+  # corruption; it does not cover losing the cluster — ADR 0048 names that gap,
+  # and the off-host copy is what closes it.
+  backup:
+    enabled: true
+
+    # `postgres:16`, Debian — not the `16-alpine` the server runs.
+    #
+    # It is the only way to have `pg_dump` and a crypto tool in one process,
+    # and that matters: with two containers the cleartext archive had to be
+    # written to the backup volume and then unlinked, and an unlinked file is
+    # not an erased one. Its blocks stay readable on the device until something
+    # overwrites them — and a stolen disk is exactly what the encryption below
+    # exists for. Measured on 03/10/2026: `postgres:16-alpine` carries neither
+    # openssl, gpg nor age; `alpine` carries none either; and our own core
+    # image has openssl but no `pg_dump`.
+    #
+    # The SERVER stays on alpine. Debian is glibc, Alpine is musl, and changing
+    # libc under an existing data directory can change collation ordering and
+    # leave indexes wrong. This container never touches the data directory — it
+    # speaks the wire protocol — so the difference costs nothing here.
+    #
+    # An air-gapped site therefore mirrors two postgres images.
+    image:
+      repository: postgres
+      # Pinned by digest, like the server's: a tag is a moving pointer.
+      tag: "16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54"
+      pullPolicy: IfNotPresent
+    # 02:30 UTC. Deliberately not midnight: that is when every other scheduled
+    # job in a cluster fires.
+    schedule: "30 2 * * *"
+    retentionDays: 30
+    # The dump volume, separate from the database's. A backup on the database's
+    # own disk does not survive the loss of that disk.
+    size: 20Gi
+    storageClass: ""   # empty = inherits persistence.storageClass, then the default
+
+    # ── Encryption of the archives ────────────────────────────────────────────
+    #
+    # On by default, because a product should be safe by default and because
+    # the copy below sends tenant data to an object store. ADR 0048 had named
+    # this since it was written: the dumps held every tenant's data in the
+    # clear, and the off-host copy made that true in two places instead of one.
+    #
+    # AES-256-CBC through `openssl`, PBKDF2 with 600 000 iterations. The
+    # encrypting step runs in the vibops-core image, which carries OpenSSL —
+    # `postgres:16-alpine` carries no crypto tool at all, and neither does
+    # `alpine`. No new third-party image was introduced for this: the two the
+    # chart already depended on taught that lesson (Bitnami pruned its free
+    # catalogue, MinIO put its images behind a login).
+    #
+    # It gives confidentiality, not authenticity — `openssl enc` refuses AEAD
+    # modes. A stolen disk, a forgotten snapshot or a misconfigured bucket are
+    # covered; an adversary who can rewrite the ciphertext is not. Corruption
+    # IS caught: a single altered byte makes `gzip` fail on restore.
+    #
+    # ⚠ THE KEY IS GENERATED HERE AND LIVES NOWHERE ELSE. Deleting the
+    # namespace destroys it, while the backup volume and every off-host copy
+    # survive — leaving archives nobody can open. Export it on the day you
+    # install; `helm status` prints the command, and the installation guide
+    # makes it a step.
+    encryption:
+      enabled: true
+
+      # A Secret you created yourself, with a BACKUP_PASSPHRASE key. Use it to
+      # keep the key under your own management rather than the chart's.
+      existingSecret: ""
+
+      # Or impose the passphrase at install time. Left empty the chart
+      # generates one and preserves it for the life of the release.
+      passphrase: ""
+
+      # PBKDF2 iterations. Raise it, never lower it: an archive records the
+      # count it was written with, so lowering this weakens new archives
+      # without touching old ones.
+      iterations: 600000
+
+    # ── The copy off the cluster ──────────────────────────────────────────────
+    #
+    # ADR 0048 calls this its largest gap, and it was the right call: the dump
+    # above sits on cloud storage in the database's own region, so a lost
+    # region loses the database and every backup of it together. This is what
+    # closes that.
+    #
+    # Off by default, and it cannot be otherwise — the destination is yours and
+    # no default can invent it. Turning it on requires a `path` and either an
+    # `existingSecret` or a `config` map; the chart refuses to render without
+    # them rather than deploy a job that copies nowhere.
+    #
+    # The transport is rclone, configured entirely through its own environment
+    # variables, so the chart models no provider: S3 (every cloud), SFTP to
+    # another machine, Azure Blob, Google Cloud Storage, Backblaze — whatever
+    # rclone supports works here with no chart change.
+    #
+    # docs/installation.md, Option C, "Backups", carries the keys for the
+    # common targets and the restore path.
+    remote:
+      enabled: false
+
+      # Bucket and prefix, e.g. "acme-vibops-backups/prod". No leading slash.
+      path: ""
+
+      # A Secret you created yourself, holding RCLONE_CONFIG_OFFSITE_* keys.
+      # Preferred: nothing lands in a values file, in `helm get values`, or in
+      # the release history.
+      existingSecret: ""
+
+      # Or the same keys inline, which the chart renders into a Secret of its
+      # own. Convenient for a pilot; the credential then lives in the release
+      # history for as long as the release does.
+      #
+      #   config:
+      #     RCLONE_CONFIG_OFFSITE_TYPE: s3
+      #     RCLONE_CONFIG_OFFSITE_PROVIDER: Other
+      #     RCLONE_CONFIG_OFFSITE_ENDPOINT: https://s3.gra.io.cloud.ovh.net
+      #     RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ...
+      #     RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ...
+      config: {}
+
+      # Defaults to the local retentionDays above. Set it longer to keep more
+      # history off-site than on the cluster's volume, which is the usual shape.
+      retentionDays: ""
+
+      # rclone, pinned by digest like the two other third-party images in this
+      # chart: a tag is a moving pointer, a digest is the content. An air-gapped
+      # site gets this image in the delivery archive whether or not it turns the
+      # copy on — `scripts/package-delivery.sh` renders the chart both ways,
+      # because discovering a missing image at 02:30 is not a discovery anyone
+      # wants to make.
+      image:
+        repository: rclone/rclone
+        tag: "1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5"
+        pullPolicy: IfNotPresent
 
   # Upgrading a release whose data still sits in the Bitnami subchart's volume
   # is refused, because it would start an empty database and leave the old one

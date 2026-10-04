@@ -118,6 +118,23 @@ Until 29/09/2026 this section told you to fetch a release asset from a private
 repository, which nobody outside VibOps could do. If a tutorial or an older
 console still shows `gh release download`, ignore it and use the line above.
 
+**Beyond a test, do not pass the token on the command line.** `--set
+vibops.token=…` leaves it in your shell history and in `helm get values`. Put it
+in a Secret and name the Secret instead:
+
+```bash
+kubectl create secret generic vibops-connect-token \
+  --namespace vibops-connect --from-literal=token="kR7…"
+
+helm upgrade --install vibops-connect \
+  oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
+  --namespace vibops-connect --create-namespace \
+  --set gateway.id="3f2a…-…-…" \
+  --set gateway.clusterName="gra11-prod" \
+  --set vibops.coreUrl="https://vibops.example.com" \
+  --set vibops.existingSecret="vibops-connect-token"
+```
+
 **`gateway.clusterName` is not cosmetic.** A cluster name is the address a job
 is routed to, so the platform refuses a name another gateway in the same
 organisation already declares. Left empty, an in-cluster install declares
@@ -140,7 +157,7 @@ docker run -d --name vibops-connect --restart unless-stopped \
   -e VIBOPS_CORE_URL="https://vibops.example.com" \
   -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
   -e VIBOPS_TOKEN="kR7…" \
-  ghcr.io/davidmacamara-boop/vibops-connect:latest
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.51.3
 ```
 
 Those three variables gate start-up. Connect exits immediately without any one

@@ -290,6 +290,15 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: beat
+        # The backup pod. It talks to the database like the three above, and
+        # a policy that forgets it does not produce an error: a denied packet
+        # is dropped, so `pg_dump` waits out its timeout and the CronJob fails
+        # every night in a job history nobody reads. Added on 03/10/2026 with
+        # the CronJob itself — on a CNI that enforces policies the two are
+        # inseparable, and `helm template` cannot tell them apart.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backup
       ports:
         - port: 5432
           protocol: TCP

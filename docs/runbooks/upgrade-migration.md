@@ -419,5 +419,5 @@ Verified on a cluster, all three from scratch:
 - [ ] Check Grafana API SLO dashboard — no error spike
 - [ ] Confirm gateway heartbeat: `GET /api/v1/gateways` shows `online: true` and recent `last_ping_at`
 - [ ] Check audit log for unexpected errors: `GET /api/v1/audit?limit=20`
-- [ ] Update `docs/STATUS.md` with new version and date
+- [ ] Confirm the version is coherent everywhere: `scripts/bump-version.sh --check` (this replaced `docs/STATUS.md`, which this line asked you to update and which has never existed — found 03/10/2026)
 - [ ] Tag the git commit: `git tag v0.X.Y && git push origin v0.X.Y`

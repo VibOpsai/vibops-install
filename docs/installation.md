@@ -109,6 +109,7 @@ rule can be written once rather than discovered during a maintenance window.
 | `docker.io` (Docker Hub) | PostgreSQL, Redis, Caddy, Grafana, Prometheus, the Docker socket proxy | all |
 | `vibops.ai` | `install.sh` and `docker-compose.yml` | one-line install only |
 | `download.docker.com` | installs Docker when absent, from Docker's signed apt repository | one-line install only |
+| your object storage or backup host | the off-host copy of the database backup, if you turn it on | all, optional |
 
 Two of those are avoidable and one is not:
 
@@ -156,7 +157,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.3
+  ghcr.io/davidmacamara-boop/vibops-core:v0.52.0
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -214,12 +215,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.3 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.51.3 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.51.3 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.51.3 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.51.3 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.51.3 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.52.0 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.52.0 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.52.0 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.52.0 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.52.0 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.52.0 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -464,7 +465,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.51.3` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.52.0` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -691,6 +692,7 @@ Services started by the stack, and how each is reached:
 | `prometheus` | **9090** | Metrics scraping + alerting rules |
 | `grafana` | **3000** | Dashboards — admin / `${GRAFANA_PASSWORD:-vibops}` |
 | `backup` | — | Daily `pg_dump` → `/backups/` (30-day retention) |
+| `backup-offsite` | — | Copies each night's archive off the machine. Not started by default — see "Copying the backup off the machine" below |
 
 #### Step 5 — Bootstrap the first admin user (if auth is enabled)
 
@@ -725,6 +727,153 @@ Log in at **http://localhost:8003** (or **http://SERVER_IP:8003** on a remote se
 > **Pilot clients** — to provision additional client orgs (each isolated), run `make pilot-create-client` once per client.
 
 > **Password reset by email** — for the "Forgot password" flow to send emails, configure `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` in `.env` before going live. Without SMTP, the reset token is returned directly in the API response (dev mode only — not suitable for production).
+
+#### Backups
+
+The `backup` service dumps the database every night into the `backups` volume
+and keeps 30 days. Two files per night — the database and the cluster roles,
+both needed to restore onto a fresh machine — and the service reports *healthy*
+only once it has produced an archive it can open and find tables in:
+
+```bash
+docker compose ps backup                 # healthy = a recent, readable archive exists
+make backup-list                         # what is on the volume
+make backup-now                          # one off-schedule, right now
+```
+
+##### ⚠ The archives are encrypted, and the key is in `.env`
+
+`make quickstart` and `install.sh` generate a `BACKUP_PASSPHRASE` for any new
+install, and the archives are then written as `vibops_<date>.sql.gz.enc`.
+**That key exists only in `.env`.** Lose the file and the thirty days of
+archives — and every off-host copy of them — can no longer be opened, by you or
+by us. Keep a copy of `.env` somewhere other than this machine, today:
+
+```bash
+grep BACKUP_PASSPHRASE .env
+```
+
+An existing deployment that upgrades has no such key, so nothing changes for it
+until one is set — the archives stay in the clear and the restore procedure
+stays the one it knows. To start encrypting, put a key in `.env` and restart the
+service:
+
+```bash
+echo "BACKUP_PASSPHRASE=$(openssl rand -hex 32)" >> .env
+docker compose up -d backup
+```
+
+The cleartext archives already on the volume are left alone and age out over
+the next thirty days — at the moment you turn encryption on they are the only
+backups you have. Both forms are expired by retention, and both are copied
+off-host.
+
+AES-256-CBC, PBKDF2 with 600 000 iterations, applied **in the same stream as
+the dump**: nothing in the clear is ever written to the volume. That is why the
+service runs the Debian `postgres:16` image rather than the alpine one the
+database runs — it is the only image carrying both `pg_dump` and `openssl`. A
+file that was unlinked is not a file that was erased, and a stolen disk is what
+this protects against.
+
+It gives confidentiality, not authenticity: `openssl enc` has no authenticated
+mode, so an adversary who can rewrite the ciphertext is not detected. Corruption
+is: an altered byte makes the decryption fail, and a wrong key says
+`bad decrypt` rather than producing silent garbage.
+
+#### Copying the backup off the machine
+
+The volume above is on this machine. A disk, a VM or a region lost takes the
+database and every backup of it together — so the copy below is the one that
+matters for anything beyond a POC.
+
+It is not started with the rest, because the destination is yours and no default
+can invent it. Add to `.env`:
+
+```bash
+BACKUP_REMOTE_PATH=acme-vibops-backups/prod     # bucket and prefix, no leading slash
+BACKUP_REMOTE_RETENTION_DAYS=90                 # optional, defaults to 30
+
+RCLONE_CONFIG_OFFSITE_TYPE=s3
+RCLONE_CONFIG_OFFSITE_PROVIDER=Other
+RCLONE_CONFIG_OFFSITE_ENDPOINT=https://s3.gra.io.cloud.ovh.net
+RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID=...
+RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY=...
+```
+
+Then start it:
+
+```bash
+docker compose --profile offsite up -d
+docker compose ps backup-offsite         # healthy = the destination holds a recent copy
+docker compose logs backup-offsite
+# offsite: acme-vibops-backups/prod <- vibops_2026-10-03.sql.gz globals_2026-10-03.sql.gz
+```
+
+The transport is [rclone](https://rclone.org/), so no provider is built in —
+S3 on any cloud, SFTP to another machine, Azure Blob, Google Cloud Storage or
+anything else rclone supports works with no change to the compose file. The
+remote is always called `offsite`:
+
+| Target | Keys beyond `TYPE` |
+|--------|--------------------|
+| AWS S3 | `PROVIDER=AWS`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
+| OVH, Scaleway, any S3-compatible | `PROVIDER=Other`, `ENDPOINT`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
+| Another machine over SSH | `TYPE=sftp`, `HOST`, `USER`, and `KEY_PEM` or `PASS` (obscured — `rclone obscure`) |
+| Azure Blob | `TYPE=azureblob`, `ACCOUNT`, `KEY` |
+
+Two details worth knowing:
+
+- **It retries every hour, not every day.** The copy is only transferred when
+  the destination does not already hold it, so a destination that was
+  unreachable at 02:30 is caught up within the hour instead of the next day.
+- **`healthy` means the destination holds a recent copy** — the check asks the
+  destination, not a local marker. Revoked credentials, a renamed bucket or an
+  unpaid invoice leave the container running and the loop logging its failure
+  into a stream nobody reads; `docker compose ps` is where you see it.
+
+To restore a local archive, work inside the `backup` container — it already
+has the archive, the key, and the database connection:
+
+```bash
+docker compose exec backup bash
+
+D=2026-10-03                              # the archive you picked
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_PASSPHRASE \
+  -in /backups/globals_$D.sql.gz.enc -out /tmp/globals.sql.gz
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_PASSPHRASE \
+  -in /backups/vibops_$D.sql.gz.enc  -out /tmp/vibops.sql.gz
+
+# Roles first. One `role … already exists` error per role that is already
+# there is expected — do not add ON_ERROR_STOP, it would skip vibops_app.
+gzip -dc /tmp/globals.sql.gz | psql -d postgres
+
+# Never over the live database.
+psql -d postgres -c "CREATE DATABASE vibops_restore"
+gzip -dc /tmp/vibops.sql.gz | psql -d vibops_restore 2>&1 | tee /tmp/restore.log
+grep -c '^ERROR' /tmp/restore.log         # must be 0 — psql exits 0 regardless
+```
+
+Then compare `vibops_db` against `vibops_restore` before promoting anything —
+row counts, and the row-level-security state, which is the part that fails
+silently. `docs/runbooks/backup-restore.md` has that comparison and the rest of
+the drill.
+
+To restore from the off-host copy, fetch it back into the `backups` volume and
+then restore as above. The `backup-offsite` service mounts that volume
+read-only — it transports, it does not write — so the fetch is a one-off
+container that mounts it writable:
+
+```bash
+docker volume ls | grep backups          # the project prefix depends on your directory
+docker run --rm --env-file .env \
+  -e RCLONE_CONFIG=/tmp/rclone.conf -e HOME=/tmp \
+  -v <project>_backups:/backups \
+  rclone/rclone:1.75.1 copy "offsite:$BACKUP_REMOTE_PATH" /backups \
+    --include 'vibops_*.sql.gz' --include 'globals_*.sql.gz'
+```
+
+`docs/runbooks/backup-restore.md` has the full drill from there, including the
+one error that is expected while restoring the roles.
 
 ---
 
@@ -894,7 +1043,7 @@ with a disposable pod that the cluster really does drop what a policy denies.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.51.3 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.52.0 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -967,6 +1116,229 @@ no way to open the console: the only command offered pointed at a host no
 resource served.
 
 Open the console, then continue with section 5 below.
+
+#### Backups
+
+With the bundled database — `postgresql.enabled: true`, the default — the chart
+deploys a nightly backup. There is nothing to set:
+
+```bash
+kubectl -n vibops get cronjob vibops-backup
+# NAME             SCHEDULE     SUSPEND   ACTIVE   LAST SCHEDULE
+# vibops-backup    30 2 * * *   False     0        <none>
+```
+
+At 02:30 UTC it writes two files to a volume of its own, `vibops-backups`:
+
+| File | What it holds | Why both |
+|------|---------------|----------|
+| `vibops_YYYY-MM-DD.sql.gz.enc` | The database | |
+| `globals_YYYY-MM-DD.sql.gz.enc` | Roles and grants | A restore onto a fresh cluster fails without it — the roles do not exist yet |
+
+Thirty days are kept. The job verifies the archive contains a schema before
+pruning anything, so a night that produced nothing usable cannot expire the last
+good copy.
+
+##### ⚠ Export the backup key on the day you install
+
+**The archives are encrypted, and the key exists only inside your cluster.**
+`helm install` and every `helm upgrade` print the command; run it once and put
+the output where you keep your other break-glass secrets:
+
+```bash
+kubectl -n vibops get secret vibops-backup-key \
+  -o jsonpath='{.data.BACKUP_PASSPHRASE}' | base64 -d; echo
+```
+
+Deleting the namespace destroys the key, while the backup volume survives on
+purpose and so does every off-host copy. That combination leaves thirty days of
+archives and nothing to open them with — by you or by us. The key and the
+volume both carry `helm.sh/resource-policy: keep` so that a `helm uninstall`
+keeps the pair together, but a namespace deletion takes both.
+
+To keep the key under your own management instead, create the Secret yourself
+and point the chart at it:
+
+```bash
+kubectl -n vibops create secret generic my-backup-key \
+  --from-literal=BACKUP_PASSPHRASE="$(openssl rand -base64 36)"
+```
+
+```yaml
+postgresql:
+  backup:
+    encryption:
+      existingSecret: my-backup-key
+```
+
+##### What the encryption does and does not do
+
+AES-256-CBC, PBKDF2 with 600 000 iterations, applied **in the same stream as
+the dump**. `pg_dump` writes into the cipher; nothing in the clear is ever
+written to the backup volume.
+
+That last point is the whole design. A file that was unlinked is not a file
+that was erased — its blocks stay readable on the device until something
+overwrites them, and a stolen disk is exactly what this protects against. So
+the backup container runs `postgres:16` (Debian) rather than the `16-alpine`
+the server runs: it is the only image carrying both `pg_dump` and `openssl`.
+**An air-gapped site therefore mirrors two PostgreSQL images** — the alpine one
+for the server, the Debian one for the backup. The server stays on alpine
+deliberately: Debian is glibc, Alpine is musl, and changing libc under an
+existing data directory can change collation ordering and leave indexes wrong.
+
+| | |
+|---|---|
+| **Covered** | A stolen or decommissioned disk. A forgotten volume snapshot. An object-store bucket left readable. Anyone who obtains a copy of the files without the key. |
+| **Not covered** | Someone who can read the running pod's environment — the key has to be reachable by the process that encrypts. And authenticity: an adversary able to rewrite the ciphertext is not detected, because `openssl enc` offers no authenticated mode. |
+| **Also true** | Corruption *is* detected. A single altered byte makes the decryption fail on restore, and a wrong key says `bad decrypt` rather than producing silent garbage. |
+
+The only cleartext anywhere is the cluster roles file — a few kilobytes of
+`CREATE ROLE` and `GRANT`, whatever the size of the database — and it is staged
+in a memory-backed volume, never on a disk.
+
+`encryption.enabled: false` turns this off. The archives are then readable by
+anyone who reaches the volume or, if the off-host copy is on, the bucket.
+
+**This did not exist until 03/10/2026.** `postgresql.enabled: true` deployed a
+database and nothing dumped it: no cron, no `pg_dump`, no volume. The enterprise
+values file sets `postgresql.enabled: false` and delegates to a managed database
+that backs itself up, so the gap only affected installs that used the bundled
+one — which is every install that follows this option as written. Nothing failed
+and no install reported anything; it would have surfaced on the day a restore
+was needed.
+
+Run one now rather than waiting for 02:30:
+
+```bash
+kubectl -n vibops create job --from=cronjob/vibops-backup backup-now
+kubectl -n vibops wait --for=condition=complete job/backup-now --timeout=10m
+kubectl -n vibops logs job/backup-now
+# backup: -rw-rw-r-- 1 999 ping 614 Oct 3 16:07 /backups/vibops_2026-10-03.sql.gz
+```
+
+Measured on 03/10/2026 on a managed OVH cluster (Calico, policies enforced):
+the job completes in 5 seconds, the 20 Gi claim binds on Cinder with no storage
+class set, and the archive restores into a fresh database with every row back.
+
+**To restore**, decrypt first, then feed `psql`. Two stages, because no single
+image carries both OpenSSL and `psql`; any pod that talks to the database needs
+`app.kubernetes.io/component: backup` among its labels or the network policy
+will not admit it:
+
+```bash
+kubectl -n vibops exec vibops-db-0 -- psql -U vibops -d postgres \
+  -c 'CREATE DATABASE restored'
+
+# Stage 1 — in the core image, with BACKUP_PASSPHRASE from the Secret:
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+  -pass env:BACKUP_PASSPHRASE \
+  -in /backups/vibops_<date>.sql.gz.enc -out /work/vibops.sql.gz
+
+# Stage 2 — in the postgres image, sharing /work:
+gzip -dc /work/globals.sql.gz | psql -d postgres    # one error is expected
+gzip -dc /work/vibops.sql.gz  | psql -d restored
+```
+
+`docs/runbooks/backup-restore.md` carries the full drill.
+
+One thing this leaves open, and one thing it deliberately does not do:
+
+- **A dump on the cluster does not survive the cluster.** The volume sits on
+  cloud storage in the database's own region. Human error and logical
+  corruption are covered; losing the region loses the database and every backup
+  of it together. The copy below is what closes that, and it is worth turning
+  on.
+- **With an external database — `postgresql.enabled: false` — the chart deploys
+  no backup job at all**, and `kubectl get cronjob` returns nothing. That is
+  correct: a managed database backs itself up on its provider's schedule, and a
+  job of ours pointing at it would dump a server you did not ask us to touch.
+  **Check that your provider's backups are actually on**, because nothing in
+  this chart will tell you if they are not.
+
+##### Copying the backup off the cluster
+
+Off by default, because the destination is yours and no default can invent it.
+Turning it on adds a second stage to the same nightly job: the dump runs first,
+then the archive is copied out and read back.
+
+The transport is [rclone](https://rclone.org/), configured entirely through its
+own environment variables. The chart models no provider — S3 on any cloud, SFTP
+to another machine, Azure Blob, Google Cloud Storage, Backblaze, anything rclone
+supports works with no chart change. The remote is always called `offsite`:
+
+```bash
+kubectl -n vibops create secret generic vibops-offsite \
+  --from-literal=RCLONE_CONFIG_OFFSITE_TYPE=s3 \
+  --from-literal=RCLONE_CONFIG_OFFSITE_PROVIDER=Other \
+  --from-literal=RCLONE_CONFIG_OFFSITE_ENDPOINT=https://s3.gra.io.cloud.ovh.net \
+  --from-literal=RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID=... \
+  --from-literal=RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY=...
+```
+
+Then, in your values file:
+
+```yaml
+postgresql:
+  backup:
+    remote:
+      enabled: true
+      path: "acme-vibops-backups/prod"   # bucket and prefix, no leading slash
+      existingSecret: vibops-offsite
+      retentionDays: 90                  # optional; defaults to the local 30
+```
+
+Create the Secret yourself rather than putting the credential in values: a
+`--set` secret stays in `helm get values` and in the release history for as long
+as the release does. The chart will also render a Secret from a
+`remote.config` map if you prefer that for a pilot.
+
+The keys for the common targets:
+
+| Target | Keys beyond `TYPE` |
+|--------|--------------------|
+| AWS S3 | `PROVIDER=AWS`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
+| OVH, Scaleway, any S3-compatible | `PROVIDER=Other`, `ENDPOINT`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
+| Another machine over SSH | `TYPE=sftp`, `HOST`, `USER`, and `KEY_PEM` or `PASS` (obscured — `rclone obscure`) |
+| Azure Blob | `TYPE=azureblob`, `ACCOUNT`, `KEY` |
+
+**The chart refuses to render if `enabled: true` has no `path` or no
+credentials.** That is deliberate: a transfer job that copies nowhere is worse
+than no job, because it reports success every night.
+
+What the job does, and why each step is there:
+
+1. Checks today's two files exist and are not empty. `rclone copy /backups
+   dest:` succeeds on an empty directory — that is the failure this whole
+   mechanism exists to refuse, so the files are named rather than globbed.
+2. Copies them.
+3. **Reads the destination back** with `rclone check`. `copy` verifies its own
+   transfer; `check` verifies what the destination holds now, which is the
+   question actually being asked. A remote object replaced by the same number
+   of different bytes is caught on `md5 differ`.
+4. Expires remote copies older than `retentionDays`, filtered to the two
+   filename patterns above, so a mistyped `path` can at worst delete nothing.
+
+Any of those failing fails the job. Verified on 03/10/2026 against an
+S3 endpoint outside the release's namespace: both objects land, `check` reports
+`0 differences found, 2 matching files`, wrong credentials make the job `Failed`
+rather than `Complete`, and an archive fetched back **from the destination**
+restores into a fresh database with every row.
+
+To restore from the off-host copy, fetch it with the same Secret and pipe it
+into `psql` — two stages, because no single image carries both tools:
+
+```bash
+# Stage 1, in an rclone pod with envFrom the same Secret:
+rclone copy offsite:acme-vibops-backups/prod /work \
+  --include 'vibops_*.sql.gz' --include 'globals_*.sql.gz'
+# Stage 2, in a postgres pod sharing that volume:
+gzip -dc /work/globals_<date>.sql.gz | psql -d postgres   # one error is expected
+gzip -dc /work/vibops_<date>.sql.gz  | psql -d restored
+```
+
+In an air-gapped installation the transfer image is already in the delivery
+archive, whether or not you turn the copy on.
 
 #### Optional: use the automated onboarding script
 
@@ -1168,6 +1540,182 @@ refuses a name another gateway in the same organisation already holds. Left
 empty, every in-cluster install declares `in-cluster`, so the second Kubernetes
 site collides with the first and appears in the fleet with no cluster — its
 metrics arriving all the while. Name it after the site.
+
+### Method D — Docker, on a host that is not a cluster
+
+Connect does not need Kubernetes. It runs as a plain container anywhere that can
+reach core — a hypervisor host, a Slurm login node, a jump box, a VM on the
+management VLAN.
+
+```bash
+docker run -d --name vibops-connect --restart unless-stopped \
+  -e VIBOPS_CORE_URL="https://vibops.mycompany.com" \
+  -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
+  -e VIBOPS_TOKEN="kR7…" \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.52.0
+```
+
+Those three variables gate start-up: Connect exits immediately without any one
+of them, which is deliberate — a gateway that cannot authenticate should stop,
+not poll.
+
+That container reports the host itself. To let it see anything else, give it the
+credentials for what it should reach:
+
+- **another Kubernetes cluster** — mount a kubeconfig and point `KUBECONFIG` at
+  it (`-v ~/.kube/config:/home/vibops/.kube/config:ro`);
+- **a hypervisor** (Proxmox VE, vSphere, Xen Orchestra) — enter its API URL and
+  credentials on the gateway in the console, not here;
+- **bare metal over Redfish** — same, on the gateway.
+
+One gateway covers every site it can reach over the network. Sites it cannot
+reach each need their own.
+
+### What each platform needs
+
+The methods above start a gateway. What it then *sees* depends on what you give
+it. `docs/connect-quickstart.md` in the install repository covers the same ground
+at more length, with the reasoning behind each choice; everything needed to
+onboard a site is here.
+
+#### Kubernetes — the cluster Connect runs in
+
+Nothing. Deployed by Helm with the chart's ServiceAccount, Connect reads its own
+cluster with no configuration.
+
+#### Kubernetes — other clusters
+
+Give it a kubeconfig. **Every context in the file is enumerated**, so one
+kubeconfig with five contexts is five clusters reported by one gateway.
+
+```bash
+kubectl create secret generic vibops-kubeconfig \
+  --from-file=config=$HOME/.kube/config -n vibops-connect
+
+helm upgrade vibops-connect ./charts/vibops-connect \
+  --namespace vibops-connect --reuse-values \
+  --set kubeconfig.secretName=vibops-kubeconfig
+```
+
+**The two modes are exclusive.** With a kubeconfig mounted, Connect reads the
+contexts in it and *only* those — if the local cluster matters, add it to the
+file. Without one, it reads the local cluster and only that one.
+
+Reaching those clusters is a separate matter: the pod needs a route to each API
+server, and credentials that are still valid. A context Connect cannot reach is
+reported as unavailable, not silently skipped.
+
+#### Cluster names are routing addresses
+
+Core decides which gateway runs a job by finding the gateway that declares the
+target cluster, so **a cluster name must be unique within an organisation**. Two
+sites each calling their cluster `prod` is the natural thing to do and the one
+thing that breaks: the job goes to one of the two, and not the one you choose.
+
+Registration refuses it with `409 Conflict`, naming the gateway that already
+holds it. Prefix by site and never reuse a bare `prod`:
+
+```
+paris-prod      riyadh-prod      lyon-staging
+```
+
+#### Hypervisors — Proxmox VE, vSphere, Xen Orchestra
+
+VMs come from a hypervisor's API: the endpoint and its credentials are declared,
+there is no discovery step that produces a working connection.
+
+```bash
+# Proxmox VE
+helm upgrade vibops-connect ./charts/vibops-connect --reuse-values \
+  --set proxmox.url="https://pve.paris.local:8006" \
+  --set proxmox.user="root@pam" \
+  --set proxmox.tokenId="vibops" \
+  --set proxmox.token="…" \
+  --set gateway.hypervisorName="pve-paris"
+
+# VMware vCenter
+helm upgrade vibops-connect ./charts/vibops-connect --reuse-values \
+  --set vsphere.host="vcenter.lyon.local" \
+  --set vsphere.username="svc-vibops@vsphere.local" \
+  --set vsphere.password="…" \
+  --set gateway.hypervisorName="vc-lyon"
+
+# Xen Orchestra (XCP-ng / Vates)
+helm upgrade vibops-connect ./charts/vibops-connect --reuse-values \
+  --set xenOrchestra.url="https://xo.paris.local" \
+  --set xenOrchestra.token="…" \
+  --set gateway.hypervisorName="xo-paris"
+```
+
+There is **no platform type to set** — a hypervisor is detected by the presence
+of its URL. And `hypervisorName` is not cosmetic: alert rules and pricing target
+a hypervisor by name, so two Proxmox instances without distinct names merge into
+one and their VMs are attributed to whichever answered last.
+
+For several hypervisors on one gateway, use the `hypervisors` list instead; each
+entry carries its own name. The list and the single-variable form are mutually
+exclusive — when `hypervisors` is set, the `proxmox` / `vsphere` /
+`xenOrchestra` blocks are ignored.
+
+```yaml
+# values-paris.yaml
+hypervisors:
+  - {type: proxmox, name: pve-paris-a, url: "https://pve-a.paris.local:8006",
+     user: root@pam, token_id: vibops, token: "…"}
+  - {type: vsphere, name: vc-lyon, url: vcenter.lyon.local,
+     user: svc-vibops@vsphere.local, token: "…"}
+```
+
+#### Bare metal over Redfish
+
+This is the one that is scanned, and the one where placement matters.
+
+```bash
+helm upgrade vibops-connect ./charts/vibops-connect --reuse-values \
+  --set networkScan.subnet="10.20.0.0/24" \
+  --set networkScan.timeoutMs=500
+```
+
+**Set the subnet.** By default Connect derives it from its own address — inside a
+Kubernetes pod that is the cluster network, where there is no BMC. The scan then
+runs, finds nothing, and reports zero servers, which reads as "this site has no
+bare metal" and means "I could not look".
+
+**Naming a subnet does not create a route to it**, and that is the half that gets
+forgotten. Either Connect runs on the host network of a machine that already
+reaches the management VLAN — the Docker install above, typically on a jump box —
+or that VLAN is routed to the pod network. Without one of the two, the address is
+right and the packets go nowhere.
+
+The sweep probes 8006, 6443, 443, 9090, 9400, 6817, 3000 and 8080, and
+identifies what answers: Redfish BMCs (iDRAC, iLO, including model and firmware),
+Proxmox, a Kubernetes API, Prometheus, DCGM exporter, Slurm, Grafana. Every BMC
+found is **proposed, not adopted**: it lands unmanaged in the inventory and an
+operator confirms it. Reading it then needs credentials, stored as a vault secret
+name against the node and resolved at execution — the credential itself is never
+stored.
+
+Scanning a customer's network is opt-out, and opting out costs one flag:
+`--set networkScan.enabled=false`. Nodes are then declared by hand; nothing else
+changes.
+
+#### One gateway, or several
+
+The question that decides the topology is not *"is this the same customer?"* but
+**"can this container open a TCP connection to that API?"**
+
+- **It can** — one gateway. Add the contexts to the kubeconfig, add the entries
+  to the `hypervisors` list. One Connect serves as many clusters and hypervisors
+  as it has routes and credentials for.
+- **It cannot** — one gateway per network island, each with its own id and token.
+  Routing follows on its own, because core sends each job to the gateway that
+  declares the target cluster. All connections stay outbound.
+
+#### What is *not* configured in the chart
+
+**The Slurm head node, the Prometheus URL and mTLS** are properties of the
+gateway, entered in the console — which is also what lets you change them without
+redeploying. Setting them in `values.yaml` does nothing.
 
 ### Verify the gateway is online
 
@@ -1674,18 +2222,24 @@ kubectl delete namespace vibops
 ```
 
 **The two lines do different things, and the first one deliberately keeps your
-data.** `helm uninstall` removes the release but leaves
-`data-vibops-db-0` — the database volume comes from the StatefulSet's
-`volumeClaimTemplate`, which Kubernetes does not delete with its owner. That is
-the right default: an uninstall must not destroy a database. It also means the
-volume keeps being billed on a cloud provider until you remove it.
+data.** `helm uninstall` removes the release but leaves two volumes behind:
 
-Measured on 02/10/2026 on a managed OVH cluster: three claims before
-(20 Gi database, 10 Gi agent training data, 1 Gi console), one after. Deleting
-the namespace is what releases it:
+| Volume | Kept because |
+|--------|--------------|
+| `data-vibops-db-0` | It comes from the StatefulSet's `volumeClaimTemplate`, which Kubernetes does not delete with its owner |
+| `vibops-backups` | A plain PVC, so it *would* have gone with the release — it carries `helm.sh/resource-policy: keep` precisely so it does not |
+
+Both are the right default: an uninstall must not destroy a database, and it
+must not destroy the backups either — those are what you need if the uninstall
+was the mistake. It also means both volumes keep being billed on a cloud
+provider until you remove them.
+
+Measured on 03/10/2026 on a managed OVH cluster: four claims before (20 Gi
+database, 20 Gi backups, 10 Gi agent training data, 1 Gi console), two after.
+Deleting the namespace is what releases them:
 
 ```bash
-kubectl -n vibops get pvc            # before deleting the namespace — check what you keep
+kubectl -n vibops get pvc            # before deleting the namespace — take your backups off the cluster first
 kubectl delete namespace vibops      # releases the remaining volume
 kubectl get pv | grep vibops         # must print nothing
 ```

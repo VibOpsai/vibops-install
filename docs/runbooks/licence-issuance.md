@@ -148,7 +148,42 @@ so a 64-GPU fleet on a 10-GPU trial displayed "0 / 10", in green.
 
 ---
 
-## 6. Renewal
+## 6. The registry
+
+Every issuance appends a line to `~/.vibops/licences.csv` — override with
+`VIBOPS_LICENCE_REGISTRY`. It is created `0600` on first write.
+
+```
+issued_at,customer,plan,days,expires_at,gpu_max,users_max,clusters_max,fingerprint
+2026-10-02 16:08:15Z,Oreus,pro,365,2027-10-02,50,20,10,623d33e87aa6a5d4
+```
+
+It holds a **fingerprint of the key, not the key**. A registry containing the
+JWTs would be a file whose leak hands a third party working licences, for a
+traceability a hash provides just as well.
+
+It protects nothing technically — it answers a question that had no answer:
+who holds what, until when. Nothing else knows: there is no licence server to
+query, by design.
+
+What to do with it:
+
+```bash
+# Ce qui expire dans les trente jours
+awk -F, -v d="$(date -u -v+30d +%Y-%m-%d 2>/dev/null || date -u -d '+30 days' +%Y-%m-%d)" \
+  'NR>1 && $5 <= d {print $5, $2, $3}' ~/.vibops/licences.csv | sort
+```
+
+A failed write does not stop the issuance — the key is already signed, and
+losing it because a file was not writable would be worse — but it says so on
+stderr. A registry that fails silently is worth no more than no registry.
+
+**Back it up with the signing key.** They are the two things that cannot be
+reconstructed: the key issues, the registry remembers.
+
+---
+
+## 7. Renewal
 
 Nothing renews itself. There is no reminder, no job, no mail. The only signal is
 the countdown banner in the customer's own console — which is to say, the

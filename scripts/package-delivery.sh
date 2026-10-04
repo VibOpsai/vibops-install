@@ -56,6 +56,21 @@ echo "  ── images declarees par les charts…"
 rendu=$(
   helm template vibops "${REPO_ROOT}/helm/vibops" \
     --set agent.secret.llmApiKey=placeholder 2>/dev/null
+  # Et le meme chart avec la copie de sauvegarde hors machine activee.
+  #
+  # Elle est desactivee par defaut — la destination appartient a l'operateur —
+  # donc son image de transfert n'apparait pas dans le rendu par defaut. Un site
+  # hors ligne qui l'active ensuite se retrouverait avec un CronJob dont le
+  # second conteneur ne peut pas etre tire, et c'est a 02h30 qu'il l'apprendrait.
+  #
+  # L'archive porte donc l'image dans les deux cas. Les valeurs ci-dessous ne
+  # servent qu'a faire rendre le conteneur : le chart refuse de rendre sans
+  # chemin ni identifiants, ce qui est voulu.
+  helm template vibops "${REPO_ROOT}/helm/vibops" \
+    --set agent.secret.llmApiKey=placeholder \
+    --set postgresql.backup.remote.enabled=true \
+    --set postgresql.backup.remote.path=placeholder/placeholder \
+    --set postgresql.backup.remote.existingSecret=placeholder 2>/dev/null
   helm template vibops-connect "${REPO_ROOT}/charts/vibops-connect" \
     --set gateway.id=placeholder --set vibops.coreUrl=http://placeholder \
     --set vibops.token=placeholder 2>/dev/null
