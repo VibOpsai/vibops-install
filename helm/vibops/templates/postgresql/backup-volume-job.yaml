@@ -1,0 +1,106 @@
+{{- if and .Values.postgresql.enabled (dig "backup" "enabled" true .Values.postgresql) }}
+{{/*
+  Une tache d'installation qui monte le volume de sauvegarde, y ecrit, et sort.
+
+  Elle existe pour deux raisons, et la seconde est celle qui l'a fait ecrire.
+
+  **Elle lie le volume.** La plupart des StorageClass gerees se lient en
+  `WaitForFirstConsumer` : le volume n'est provisionne qu'au moment ou un pod
+  qui le monte est ordonnance. Le PVC de sauvegarde n'avait pour consommateur
+  que le CronJob de 02h30, donc il restait `Pending` — et `helm install --wait`
+  attend qu'un PVC soit `Bound`, sans moyen de l'en dispenser. L'installation
+  echouait donc apres son delai d'attente, sur :
+
+      PersistentVolumeClaim/vibops/vibops-backups not ready.
+      status: InProgress, message: PVC is not Bound. phase: Pending
+
+  Mesure le 04/10/2026 par « Install smoke » sur le tag v0.52.0, option C, k3d.
+  J'avais verifie le CronJob sur OVH, ou csi-cinder se lie immediatement : la
+  classe de stockage d'un cluster decide, et un seul cluster ne la decide pas.
+  Cela touche k3s et k3d, gp2/gp3 via ebs-csi, et `standard-rwo` sur GKE — la
+  majorite des installations, pas un cas de CI.
+
+  **Et elle prouve ce que la nuit supposait.** Le volume etait jusqu'ici ecrit
+  pour la premiere fois a 02h30. Un volume monte en lecture seule, un fsGroup
+  qui ne correspond pas, un quota a zero : rien ne le disait avant la premiere
+  sauvegarde manquee, dans un historique de job que personne ne lit. Ici
+  l'installation s'arrete, avec le message au-dessus de la main de l'operateur.
+  C'est la forme que demande l'ADR 0038 — une action declare comment son effet
+  est prouve — appliquee a l'installation plutot qu'a l'execution.
+
+  Pourquoi une tache ordinaire et non un hook : un hook Helm porte un nom fixe
+  et doit etre supprime avant d'etre recree, ce qui pour un PVC voudrait dire
+  detruire les sauvegardes a chaque mise a jour. Et un hook `post-install`
+  arrive apres l'attente, donc trop tard. Le nom porte la revision pour que la
+  mise a jour suivante n'ait pas a modifier un Job immuable, et
+  `ttlSecondsAfterFinished` les ramasse.
+
+  L'image est celle de la sauvegarde, et non une busybox : une image de plus
+  serait une image de plus a mettre en miroir sur un site coupe du reseau.
+*/}}
+{{- $b := dig "backup" dict .Values.postgresql -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "vibops.fullname" . }}-backup-volume-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  # Un quart d'heure apres la fin, l'objet disparait de lui-meme. Sans cela
+  # chaque mise a jour laisserait un Job termine de plus dans le namespace.
+  ttlSecondsAfterFinished: 900
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        {{- include "vibops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backup
+    spec:
+      restartPolicy: Never
+      {{- include "vibops.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        # Meme uid que le CronJob : c'est l'ecriture de CE compte qu'on verifie,
+        # pas celle de root. Un volume ou root ecrit et ou 999 ne peut pas est
+        # precisement le defaut que cette tache doit trouver.
+        fsGroup: 999
+        runAsUser: 999
+      containers:
+        - name: check
+          image: "{{ dig "image" "repository" "postgres" $b }}:{{ dig "image" "tag" "16" $b }}"
+          imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" $b }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              # Ecrire, relire, effacer. `test -w` repond sur les permissions
+              # declarees ; il ne dit rien d'un volume plein, d'un quota a zero
+              # ou d'un montage en lecture seule que le noyau n'applique qu'a
+              # l'ecriture. Une ecriture reelle repond aux trois.
+              probe=/backups/.vibops-write-probe
+              echo "vibops {{ .Release.Revision }}" > "$probe"
+              [ -s "$probe" ] || { echo "backup volume: write produced an empty file" >&2; exit 1; }
+              rm -f "$probe"
+              df -h /backups | tail -1
+              echo "backup volume: writable as uid $(id -u)"
+          volumeMounts:
+            - name: backups
+              mountPath: /backups
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ include "vibops.fullname" . }}-backups
+{{- end }}

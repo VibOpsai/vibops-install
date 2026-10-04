@@ -1,6 +1,6 @@
 # Updating the demonstration host
 
-_Last updated: 2026-10-02 · v0.51.2_
+_Last updated: 2026-10-04 · v0.52.0_
 
 > **When to use this runbook:** a release has been tagged and the public demo
 > should run it.
@@ -19,14 +19,34 @@ is now skipped rather than green, and the run says so, but the conclusion stands
 
 The host runs Docker Compose with a hand-maintained `docker-compose.yml`. It is
 close to `install/docker-compose.yml` but not identical, and the differences are
-deliberate — do not overwrite it wholesale:
+deliberate — do not overwrite it wholesale. **These three, and only these three:**
 
 - `caddy` mounts `./static`, which the host's own `Caddyfile` serves `/whisper`
   and `/whisper-demo` from. The published file dropped that mount.
 - `core` publishes no port; a separate `vibops_port_fwd` container forwards
   `127.0.0.1:8000`. Adding the published port mapping collides with it.
-- `docker-compose.override.yml` carries the worker's kubeconfig and the
-  `demo_pulse` service.
+- image tags are written out (`:v0.52.0`), not `${VIBOPS_VERSION:-…}`, which is
+  what step 3's `sed` assumes.
+
+`docker-compose.override.yml` carries the worker's kubeconfig, its stable gateway
+identity, and the `demo_pulse` service.
+
+**Synchronised on 04/10/2026**, 385 → 670 lines, after drifting far enough that
+the host still ran the pre-v0.52.0 backup. What landed: the reworked `backup`
+service (Debian image for `openssl`, encryption in the pipe, retention suspended
+unless the archive reads back), `backup-offsite` and `connect` (both behind their
+profiles, so inert), and `llm-proxy`'s `127.0.0.1:8004`. Everything else was
+compared service by service and is byte-identical.
+
+The worker's gateway identity was **not** copied into the base file: the override
+already sets it and mounts `worker_data`, and two definitions of the same mount
+point is how you get a container that will not start.
+
+> **`BACKUP_PASSPHRASE` is empty on this host, so its archives are not
+> encrypted.** The mechanism is in place and falls back to cleartext by design
+> when no key is set — `vibops_2026-10-04.sql.gz`, no `.enc`. Setting it is a
+> custody decision, not a configuration one: an archive encrypted with a key
+> nobody kept is an archive nobody can restore. ADR 0048 covers this.
 
 ## Procedure
 

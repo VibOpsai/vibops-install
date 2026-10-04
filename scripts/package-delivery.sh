@@ -221,6 +221,17 @@ postgresql:
   image:
     repository: VOTRE_REGISTRE/postgres
     tag: "16-alpine"
+  # DEUX images postgres, et c'est voulu : le serveur tourne sur la variante
+  # alpine, la sauvegarde sur la Debian, seule a porter \`pg_dump\` ET
+  # \`openssl\` dans un meme processus — le dump est chiffre dans le tube, donc
+  # le clair n'atteint aucun systeme de fichiers. Le CronJob a sa propre cle
+  # d'image : l'oublier ici laisse le chart tirer \`postgres:16\` de Docker Hub,
+  # ce qu'un site coupe du reseau ne peut pas faire. Vu le 04/10/2026 sur la
+  # v0.52.0, par la verification hors ligne de la CI.
+  backup:
+    image:
+      repository: VOTRE_REGISTRE/postgres
+      tag: "16"
 redis:
   image:
     repository: VOTRE_REGISTRE/redis
