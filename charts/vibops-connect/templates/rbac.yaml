@@ -31,6 +31,25 @@ rules:
   - apiGroups: [""]
     resources: ["services/proxy"]
     verbs: ["get"]
+  # Et `pods/proxy`, pour la meme raison a un niveau plus fin.
+  #
+  # dcgm-exporter est un daemonset : un pod par noeud GPU, derriere un Service
+  # ClusterIP. Lire le Service route vers UN pod, choisi par le load balancing —
+  # mesure le 05/10/2026 sur un cluster a deux L4, six appels, trois fois une
+  # carte et trois fois l'autre. La mesure de la flotte ne couvrait donc que la
+  # moitie de la flotte, au hasard et sans le dire.
+  #
+  # On interroge desormais chaque pod, ce qui est une ressource RBAC distincte
+  # de `pods` : lister un pod ne donne pas le droit de le traverser, exactement
+  # comme pour `services/proxy` plus haut.
+  #
+  # En lecture seule, et c'est ce qui la separe de `pods/portforward` : un GET
+  # HTTP vers un port declare, pas un tube par lequel passe un trafic
+  # arbitraire. Elle reste donc dans le bloc de lecture, pour qu'une passerelle
+  # en observation pure mesure quand meme ses GPU.
+  - apiGroups: [""]
+    resources: ["pods/proxy"]
+    verbs: ["get"]
 {{- if .Values.rbac.allowWrite }}
   # ── Ecriture (rbac.allowWrite) ──────────────────────────────────────────────
   #
