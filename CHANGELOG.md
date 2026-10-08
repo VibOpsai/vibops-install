@@ -9,6 +9,103 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.53.0] — 2026-10-08
+
+ADR 0049 reaches the floor it set: the route layer went from 45 files holding
+266 queries on 03/10 to 17 files holding 31, of which `auth.py` is excluded by
+the ADR and the rest hold one or two — which the ADR calls not debt.
+
+Eight live defects were found by the method rather than by a user, and each is
+the reason this release exists. Every one of them was found the same way:
+moving a query into a service, then neutering the service method and checking
+whether anything noticed.
+
+### Fixed — approving a destructive action from the console
+
+`approvals.router` and `approvals.auth_router` both declared
+`/approvals/{x}/approve` — a callback token in one, a `gate_id` in the other —
+and FastAPI resolves in registration order. The public router came first, so it
+captured every path and both admin endpoints were unreachable. The console
+calls the `gate_id` form, so it received "Invalid or expired approval token"
+for a gate it owned: **approving from the console never worked**, and only the
+emailed link could release a job awaiting approval.
+
+The public router is now mounted after the protected one. Nothing breaks and no
+URL changes, because Starlette's `uuid` convertor only matches uuid-shaped
+segments and a `token_urlsafe(32)` never is.
+
+### Fixed — SSO and LDAP login on a Helm install
+
+The OIDC callback resolves a user in order to learn which tenant they belong
+to, so nothing has set `app.current_org_id` when it reads. Under ADR 0047 that
+transaction matches no branch of the policy on `users` and reads zero rows.
+Measured as `vibops_app`: the callback found no existing SSO user, tried to
+create one, hit the unique constraint, re-read zero rows and answered 500. A
+genuinely first login got past the insert and failed the other way. `ldap.py`
+calls the same two helpers, so LDAP login carried it too. Invisible on Docker
+Compose, where core connects as a superuser.
+
+### Fixed — the VM GPU collector never got its SSH key
+
+`workers/workload_tasks.py` imported a name `secret_service` has never
+defined, inside a function, inside a blanket `except Exception`. The
+ImportError became one log line and a `None`, so every gateway configured with
+`vm_gpu_config.ssh_key_secret` collected nothing while reporting success.
+
+### Fixed — three delete previews answered 500
+
+`alert_rules.py`, `providers.py` and `webhooks.py` each named fields their
+model does not have, so every delete without `?confirmed=true` raised
+AttributeError — under a convention whose whole point is to make a destructive
+action safe rather than broken, and the console sends no flag.
+
+### Fixed — the agent dependency graph lost call counts
+
+`record_dependency` incremented `call_count` in Python. Nine recordings of one
+edge, eight concurrent, left it at 3. One `INSERT … ON CONFLICT DO UPDATE` now.
+
+### Fixed — vLLM on ROCm was an unknown framework
+
+The image table was written from an NVIDIA deployment's images. `rocm/vllm` and
+`rocm/pytorch` are recognised now, with the vLLM version pulled out of AMD's
+composite tag.
+
+### Fixed — the rubric delete warning named the lesser consequence
+
+Deleting an eval rubric deletes every evaluation ever scored with it
+(`ON DELETE CASCADE`), and the warning mentioned only future ones.
+
+### Fixed — a reachable import of a module that does not exist
+
+`v1/finops.py` imported `app.models.finops_pricing`, which has never existed,
+in the reseller-margin branch of the VM chargeback calculation — a 500 for any
+reseller customer generating one.
+
+### Added — four guards for the classes of defect above
+
+- `test_every_internal_import_names_a_real_module.py` — every `from app.… import …`
+  in `core/app` names a module **and a name** that exists. The second half found
+  the SSH-key defect the day it was written.
+- `test_every_dry_run_preview_describes_a_real_object.py` — every confirmation
+  gate's preview reads only fields its model has. Found the third occurrence on
+  its first run.
+- `test_every_table_is_cleaned_between_tests.py` — conftest's cleanup list is
+  compared against `Base.metadata`. Seven tables were leaking rows between
+  tests, found one at a time over a week; this found the last seven at once.
+- `test_pre_tenant_lookups_are_scoped.py` extended from `auth.py` to every
+  file, and its ordering predicate taught to recognise a service call as a
+  query — ADR 0049 had made it blind.
+
+### Changed — the ADR 0049 budgets measure what they claim
+
+Both predicates enumerated the SQLAlchemy methods they knew. `db.get()` was not
+among them, so eight queries and two whole files were uncounted; `scalar`,
+`scalars`, `stream` and `stream_scalars` had been missing before that. The file
+budget rose once, from 17 to 19, to tell the truth about a count that was never
+17.
+
+---
+
 ## [0.51.3] — 2026-10-02
 
 ### Added — the client guide is produced by the repository, not by hand

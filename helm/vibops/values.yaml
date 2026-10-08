@@ -30,17 +30,17 @@ images:
   core:
     repository: ghcr.io/davidmacamara-boop/vibops-core
     tag: ""
-    digest: "sha256:1d6c901cce98e500eaf1c83c6cd6718c639f3047a904ce76d15ac5c5641fb349"
+    digest: "sha256:40dedbdf12961f94f1bdc268af4b52ca3eb6c016faddc4419be6d02ca453d521"
     pullPolicy: IfNotPresent
   agent:
     repository: ghcr.io/davidmacamara-boop/vibops-agent
     tag: ""
-    digest: "sha256:8b74b31e0f58f95ecdb91267a1f13ece5aaeb3ac3f280d5e365b0d869debf19f"
+    digest: "sha256:e07ef160b5e352e5e2a4cb44547c99bc713538b3ecbc1af4ff3e9ab5161ebc65"
     pullPolicy: IfNotPresent
   console:
     repository: ghcr.io/davidmacamara-boop/vibops-console
     tag: ""
-    digest: "sha256:373defb7336dba966b3cb1b536af7d525810541f31f775514f12eb3d4a44a00b"
+    digest: "sha256:6c8b1bef74f8a79948b69ffb219edaa2918d7435e153f0309cc0c43ad3c43524"
     pullPolicy: IfNotPresent
 
 # ── Namespace ─────────────────────────────────────────────────────────────────
