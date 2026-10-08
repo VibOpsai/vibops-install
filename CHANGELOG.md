@@ -9,6 +9,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.53.1] — 2026-10-08
+
+### Fixed — v0.53.0 traded one broken approval route for the other
+
+v0.53.0 made the admin approve/reject endpoints reachable by mounting the
+public router last. The reasoning behind it was wrong in a way the tests did
+not catch: Starlette's `uuid` convertor does restrict path matching, but
+FastAPI does not use it for a `uuid.UUID`-annotated parameter — `{gate_id}`
+compiles to `(?P<gate_id>[^/]+)` and the annotation only adds Pydantic
+validation, which runs *after* the route has already won.
+
+So the admin route then matched token-shaped segments too, and the emailed
+approve/reject links answered 422 `uuid_parsing`. Measured on the demo host
+right after the upgrade, which is where it was caught.
+
+The paths are written `{gate_id:uuid}` now. Both conditions are needed and
+only one was understood before: the convertor stops a token reaching the admin
+route, and the mount order stops a `gate_id` reaching the broader `{token}` —
+the two paths are not disjoint, one contains the other.
+
+`test_approval_gate.py` asks the routing table with both shapes of segment
+rather than asserting registration order. The order test it replaces passed
+while encoding the wrong model, which is the whole reason this needed a second
+release.
+
+---
+
 ## [0.53.0] — 2026-10-08
 
 ADR 0049 reaches the floor it set: the route layer went from 45 files holding
