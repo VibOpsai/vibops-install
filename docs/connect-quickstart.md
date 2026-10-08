@@ -157,7 +157,7 @@ docker run -d --name vibops-connect --restart unless-stopped \
   -e VIBOPS_CORE_URL="https://vibops.example.com" \
   -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
   -e VIBOPS_TOKEN="kR7…" \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.53.2
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.53.3
 ```
 
 Those three variables gate start-up. Connect exits immediately without any one

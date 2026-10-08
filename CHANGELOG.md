@@ -9,6 +9,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.53.3] — 2026-10-08
+
+**Aucun changement produit.** Le code de la v0.53.2, republié avec un manifeste
+`linux/arm64` en plus de `linux/amd64`.
+
+### Added — les images sont publiées pour arm64 comme pour amd64
+
+L'arm64 avait été retiré le 13/09/2026, au motif mesuré que personne ne tirait
+ces images : le développement sur Apple Silicon compile nativement, la
+production tourne sur x86. Ce motif a cessé d'être vrai.
+
+`scripts/local-standby.sh` tient sur un poste de travail la pile **publiée**,
+prête pour le jour où un environnement distant tombe pendant une démonstration.
+Elle doit faire tourner les artefacts qu'un client reçoit — sinon elle prouve
+que le code compile, pas que la release fonctionne. Sur un portable arm64, elle
+s'arrêtait net :
+
+```
+no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+`setup-qemu-action` arrive avec : ce workflow ne l'a jamais porté, et l'arm64
+d'avant le 13/09 reposait sur les gestionnaires binfmt que l'image du runner
+installe d'elle-même. Cela marchait, et c'était un appui sur un détail de l'hôte
+que rien ne déclarait.
+
+**Attendez une release nettement plus lente.** L'arm64 est compilé sous QEMU sur
+un runner x86 — les runners ARM hébergés ne sont pas acquis sur un dépôt privé
+de compte personnel. La v0.53.2 a pris 3 minutes en amd64 seul ; l'ancienne
+ligne du workflow parlait de « l'essentiel des 54 min par release ». Le chiffre
+réel de la première release qui porte cette ligne est à inscrire dans le
+workflow plutôt qu'estimé.
+
+---
+
 ## [0.53.2] — 2026-10-08
 
 A tenancy release. One live cross-tenant leak, ten more sites of the same shape
