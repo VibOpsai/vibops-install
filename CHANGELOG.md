@@ -9,6 +9,121 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.53.2] — 2026-10-08
+
+A tenancy release. One live cross-tenant leak, ten more sites of the same shape
+found by scanning for it rather than waiting for the next report, and the rule
+encoded so a twelfth fails a test instead of a measurement.
+
+Written down as it happened rather than assembled at tag time, which is how the
+ten 0.52.x releases came to have no entry at all.
+
+### Fixed — one tenant's alert channels were served to, and used for, another's
+
+`GET /api/v1/alerts/channels` called `ChannelService.list()` with no argument,
+and an absent tenant meant **every** tenant. Measured over HTTP with two
+organisations: an authenticated user of one received the other's channel name
+and type.
+
+`notify_alert_via_channels` reads through the same method, so this was not only
+disclosure — **an alert raised under a tenant-less identity was delivered to
+every tenant's Slack and webhooks**, and `CoreClient()` defaults to the agent's
+service token, which carries `org_id: ""`.
+
+Row level security hid it on one installation path and not the other, which is
+why it survived. Helm connects `vibops_app`, where the policy on
+`notification_channels` returns zero rows for an unscoped read; Docker Compose
+connects `vibops`, a superuser the policy does not apply to at all. Measured on
+the same call: 4 channels across two tenants against 0.
+
+The tenant is required now and a falsy one yields nothing rather than
+everything — fixed at the parameter, because five other callers pass
+`org_id or None` and were one empty string from the same read. The empty case is
+logged rather than silent.
+
+### Fixed — ten more reads treated an absent tenant as every tenant
+
+The same shape, ten more times, found by scanning for it rather than by waiting
+for the next report. A method declares `org_id: str | None = None`, filters
+under `if org_id:`, and so means "this organisation, or **every** organisation"
+— while console callers pass `org_id or None` and the agent's service token
+carries `org_id: ""`.
+
+Four were listings — trigger rules, webhook subscriptions, jobs, pipelines. Each
+requires the tenant now and yields nothing without one; the two that return a
+total return `([], 0)`, because an empty page beside a real count reads as a
+loading failure rather than as isolation.
+
+The rest each needed a different decision:
+
+- **the waste report** read every tenant's `accelerator_detect_waste` scans. One
+  organisation's idle GPUs in another's dollar figure is not a disclosure a
+  reader questions, because the number looks like a number;
+- **the GitHub push handler** is legitimately cross-tenant — a push carries a
+  repository and an HMAC, not a tenant — and its method says so in its name now.
+  It also had an `org_id` parameter no caller ever passed: a parameter that
+  silently widens the scope, waiting for the first caller to believe it scoped;
+- **the bare-metal inventory injection** puts BMC hostnames into a job payload.
+  That branch was already unreachable, and was closed anyway, because an
+  unreachable widening is a widening waiting for a caller;
+- **the audit chain**, where returning nothing would have been the *wrong*
+  default: an absent predecessor means a second root, which is the fork ADR 0050
+  exists to prevent. A tenant-less row is filed under the reserved organisation,
+  so the chain read and the lock now name that organisation too.
+
+The two reads that genuinely cross tenants are named for it, so neither is
+reachable by leaving an argument out, and the rule is held by a test rather than
+by anyone remembering it.
+
+**If you run Docker Compose, the database enforces no tenant isolation at all.**
+That is ADR 0047's known limitation, measured again here: core connects as the
+`vibops` superuser, the policies do not apply to it, and the same query returns
+6 rows across two tenants where Helm's `vibops_app` returns 0. The hand-written
+filters in the application are what stands in its place on that path — which is
+why these ten were worth finding before someone else found them.
+
+### Fixed — the test suite's own connection pool reached across event loops
+
+`test_the_agent_can_write_an_audit_row` failed in four CI runs between 07/10 and
+08/10 and passed in the others, always with `attached to a different loop`, and
+the suite was green locally every time — so the colour was read as noise. It was
+not. pytest-asyncio gives each test its own event loop, and `app.database.engine`
+is a pooled module-level singleton unlike every engine `conftest.py` creates, so
+a connection checked out by one test was handed to the next on a loop that no
+longer existed. Every handler opening its own session instead of taking `get_db`
+was exposed.
+
+The application is unaffected, which was measured rather than presumed: uvicorn
+runs one loop for the life of the process, and the Celery tasks that do open a
+loop per task go through the synchronous `get_sync_db`, NullPool and disposed per
+call. Had they used the async writer, `log_action` would have swallowed the error
+and audit rows would have gone missing in silence.
+
+### Fixed — the install smoke's uninstall assertion was a day older than the product
+
+It asserted that exactly **one** PVC survives `helm uninstall`, measured on OVH
+on 02/10 and true that day. ADR 0048 landed on 03/10 and added `vibops-backups`
+with `helm.sh/resource-policy: keep`, plus the `vibops-backup-key` secret — both
+surviving deliberately. The gate was therefore red on every release from v0.52.1
+to v0.53.1, ten in a row, announcing "2 PVC" about a product behaving correctly.
+
+The two volumes are now named rather than counted — a count says "2" and would
+pass if the database volume vanished while a third appeared — and the backup key
+is checked too.
+
+### Changed — ADR 0049's figures, and three of them were wrong
+
+The named perimeter is complete: of the ten files it listed, six hold no SQL,
+`auth.py` was exempt in writing from the start, and three hold one or two
+queries, which the ADR calls not debt. Re-measuring the 03/10 tree corrected
+three published numbers — the one-or-two-query count (twelve, not twenty-seven),
+"route functions" (411 counts every function in `api/`; the routes are 286), and
+the starting point itself (46 files and 274 queries under a predicate that counts
+`scalars`, `stream`, `stream_scalars` and `db.get`, against the 45 and 260 the
+ADR opened with).
+
+---
+
 ## [0.53.1] — 2026-10-08
 
 ### Fixed — v0.53.0 traded one broken approval route for the other
@@ -38,9 +153,16 @@ release.
 
 ## [0.53.0] — 2026-10-08
 
-ADR 0049 reaches the floor it set: the route layer went from 45 files holding
-266 queries on 03/10 to 17 files holding 31, of which `auth.py` is excluded by
+ADR 0049 reaches the floor it set: the route layer went from 46 files holding
+274 queries on 03/10 to 17 files holding 31, of which `auth.py` is excluded by
 the ADR and the rest hold one or two — which the ADR calls not debt.
+
+The starting figure is not the one the ADR opened with. It published 45 and 260,
+counting only `db.execute(` and `session.execute(`, and that missed queries run
+through `scalars`, `stream`, `stream_scalars` and `db.get` — including every
+query in `approvals.py`, which is why that file had never appeared in any count.
+Re-measured on the 03/10 tree with the corrected predicate, both ends of the
+comparison use the same definition.
 
 Eight live defects were found by the method rather than by a user, and each is
 the reason this release exists. Every one of them was found the same way:
@@ -130,6 +252,342 @@ among them, so eight queries and two whole files were uncounted; `scalar`,
 `scalars`, `stream` and `stream_scalars` had been missing before that. The file
 budget rose once, from 17 to 19, to tell the truth about a count that was never
 17.
+
+---
+
+## [0.52.9] — 2026-10-06
+
+### Added — ADR 0049 begins: `v1/jobs.py` holds no SQL
+
+Its eight queries moved to `JobService`, `ClusterRateService` and a new
+`OrgPolicyService`, and the three helpers four other route modules imported
+*from it* moved to `app/policy/`. A route module had been serving as a shared
+library, reached through imports written inside function bodies to dodge the
+import cycle.
+
+The ratchet in `core/tests/test_the_route_layer_does_not_grow.py` gained a
+second budget here. The file count alone cannot see partial progress — a file
+losing 25 of its 26 queries does not move it — so the query count is held too.
+
+### Fixed — `portability_check` answered "NVIDIA only" about portable workloads
+
+A tool whose purpose is to say whether a workload can move declined to know.
+Measured 06/10/2026: `framework=jax` and `framework=onnxruntime` both returned
+`portable_to: ['nvidia']` with a significant migration cost. Both are portable,
+and the verdict was wrong in the direction that costs the most — it argues
+against moving off NVIDIA, which is the decision the tool exists to inform.
+
+### Fixed — asked to deploy on AMD, the platform wrote `nvidia.com/gpu`
+
+Measured on the OVH gra11 cluster, the same call with `vendor="amd"` produced
+`{"limits": {"nvidia.com/gpu": "1"}}`. The scheduler confirms the corrected
+form, which asks for `amd.com/gpu`.
+
+### Fixed — `helm_diff` reported "no difference" on a comparison that never ran
+
+It answered `success=True` and reported no differences when helm-diff was not
+installed. helm-diff is a plugin, not part of helm, and helm's refusal reads
+`Error: unknown command "diff" for "helm"` — which contains no occurrence of the
+word the guard was looking for. **An operator runs a diff precisely to learn
+what an upgrade will change, and being told "nothing" invites the upgrade.** The
+connector now says `No comparison was made: the helm-diff plugin is not
+installed.`
+
+The verdict no longer comes off the exit status either: the old comment claimed
+exit 1 when differences exist, and exit 0 with differences present was measured
+— that convention only applies under `--detailed-exitcode`. The connector now
+distinguishes "a comparison was produced" from "the command could not run",
+which holds under either.
+
+`helm_get_release` never reported a chart, for any release, on any cluster: it
+read `chart.metadata.version` off `helm status -o json`, which does not carry it
+at that path.
+
+Both were found by running the connector against a real cluster (OVH gra11,
+helm 3.22.0, the version the Connect gateway runs) rather than against mocks.
+The nineteen mocked tests passed throughout: a fake subprocess returns whatever
+shape the code asks of it.
+
+---
+
+## [0.52.8] — 2026-10-05
+
+### Fixed — the fleet reported neither its GPU model nor its real usage
+
+Measured on a Scaleway Kapsule carrying two NVIDIA L4 while a Whisper workload
+held 926 MiB of VRAM on one of them, the console received:
+
+    gpu_total=2   gpu_used=0   gpu_model=''
+
+**`gpu_used` was hard-coded to zero**, with a comment accepting it: computing it
+looked like it required the full pod JSON every cycle. GPU usage therefore read
+0 % on every real cluster whatever was running on it — while the demo fixtures
+showed a figure, so the real card looked like the only idle one. That is the
+worst shape a number can take: plausible enough to be read as a measurement,
+which is why nobody reported it. It is read with `custom-columns` now, one line
+per pod instead of the whole JSON, and summed across all three vendors.
+
+**`gpu_model` was never populated.** Connect counted allocatable cards without
+reading the label `gpu-feature-discovery` already places in the same node JSON,
+so the console showed "2" and nothing else, while all eighteen reference sites
+in the demo set carried a model — an operator could conclude their real fleet
+was less well seen than the fixtures.
+
+---
+
+## [0.52.7] — 2026-10-05
+
+### Fixed — GPU memory was read in bytes where DCGM reports MiB
+
+`DCGM_FI_DEV_FB_USED` and `FB_FREE` are MiB. The code divided by 1024³ as
+though they were bytes, so 926 MiB became 0.0000009 GB and displayed `0.0GB`.
+**A card holding 20 GB announced zero.**
+
+Nothing flagged it, because utilisation, temperature and power were correct
+right beside it: a reader saw three credible figures and a fourth at zero,
+which reads as "this card has nothing in memory". `nvidia-smi` said 926 MiB,
+DCGM said `FB_USED 926`, and the product said 0.0 GB, at the same instant on
+the same L4.
+
+`mem_total` was never populated either — DCGM does not emit that field, so
+capacity was always `None`. It is derived now, used plus free, giving 22 563 MiB
+for an L4. The product displays `0.9GB / 22.03GB` where it wrote `0.0GB`.
+
+No test covered the unit. 6 751 connector tests were green and the figure had
+been wrong from the start.
+
+**This release closes a chain of six.** v0.52.2 through v0.52.7 are one
+investigation into why GPU measurement did not work on a managed Kubernetes,
+each step found by publishing the previous one and testing it against real
+hardware. Two of the six were regressions of the fix before them. What made the
+chain long is that mocked tests stayed green at every step: the measurement had
+to be taken on a cluster to be taken at all.
+
+---
+
+## [0.52.6] — 2026-10-05
+
+### Fixed — a jsonpath carrying a real newline, which kubectl refuses
+
+The multi-node fix in v0.52.5 listed exporters with
+`jsonpath={range .items[*]}…{"\n"}{end}` and the escaping was lost on the way,
+so the command carried an actual line break inside a quoted string. kubectl
+answers `unterminated quoted string`, and **all** GPU measurement fell over —
+including what v0.52.5 had just repaired.
+
+The list is read with `-o json` now. JSON has no escaping to lose, and the
+per-node filter happens in Python rather than inside an expression that three
+layers of quoting have to survive.
+
+The lesson is about the tests, not the jsonpath: the connector mocks recognise
+a command by substring, so a malformed command passes them without a word.
+`test_no_kubectl_argument_carries_a_raw_newline` reads the source with `ast` and
+refuses a literal argument containing a line break.
+
+---
+
+## [0.52.5] — 2026-10-05
+
+### Fixed — DCGM read only every other GPU node, at random
+
+`dcgm-exporter` is a DaemonSet behind a ClusterIP Service: reading the Service
+routes to **one** pod, picked by load balancing. Measured on a two-L4 Scaleway
+cluster, six calls alternated between the two pods unpredictably.
+
+`accelerator_get_metrics` therefore returned half the fleet, at random and
+without saying so, and a per-node filter returned nothing one time in two. A
+fleet measurement covering part of the fleet is worse than no measurement: it
+looks like an answer.
+
+Each exporter pod is queried individually now, through `pods/proxy` read access
+— a distinct RBAC resource granted in the chart's read block. The index key
+became `node:gpu`, because `gpu="N"` collapsed one card into the other on
+merge: on that cluster both GPUs are `gpu="0"`.
+
+---
+
+## [0.52.4] — 2026-10-05
+
+### Fixed — DCGM is read through the API server's proxy, not a port-forward
+
+The root of the day's chain, found by walking back through three fixes that
+were hiding it. On the Scaleway Kapsule, the gateway's own credentials answer
+`no` to `create pods/portforward` and `yes` to `get pods`, so the tunnel died
+immediately on a permissions refusal.
+
+That right must **not** be granted: the chart documents what it refuses so a
+gateway cannot become a pivot, and a tunnel to any pod in the cluster is in
+that category. The correct path already existed and was already allowed —
+`services/proxy` read access, added on 30/09/2026 for power collection.
+
+---
+
+## [0.52.3] — 2026-10-05
+
+### Fixed — `accelerator_diagnose` neutered its own namespace discovery
+
+Found by verifying v0.52.2 in the field, which required having published it. On
+the same cluster in the same minute, DCGM collection reported the operator
+present in `kube-system` while `accelerator_diagnose` announced
+"GPU Operator Not Installed · CRITICAL".
+
+The cause was in the previous fix. `diagnose` resolved the namespace *before*
+calling the health check, with the `gpu-operator` default, and passed it
+explicitly — which triggers the "namespace requested" branch, the one that
+obeys without looking. **A default resolved too early becomes an order.**
+
+Two messages also named a pre-resolved namespace, including the
+`kubectl describe pod -n …` line of the remediation. A remediation naming the
+wrong place does not copy-paste, and that is all an operator does with it.
+
+---
+
+## [0.52.2] — 2026-10-05
+
+### Fixed — `dcgm-exporter` is looked for where it runs, not where it is expected
+
+`gpu-operator` is the conventional namespace, the one a manual install of the
+NVIDIA chart chooses. A managed Kubernetes installs the operator itself,
+wherever it likes: creating an L4 pool on a Scaleway Kapsule puts
+`nvidia-gpu-operator` in `kube-system`. Everything ran, and the connector
+answered `No Running dcgm-exporter pod found in 'gpu-operator'`.
+
+That is the worst shape an answer can take — wrong, and looking like
+information. An operator reads it as "DCGM is not installed" and goes to
+install a second one on top of a driver already present, which is a known way
+to break a GPU node. The agent attempted exactly that; the install failed on a
+CRD the first operator had already created.
+
+`accelerator_get_metrics` and `accelerator_detect_waste` — so all waste
+detection — were unusable on any managed Kubernetes that preinstalls the
+operator.
+
+### Fixed — the nine accelerator tools could not say which cluster to look at
+
+Measured on the demo host with a real Scaleway L4 in the fleet: the same
+question three minutes apart answered "No NVIDIA accelerator devices detected"
+when routed to no gateway, and `1 × NVIDIA L4, 22.5 GB` when routed to one.
+
+---
+
+## [0.52.1] — 2026-10-04
+
+### Fixed — every tool call the agent made went unaudited
+
+**44 calls out of 44 to `POST /api/v1/audit/ingest` returned 500**, and not one
+row in the table carried `source = 'agent'`. `AuditIngest.org_id` is typed
+`uuid.UUID`, so pydantic hands over a UUID object, and the signature is a
+`"|".join` of text: `TypeError: sequence item 5: expected str instance, UUID
+found`. The agent's client swallows the error so as never to block a user, so
+the agent answered perfectly while the audit trail — the product's whole
+argument for trust — received nothing from it.
+
+`POST /api/v1/training/exchanges` had returned 500 since 21/09/2026 for the
+same class of reason: the agent calls with a service identity carrying no
+organisation, and an empty `org_id` reaching a `uuid` column makes the driver
+raise.
+
+Found by reading the demo host's logs after a rehearsal. No test called
+`/audit/ingest` — the only endpoint through which the agent writes to the trail.
+
+### Fixed — `helm install --wait` never finished on a managed StorageClass
+
+The backup PVC added in v0.52.0 stayed `Pending`. Most managed StorageClasses
+bind on `WaitForFirstConsumer`, provisioning the volume only when a pod that
+mounts it is scheduled — and the only consumer was the 02:30 CronJob. Helm
+waits for every PVC to be `Bound` with no way to exempt one.
+
+### Fixed — the `POST /jobs` throughput gate was a latency SLO in disguise
+
+`SLO Tests (perf)` failed at 22.6 req/s against 25 required, while p50 was
+315 ms and p99 907 ms against budgets of 500 and 1 500. The product was meeting
+its published SLO and failing on a figure derived from it: at fixed concurrency,
+throughput ≈ concurrency ÷ mean latency, so demanding 25 req/s over 10
+concurrent requests imposes a 400 ms mean — a harder promise than the
+`p50 < 500 ms` written on the same line.
+
+---
+
+## [0.52.0] — 2026-10-04
+
+### Added — backups, on both installation paths (ADR 0048)
+
+The chart deployed a database and nothing dumped it. `postgresql.enabled: true`
+is the default and the path Option C of the installation guide walks through:
+it brought a StatefulSet, a 20 Gi volume and no backup at all — no CronJob, no
+`pg_dump`, nowhere to put one. Nothing failed and no install reported anything.
+A customer would have found out on the day they needed a restore.
+
+Both paths now dump nightly, encrypt with AES-256-CBC and PBKDF2 at 600 000
+iterations, keep 30 days, and can copy off the host or cluster. Four decisions
+are worth naming because each closes a gap the previous step opened:
+
+- **the cleartext dump is never written to a disk.** The first encryption
+  commit had one container writing the plain archive to the backup volume and
+  the next encrypting it and deleting it. An unlinked file is not an erased
+  file: its blocks stay readable until something overwrites them, and a stolen
+  disk is precisely the threat the encryption exists for;
+- **a failed dump must not expire the good ones.** Retention ran
+  unconditionally, so a dump failing every night with a working retention is a
+  volume that drains — on the thirty-first day nothing is left, and every step
+  did exactly what it was told;
+- **the off-host copy came before the encryption**, which made the exposure
+  worse before anything closed it — the clear dumps then existed in two places,
+  one of them an object store at a provider;
+- **the restore procedure was typed out literally, on both paths.** It failed
+  four times, each time on a command that cannot run in the context the document
+  puts you in — the workstation pod had no key, so `openssl` could reach the
+  archive and the database and not decrypt.
+
+### Added — licence issuance is a command with a registry
+
+`make licence CUSTOMER=… PLAN=… DAYS=…` replaces a script named only in a
+runbook. Every issuance appends a line to `~/.vibops/licences.csv`, because
+nothing anywhere knew who held what or until when: offline verification is the
+assumed price of having no licence server, but nothing renews by itself, and an
+expiry was discovered when the customer called.
+
+### Fixed — the audit chain forked under concurrency (ADR 0050)
+
+Found by rehearsing the AMD demo, whose closing prompt asks the product to
+verify its own audit trail. It answered `"verified": false` at row 181,
+`prev_hmac mismatch`. Two rows written 0.9 ms apart carried the **same**
+`prev_hmac` — siblings, not a sequence — leaving the first one's signature
+orphaned. A second fork followed 0.7 ms later the same day. Of 364 signed rows,
+360 distinct predecessors.
+
+**`FOR UPDATE` prevented nothing, and the comment asserting otherwise is what
+stopped anyone looking.** It locks the row returned; it does not stop a
+concurrent INSERT making the answer false. That is a phantom, which READ
+COMMITTED permits by construction. An advisory lock per organisation does stop
+it, and costs nothing: two tenants have no reason to wait for each other.
+
+### Fixed — ten background tasks read zero rows and reported success
+
+Under ADR 0047, a transaction that has not set `app.current_org_id` matches no
+branch of the policies and reads nothing. For a user request that is the
+protection working. For a background task it is a silent defect: the task runs,
+processes nothing, and exits successfully.
+
+Ten call sites across seven worker files opened `AsyncSession(engine)` by hand,
+outside the helper that sets the scope — `briefing`, `datadog_gpu`,
+`discovery`, `job_tasks` (three), `pipeline`, `trigger` and `workload` (two).
+
+### Fixed — eleven subprocesses could wait forever
+
+The connectors launch kubectl, helm, git, nvidia-smi, rocm-smi. If one does not
+return — a severed cluster API, a stuck `helm upgrade`, a frozen GPU driver —
+`await proc.communicate()` has no reason to come back, and the Celery task
+waiting on it is lost in silence until the worker restarts. Two launchers out of
+twelve bounded anything — `git`, always, and `kubectl` on two of its four calls.
+
+Eleven sites are bounded now, through a common launcher. **helm derives its
+bound from its own `--timeout`**: a `helm upgrade --wait --timeout 5m0s`
+legitimately takes five minutes, and a fixed two-minute bound would have killed
+it while it was still working. The bounds set by analogy rather than by
+measurement were raised from 120 to 600 seconds in the same release — a generous
+bound still prevents the hang; a tight one turns slow but valid work into
+failure.
 
 ---
 
