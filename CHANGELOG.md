@@ -9,6 +9,151 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.54.1] — 2026-10-09
+
+### Changed — the release builds six images instead of eight
+
+`vibops-beat` and `vibops-gateway` entered the release matrix on 08/09/2026 and
+were in every release from v0.41.1. Each was built for two architectures, signed
+with cosign, scanned by Trivy, pushed under two tags — and pulled by nothing,
+ever.
+
+`vibops-beat` was redundant by construction: the published compose runs beat from
+`vibops-core` with `command: ["beat"]`. And `vibops-gateway` is **not** the
+gateway image — that is `vibops-connect`, which stays. Verified before removing:
+no compose service, no chart and no Helm template names either of them.
+
+From the per-image timings the workflow records, this returns **19 minutes of
+runner time per release**, of which beat was 15 — it was the slowest image in the
+matrix. At the wall, little: the matrix is parallel and `worker` at 14 min takes
+beat's place. The tags already in the registry are untouched.
+
+The v0.45.11 entry below had already found this — "private, and used by nothing
+[…] worth removing, not done here".
+
+`tests/test_the_release_builds_only_images_something_pulls.py` now holds the
+correspondence in both directions. The second direction is why it earns a file:
+an `image:` naming something no release builds is a customer's first
+`docker compose up` ending on `manifest unknown`, and nothing else in the
+repository could see it — the compose declares a tag and the registry is checked
+by nobody at commit time.
+
+It reads each compose service's `image:` key rather than grepping for
+`vibops-`, which also matches the network `vibops-dev`, the container
+`vibops-connect-heartbeat` and the secret `vibops-tls`; a scan counting those
+would compare two different things and pass.
+
+### Fixed — `grid_factors` had no row level security on any installation
+
+ADR 0047 names 47 tenant-scoped tables. A migrated database had **46** under
+policy. The odd one is `grid_factors`, which carries an `org_id` like the rest —
+confirmed on a live published install and on a freshly migrated schema, same
+answer both times. Its `updated_at` column had no touch trigger either, so every
+row's value stayed frozen at insertion.
+
+Both halves have the same cause. `app/models/_rls.py` and
+`app/models/_timestamps.py` each install through **two** paths: a migration for a
+real database, and an `after_create` listener for whatever
+`Base.metadata.create_all` builds. The table was added to `RLS_TABLES` by the
+GreenOps work, after migration `d9e0f1a2b3c4` had closed the set at "forty-six of
+forty-six" — and the listener covered the gap in the only place anyone was
+looking, because the test suite was built by `create_all`. The suite reported ADR
+0047 satisfied on 47 tables for three weeks while no client enforced 47.
+
+Migration `b2d7f3e91a08` installs the policy and the trigger. Verified upgrade,
+downgrade and re-upgrade against an already-migrated database.
+
+### Changed — the test suite builds its schema from the migrations
+
+`pytest_configure` ran `Base.metadata.create_all`. It now runs
+`alembic upgrade heads`. That costs **0.95 s**, measured, and it is the schema
+clients actually have. The `grid_factors` finding above is what it turned up on
+the first run; two more differences came with it.
+
+**152 NOT NULL columns** carry a server default in a migrated database and none
+under `create_all`. The models declare `default=`, which SQLAlchemy applies to an
+ORM insert; the migrations declare `server_default=`, which the database applies
+to any insert, raw SQL included. So every raw-SQL writer in the product was
+untestable here — `gateway_heartbeat._upsert_gateway` names neither
+`removed_clusters` nor the timestamps in its INSERT, works on every real
+installation, and raised `NotNullViolation` in the suite. That module sat at 23 %
+coverage for this reason.
+
+The dangerous direction is the other one, and it is worth stating plainly: a
+column with a Python-side `default=` and no `server_default` in its migration
+**passes the suite through the ORM and fails in production on the first raw-SQL
+insert**, and nothing here could see it.
+
+`ck_audit_logs_org_id_shape` also did not exist in the old test schema, so a test
+could insert an `audit_logs` row the production database refuses. Its intent was
+right — migration `a7b8c9d0e1f4` adds that CHECK `NOT VALID`, so legacy non-uuid
+rows remain and must stay readable — and its method was not. It now writes the
+row the way production holds it, before the constraint, and a second test pins
+the other half: the shape reads, it no longer writes.
+
+`test_the_suite_runs_the_schema_clients_have.py` keeps this from being quietly
+reverted by someone making the suite faster, since the listeners that hid all of
+it are still in the models. Verified against the broken form: re-adding a
+`create_all` call to conftest fails it by name. Its head check reads alembic's
+own `ScriptDirectory` — a regex over the version files reported eleven heads
+where `alembic heads` reports one, because `down_revision` is a tuple at every
+merge and `None` at the root.
+
+### Fixed — a GPU saturation with no notification channel was recorded nowhere
+
+`_check_gpu_thresholds` read the notification channels and dispatched inline,
+then wrote the Alert History **inside `if sent:`**. On an installation with no
+channel configured — which is every fresh one — a GPU saturation therefore left
+no trace at all: nothing delivered, nothing in the console's Alert History, and a
+`log.debug` below the default level as the only sign. Measured, same metrics and
+gateway: 0 rows in `alert_history` with no channel, 1 with a Slack channel.
+
+It is the converse of the defect already fixed for the hypervisor half, whose
+alerts "reached Slack and nowhere else". The history is the record of what the
+platform observed; tying it to a delivery made it a record of what the platform
+managed to send. The GPU half now does what the VM half does, in the same order —
+record the cooldown, send, write the history with whatever channels accepted,
+including none. The cooldown is recorded unconditionally, which is what keeps an
+unconditional history write from becoming 2 880 rows a day at a 30-second
+cadence.
+
+The import guard that opened the function is gone too: it imported four senders
+and returned if that failed, so an unimportable notification layer stopped the
+thresholds being *evaluated*, not just delivered.
+
+### Added — 52 tests for the heartbeat, the product's only GPU metric writer
+
+`gateway_heartbeat.py` is the largest module under `app/workers/` and ran at
+**23 %**; it is now at **58 %**, and worker coverage overall is 58 % against the
+39 % it started the day at. Nothing else writes `gpu_metrics_history` or
+`cluster_resource_metrics`, which `detect_anomalies`, `predict_gpu_health` and
+every GPU chart read.
+
+Against the real database, not mocks: the tenant on every row, both metric
+writers, registration and its identity file, the Kubernetes quantity parsers,
+the thresholds and their cooldown, and one turn of the loop including a
+collection failure it has to survive.
+
+Two things recorded rather than fixed, because both are decisions:
+
+- **`GATEWAY_ORG_ID` decides which tenant every metric belongs to, and neither
+  compose file sets it.** Unset, `_org_id()` returns the reserved system
+  organisation and says so once — its own docstring is explicit that the figure
+  "will appear in no customer report", and on the running standby the
+  self-registered gateway is indeed under `00000000-…`. Set to an organisation
+  *slug*, which is the natural thing to type, every write raises
+  `InvalidTextRepresentation` into the writers' blanket `except`: 0 rows, one
+  warning per attempt, every 30 s. The heartbeat's own `UPDATE` carries no
+  `org_id`, so the gateway keeps pinging and the console shows it **online** with
+  empty charts.
+- **`_parse_memory` returns 0 for a quantity it cannot read**, and that 0 is
+  stored as `memory_capacity_bytes` — "a measurement of a site that was never
+  measured", the shape `gpu_metric.py` rejects in its own comment. kubectl always
+  emits a suffix, which is why it has not bitten; `1e3` and `1.5` are valid
+  Kubernetes quantities all the same.
+
+---
+
 ## [0.54.0] — 2026-10-09
 
 ### Added — Docker Compose connects the role the policies apply to
