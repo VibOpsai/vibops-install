@@ -7,6 +7,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — two worker paths opened a session with no tenant scope
+
+Found by doing what ADR 0047 has been asking for: setting `APP_ROLE_PASSWORD` on
+a real installation, so the application connects as `vibops_app` and the 47
+policies actually apply. The worker broke immediately.
+
+```
+Unable to start gateway heartbeat:
+  new row violates row-level security policy for table "gateways"
+```
+
+**`gateway_heartbeat`** is the only synchronous module under `workers/` — it runs
+in a `threading.Thread` started by `worker_ready`, not in a Celery task, and
+builds its own engine. Its ten sessions were bare `with Session(engine)`, so the
+`after_begin` listener set `app.current_org_id` to the contextvar's default, the
+empty string, which matches no policy branch. The insert was refused, the
+heartbeat thread never started, and that worker collected **no GPU metrics at
+all**.
+
+**`job_tasks.on_log`** is quieter and worse. It built its own `sessionmaker` and
+ran `UPDATE jobs SET logs = ...` with no scope: under the constrained role that
+matches no branch and updates **zero rows**, inside an `except Exception:
+logger.debug(...)` that is deliberately non-fatal. Jobs would run with empty
+logs and nothing would say why.
+
+`tenant_scope.system_sync_session(engine)` is the synchronous counterpart of
+`system_session`, and both sites use it now. The scope is set before the session
+opens — `after_begin` does not come round again — and inside the thread, since a
+`threading.Thread` starts on a fresh context and inherits none.
+
+### Changed — the background-scope guard now recognises synchronous sessions
+
+`test_background_work_opens_a_scope.py` exists for precisely the class above and
+had been green since 03/10/2026. Its three patterns enumerated only the
+asynchronous spellings — `AsyncSession(`, `*factory()`, `async_sessionmaker(` —
+and the one synchronous module in the directory matched none of them. A predicate
+that enumerates the shapes it knows measures its own vocabulary, not the code.
+
+Widened to `with Session(` and `sessionmaker(`, it immediately found the
+`job_tasks` site too. `db_sync.py` is the single declared exception — it *is* the
+helper — with a test asserting it still sets the scope it is exempted for.
+
+The heartbeat tests were blind for a different reason: they drove every function
+through an **owner** engine, so they passed under both CI passes while the
+product was broken. They now take the app-role engine when
+`VIBOPS_TEST_APP_ROLE=1`, with cleanup and read-backs deliberately kept on the
+owner — a `DELETE FROM gateways` without a scope removes zero rows silently, and
+an assertion reading through the constrained role would pass on nothing.
+
+Verified against the broken form, which is the whole point: with the bare
+sessions restored, the owner pass still reports 54 passed — the blindness itself
+— while the app-role pass fails on `new row violates row-level security policy
+for table "gpu_metrics_history"`, and the static guard names four lines of
+`gateway_heartbeat.py` with no database at all.
+
+### Changed — the pre-commit hook runs the core suite twice, as CI does
+
+The hook ran it once, as the owner. It now runs the second pass as `vibops_app`
+too. That gap let a commit through that CI refused: a test doing `ALTER TABLE
+audit_logs DROP CONSTRAINT`, which demands table ownership. The hook printed
+"Tests OK" over half of what CI checks.
+
+Reinstall it (`cp scripts/pre-commit .git/hooks/pre-commit`) — an already
+installed copy keeps the single pass. Costs about a minute more when `core/` is
+staged.
+
 ---
 
 ## [0.54.1] — 2026-10-09

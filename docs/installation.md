@@ -157,7 +157,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.54.1
+  ghcr.io/davidmacamara-boop/vibops-core:v0.54.2
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -215,12 +215,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.54.1 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.54.1 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.54.1 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.54.1 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.54.1 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.54.1 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.54.2 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.54.2 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.54.2 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.54.2 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.54.2 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.54.2 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -465,7 +465,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.54.1` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.54.2` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -1043,7 +1043,7 @@ with a disposable pod that the cluster really does drop what a policy denies.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.54.1 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.54.2 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -1569,7 +1569,7 @@ docker run -d --name vibops-connect --restart unless-stopped \
   -e VIBOPS_CORE_URL="https://vibops.mycompany.com" \
   -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
   -e VIBOPS_TOKEN="kR7…" \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.54.1
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.54.2
 ```
 
 Those three variables gate start-up: Connect exits immediately without any one
