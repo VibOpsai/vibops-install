@@ -15,9 +15,37 @@ Après `up` :
 
 | | |
 |---|---|
-| console | <http://127.0.0.1:8080> — `admin` / `admin` |
+| console | <https://localhost> — `admin` / `vibops2026` |
 | core | <http://127.0.0.1:8000> |
 | base | `postgresql://vibops@127.0.0.1:15432/vibops_db` |
+
+**En `https`, et sur `localhost` — pas sur `127.0.0.1`.** Un certificat se valide
+sur un nom ; l'autorité interne de Caddy n'en émet pas pour une IP nue, et son
+journal le dit (`domains: [localhost]`). L'adresse IP n'est donc pas une
+variante, c'est une impasse.
+
+**Le navigateur avertira** qu'il ne connaît pas l'autorité. Sur une pile liée à
+la boucle locale c'est exact et sans conséquence — mais **l'avertissement n'est
+pas toujours contournable** : la console envoie un HSTS d'un an dès
+`APP_ENV=production`, et sous épinglage le bouton « continuer quand même »
+disparaît. Déclarez l'autorité une fois, sans sudo :
+
+```bash
+security add-trusted-cert -d -r trustRoot \
+  -k ~/Library/Keychains/login.keychain-db \
+  ~/.vibops/standby/caddy-local-ca.crt
+```
+
+Pour l'annuler : `security delete-certificate -c "Caddy Local Authority" …`.
+
+Le TLS n'est pas un ornement. La console pose ses cookies de session avec
+l'attribut `Secure` dès que `APP_ENV=production`, ce que le secours est par
+construction. Un navigateur ne renvoie jamais un cookie `Secure` sur `http://` :
+servi en clair, le secours répond **200 au login puis 401 à l'appel suivant**, et
+la console reboucle sur l'écran de connexion sans un mot. Passer en
+`APP_ENV=development` l'aurait évité, et aurait aussi ouvert l'accès anonyme —
+un secours qui ne se comporte pas comme ce qu'un client installe ne prouve rien
+sur ce qu'un client installe.
 
 ## Ce que cet environnement porte, et ce qu'il ne porte pas
 
@@ -54,6 +82,15 @@ et `core/tests/test_the_local_standby_runs_what_a_client_receives.py` refuse
 qu'il change autre chose — une pile de secours qui a dérivé ne prouve rien sur
 celle qui est publiée.
 
+Les deux listes portent `ports: !override`, et ce n'est pas décoratif : **Compose
+fusionne les listes en les concaténant.** Sans cette étiquette, l'overlay
+*ajoute* sa publication à celle du fichier publié au lieu de la remplacer —
+postgres se retrouve avec 5432 **et** 15432, caddy avec `0.0.0.0:80` **et**
+`127.0.0.1:8080` — et la pile meurt sur `bind: address already in use` après
+avoir démarré la moitié de ses conteneurs. Un overlay sans l'étiquette a l'air
+correct dans les deux fichiers ; il ne devient faux qu'une fois fusionné, ce qui
+est pourquoi le test lit `docker compose config` et non ce qui est écrit.
+
 1. **postgres passe de 5432 à 15432.** 5432 est occupé par le PostgreSQL du
    poste, dont la suite de tests de `core/` a besoin. La pile n'en souffre pas :
    en interne tout parle à `postgres:5432`.
@@ -61,8 +98,12 @@ celle qui est publiée.
 2. **caddy n'écoute plus que sur la boucle locale**, en 8080/8443 au lieu de
    `0.0.0.0:80/443`. Sur un serveur avec un domaine et un certificat, écouter
    partout est correct ; sur un portable dans un café, cela sert la pile au
-   réseau — et le compte administrateur de cet environnement est `admin`/`admin`,
-   parce que c'est ce avec quoi les scripts de seed s'authentifient.
+   réseau — et le mot de passe administrateur de cet environnement est connu et
+   écrit dans ce document.
+
+   Huit caractères minimum : `/auth/setup` refuse moins, avec un 422 qui le dit.
+   Les seeds Python codent `admin`/`admin` en dur, mais `seed-dev.sh` réécrit
+   ces identifiants depuis `VIBOPS_ADMIN_*` avant de les lancer.
 
 ## Une seule pile VibOps à la fois
 

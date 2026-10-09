@@ -9,6 +9,314 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.54.0] — 2026-10-09
+
+### Added — Docker Compose connects the role the policies apply to
+
+ADR 0047 gives tenant isolation to PostgreSQL, and it works only if the
+application connects as a role without `BYPASSRLS`. Helm has done that since the
+ADR. **Compose did not**, so on that installation path the 47 policies enforced
+nothing and the application's own 215 hand-written `org_id` filters were the
+whole of the isolation. Measured, same query, six rows across two tenants:
+
+| role | without scope | scope = tenant A |
+|---|---|---|
+| `vibops_app` | 0 | 3 |
+| `vibops` | 6 | 6 |
+
+The scope the application sets on every transaction had no effect at all.
+
+The evidence was in hand rather than assumed: migration f5a6b7c8d9e0 already
+creates `vibops_app` with SELECT/INSERT/UPDATE/DELETE on all 57 tables on
+**every** installation, and the whole core suite passes under it. Only a
+password and the right to log in were missing. ADR 0047 had even named the work
+— "giving the entrypoint a second URL is the work that would close it".
+
+`DATABASE_URL` stays the owner and the migrations keep it; `VIBOPS_APP_ROLE_URL`
+is what the application connects with afterwards. Three decisions inside:
+
+- **every mode grants, not only the one that migrates.** `worker` does not
+  depend on `core` in the published compose, so a grant done by one container
+  would be raced by the others. `ALTER ROLE … WITH LOGIN PASSWORD` is idempotent,
+  so each does it for itself.
+- **the grant verifies, then refuses.** A role that exists, can log in and is
+  *also* exempt from the policies reads exactly like success — the application
+  connects, every page works, nothing isolates. The script exits non-zero on
+  `rolsuper` or `rolbypassrls`.
+- **the fallback is loud.** An installation whose `.env` predates this keeps
+  working on the owner, and both the entrypoint and core's startup posture
+  warning say what that costs.
+
+**Upgrading an existing Compose install:** generate `APP_ROLE_PASSWORD` in `.env`
+— `openssl rand -hex 32` — and recreate the containers. Without it nothing
+breaks and nothing isolates at the database level, and the logs say so on every
+start.
+
+### Fixed — five scheduled tasks raised `TypeError` on a log line
+
+Two styles of logging live here and read identically at the call site:
+
+```python
+_log.info("anomaly.created", cluster=name, org=org_id)   # structlog
+logger.info("Retention: %s rows removed", total)          # stdlib
+```
+
+`logging.Logger.info` accepts `exc_info`, `stack_info`, `stacklevel` and
+`extra` — nothing else. The first line is therefore correct against
+`app.logging_config.get_logger` and a crash against `logging.getLogger`, and
+only the binding, forty lines up, says which one it got. Five modules got the
+wrong one: eighteen calls, each reached under a different condition.
+
+**`vibops.detect_anomalies`, every five minutes since 30/05/2026 — 132 days.**
+The worst of the five, because of where the crash sits:
+
+```python
+evt = _create_event(...)       # db.add + db.flush
+_notify_anomaly(db, evt)       # the client's Slack fires here
+created_count += 1
+_log.info("anomaly.created", type=..., cluster=..., org=...)   # TypeError
+```
+
+Measured, four idle samples on one cluster:
+
+```
+RAISED TypeError: Logger._log() got an unexpected keyword argument 'type'
+anomaly_events rows in the database: 0
+notifications dispatched:            ['gpu_idle']
+```
+
+The alert went out and the anomaly did not exist. `get_sync_db` rolled back, so
+the row that deduplicates the next run went with it: five minutes later the
+same condition was detected and alerted again, for as long as it held — 288
+times a day, with nothing in the console to click on.
+
+**`vibops.refresh_cloud_pricing`, daily since 14/06/2026 — 117 days.** The
+faulty line sits before the loop, so the task raised on every run without ever
+updating a rate. A cluster on `formula_type="cloud"` has been billed against
+whatever price was stored the day it was configured. It now also returns its
+summary, as the other fourteen scheduled tasks do; it counted `updated` and
+`errors`, logged them and returned `None`.
+
+**`vibops.predict_gpu_health`** (since 15/08/2026) and **`vibops.proactive_agent`**
+(since 17/08/2026) crash only once there is something to report — the first as
+soon as a GPU metric is under an hour old, the second as soon as it creates an
+insight. An idle system looks healthy and breaks at the moment the work
+matters. `cloud_pricing_service` replaces a pricing API error with a
+`TypeError`.
+
+One of those calls is a `.debug`. `Logger.debug` only builds the record when
+DEBUG is enabled, so it is harmless at INFO and breaks the worker on the day
+somebody raises the log level to investigate something else.
+
+The fix is the binding in five files. Every call site was already written in
+structlog's form, and `app/logging_config.py` has exposed `get_logger` all
+along — `retention_task.py` uses it correctly.
+
+### Added — four guards for the worker layer
+
+Ten of the twenty-two modules under `app/workers/` were at **0 % coverage**:
+631 statements no test had ever imported. Worker coverage is now 52 % against
+39 % (+356 statements), but the number is the side effect. What the four guards
+buy is that the classes are caught at suite time instead of at boot, or never.
+
+- **Every scheduled task runs once against the real schema.** The cheapest test
+  in the suite and the one that found the first two defects above. An empty
+  database on purpose: "completes with nothing to do" was never established for
+  ten of these modules. It truncates what a task wrote either side of each run —
+  `generate_monthly_chargeback` writes one record per organisation, 54 of them.
+- **Every stdlib logger call is checked against its binding.** One test per file
+  over all 218 modules in `core/app`. Not a ruff rule: the call is valid Python
+  and the binding is a valid logger, so only something that resolves one to the
+  other can see the fault.
+- **Every worker module imports, is in an `include` list, and every
+  `beat_schedule` name resolves to a registered task.** A renamed task is
+  scheduled, logged, and never runs.
+- **A detected anomaly reaches the product.** Seven tests against the real
+  database: the row exists afterwards, nothing is alerted that is not recorded,
+  a second run neither re-opens nor re-alerts, two tenants' anomalies land one
+  each.
+
+Every guard was verified against its broken form, and two of those checks
+corrected the guard rather than the product. The logger scan's first version
+resolved only `logging.getLogger` and called nineteen correct call sites
+unresolved — all of them `from app.logging_config import get_logger`. And the
+scheduled-task probe, reread against a reintroduced `retention_task` defect,
+stays green: those two lines sit in an error branch and in a loop that only runs
+when rows were deleted. The two files answer different questions and neither
+covers for the other.
+
+The real-database choice is deliberate. `chargeback_task.py` sits at **100 %
+coverage** with every database call replaced by a `MagicMock`, and a mock would
+have accepted every one of these `_log.info` calls without a murmur — the way
+one accepted a write to `hashed_password`, an attribute the model does not have,
+on 07/10/2026.
+
+### Fixed — a Datadog gateway could capture a job no agent would ever run
+
+`datadog_gpu_task.py` has never run. Its own docstring calls it a "Celery beat
+task … every 60 seconds" and [0.30.0] below announced it as shipped on
+08/08/2026; it carries no `@celery_app.task`, sits in no `include` list, in no
+`beat_schedule`, and nothing in the repository calls it.
+
+That alone would be an unavailable feature. What makes it worse is that the
+console offers it. `cmRegisterDatadog()` in
+`console/static/js/modules/fleet.js` stores the client's `DATADOG_API_KEY`,
+`DATADOG_APP_KEY` and `DATADOG_SITE` as secrets, registers a gateway with
+`gateway_type: 'datadog'`, then sets `cmHvConnected = true` and advances the
+wizard to its final step. So a client could enter real Datadog credentials and
+be told the source was connected, while:
+
+- `gpu_metrics_history` stayed empty, with no error anywhere;
+- the fleet showed that gateway **offline**, because `is_online()` wants a
+  recent ping and this gateway has nothing to ping with — the wizard said
+  connected, the fleet said offline, and nothing reconciled the two;
+- and the gateway counted as able to run jobs. `NON_EXECUTING_GATEWAY_TYPES`
+  names the types with no Connect agent, which `_find_gateway_for_cluster`
+  skips and the cluster-name uniqueness guard does not count. It listed
+  `virtual` and `hypervisor` and not `datadog`. Measured: a job for `prod-gpu`
+  was routed to the Datadog gateway, and a legitimate registration for the same
+  cluster name got a 409.
+
+The routing half is fixed — `datadog` joins that list — and it needed no Datadog
+access at all, being wrong on its own terms. `gateway_type` is `String(32)` with
+no CHECK and the API declares it `Field("kubernetes", max_length=32)` with no
+enum, so nothing refused a type nobody serves; a new test now reads the gateway
+types straight out of the console's own JavaScript and requires each one to name
+what serves it, with the routing list and that inventory checked against each
+other in both directions.
+
+Its first version read `fleet.js` alone, found two of the three types, and
+reported its own blind spot as "the registration calls have been rewritten".
+`hypervisor` is registered from `wizard.js`.
+
+### Changed — the wizard's Datadog entry is greyed out until something collects
+
+The collector stays unwired, decided 09/10/2026: scheduling a path no test has
+ever exercised, against a client's monitoring API every sixty seconds, is not an
+improvement on not running it. So the console no longer offers it. The entry is
+`disabled` and reads "coming soon", in the same style as the AWS, GCP and Azure
+entries three blocks above it.
+
+Disabled, not deleted. `cmRegisterDatadog()` and the step 2 form stay in place so
+that re-enabling is removing an attribute rather than rewriting a form.
+
+The guard runs both ways, and both directions had to. Offering it while nothing
+collects is the state this corrects. The other is quieter and would be easier to
+miss: once the collector *is* wired, a button still greyed out means the product
+does the work and no client can ask for it.
+`test_the_console_offers_datadog_only_if_it_collects.py` fails on either, and was
+verified against both — re-enabling the button with the collector unwired fails
+three tests, and adding the module to `include` with the button disabled fails
+one.
+
+"Wired" there means Celery would actually call it — a task decorator, an
+`include` entry, or a scheduled name — not that the code exists. And the scan is
+anchored on the `>Datadog<` label rather than a line number, in a 1 000-line
+template where everything moves.
+
+The v0.30.0 claim below stays wrong until the collector runs, and is left
+standing with this note rather than rewritten.
+
+### Fixed — HSTS pinned `localhost` for everyone who ran the stack locally
+
+Core and the console both send `Strict-Transport-Security` with
+`includeSubDomains` — two years from core, one from the console. That is right
+for a domain and wrong for `localhost`, which is the same name on every machine:
+one response from a stack running locally pins that developer's localhost, for
+every other project they have and not only this one. **Core sent it
+unconditionally**, not even behind the `app_env` gate the console had.
+
+The symptom is why this is a fix rather than a note. Under an HSTS pin a
+self-signed certificate stops being a warning you can click through — there is
+no "continue anyway" button — so the page does not open and nothing says why.
+The pin outlives the stack that set it.
+
+The condition is the **host**, not the environment, and that distinction was
+measured: the demo host runs `APP_ENV=development` and is served over TLS on a
+real domain, so gating core on production would have taken its HSTS away. The
+console keeps its production gate and gains the host condition on top. IP
+addresses are excluded too — RFC 6797 §8.1.1 says a user agent must not note
+HSTS for one.
+
+Duplicated in both services rather than shared: the console and core import
+nothing from one another, they speak HTTP. Each test exercises the middleware as
+well as the predicate, because a correct predicate the middleware ignores would
+pass every other assertion.
+
+### Added — ask an installation whether it runs what it believes it runs
+
+The demo host sat two releases behind — through v0.52.2, which fixed a live
+cross-tenant leak — while `Deploy` went green on every tag. Its compose carried
+the image tags **literally**, so `VIBOPS_VERSION` in its `.env` was decorative:
+the documented upgrade ran in full, every container restarted, everything
+reported healthy, and the images were the same ones. Nothing *reported* said so.
+
+Two checks, for the two halves of that.
+
+**What the repository publishes** —
+`core/tests/test_the_published_compose_stays_upgradeable.py`. Every image must
+read `${VIBOPS_VERSION}` and fall back to a release tag, never `latest`, and all
+of them must name the same version.
+
+**What an installation actually is** — `scripts/check-install-drift.sh`. Three
+facts from three sources, and their divergence is the defect: what the `.env`
+declares, what `docker compose config` resolves, what `docker compose ps` runs.
+Exits 1 on any gap; local or over ssh.
+
+Not scheduled yet, and that is a decision rather than an omission: remote
+surveillance would need either the version on a public endpoint — which names
+the target — or ssh access for CI. Recorded as open in `docs/harness.md`.
+
+**The first version did not catch it.** It held the declared-versus-resolved
+comparison inside the "the stack is running" branch, so on a stopped directory
+it announced "the stack is not running" and never named the gap between a `.env`
+at v0.53.3 and a compose at v0.53.1 — with both figures printed immediately
+above. It reported something and missed the subject, which is the defect it
+exists to find.
+
+### Added — a local standby on the published images
+
+`scripts/local-standby.sh` brings up the **published** stack on a workstation,
+for the day a remote environment goes down during a demonstration. It runs the
+artefacts a client receives, on seeded demo data: no real data and no
+`BACKUP_PASSPHRASE` on the laptop, by decision.
+
+Bringing it up for real found four defects in it, each only visible from a
+browser, and they are the reason it exists:
+
+- **the overlay appended instead of replacing.** Compose merges list fields, so
+  without `!override` the standby's binding joined the published one rather than
+  taking its place: postgres carried 5432 *and* 15432. The stack died on "bind:
+  address already in use" after starting half its containers. **And the test
+  passed on it**, because it compared the two files as *written* rather than as
+  merged — a check that reads what you typed instead of what runs. It now
+  asserts the merged result through `docker compose config`, and a second test
+  refuses that check skipping unnoticed. It earned its place immediately: the
+  compose check had reported a pass three times while silently skipping.
+- **no TLS, so the session cookies never came back.** The console sets its
+  cookies `Secure` as soon as `APP_ENV=production`, and the standby *is*
+  production — that is the point of it. A browser never returns a `Secure`
+  cookie over `http://`. Login answered 200 and `/auth/me` 401, the sign-in
+  screen looping without a word. `APP_ENV=development` would have fixed the
+  symptom and opened anonymous access; the standby gets `tls internal` instead.
+- **a redirect to a port it did not publish.** Caddy redirects http to https
+  *without* a port, so `http://localhost:8080` answered 308 to
+  `https://localhost/` — port 443, which nothing published. It now publishes 80
+  and 443, and only the interface differs from the published compose.
+- **`127.0.0.1` declared as a site was worse than omitting it.** Caddy excludes
+  it from certificate management, because a certificate validates a name and the
+  internal authority issues none for a bare IP. The http site accepted the
+  connection and redirected to an https that did not exist — a network failure
+  with no message rather than a plain refusal.
+
+### Added — `docs/production-readiness.md`, measured rather than asserted
+
+What is actually ready for production and what is not, with figures rather than
+adjectives. Its headline finding: **CI's 82.14 % coverage includes the test code
+itself, and the product's own coverage is 65.1 %.**
+
+---
+
 ## [0.53.3] — 2026-10-08
 
 **Aucun changement produit.** Le code de la v0.53.2, republié avec un manifeste
