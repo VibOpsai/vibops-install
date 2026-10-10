@@ -7,6 +7,177 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.54.3] — 2026-10-09
+
+> **⚠ Tagged, not published.** The images for this version were never built.
+> `Release Docker Images` failed on Docker Hub's anonymous pull limit — every
+> Dockerfile starts `FROM python:3.11-slim`, and that workflow authenticates
+> only to ghcr, never to Docker Hub. Three releases in one evening, each firing
+> seven workflows that pull `postgres`, `redis`, `caddy` and `python`
+> anonymously, went past the 100-pulls-per-6-hours ceiling.
+>
+> **So `v0.54.3` is not installable**: pulling it answers `manifest unknown`,
+> and `scripts/check-install-drift.sh` will report any host as behind a version
+> that does not exist. The demo host stays on v0.54.2.
+>
+> **To finish it:** the ceiling resets by itself within about six hours. Then
+> re-run the failed jobs of that tag's `Release Docker Images` run. Nothing in
+> the code needs changing — the two `harness` test failures of that run were
+> `caddy:2-alpine` failing to download, not a Caddyfile being wrong.
+>
+> **To stop it recurring:** authenticate Docker Hub in CI. A free account
+> doubles the allowance and counts per account rather than per shared runner IP.
+> That needs `DOCKERHUB_USERNAME` and a read-only token in the repository
+> secrets. Open on 09/10/2026.
+
+A patch, and most of its entries are the same defect in different places: a
+thing that does not happen, or happens wrong, and does not say so.
+
+### Fixed — `GET /api/v1/pipelines/templates` answered 422; the endpoint was unreachable
+
+`/pipelines/{pipeline_id}` was declared before `/pipelines/templates`, and
+FastAPI compiles `{pipeline_id}` to `(?P<pipeline_id>[^/]+)` **even when the
+parameter is annotated `uuid.UUID`** — the annotation only adds Pydantic
+validation, which runs after the route has already won. So `templates` was taken
+for an id:
+
+```
+before: 422 {"type":"uuid_parsing","loc":["path","pipeline_id"]}
+after:  200 {"items":[{"name":"deploy_vibops",...
+```
+
+`list_pipeline_templates` had existed, been importable, been testable as a
+function, and been unreachable over HTTP. `docs/user-guide.md` tells clients to
+call it.
+
+Fixed with the convertor — `{pipeline_id:uuid}` — rather than by reordering,
+because a convertor does not depend on declaration order, and reordering is what
+traded one defect for the other in v0.53.0. Same on
+`/pipelines/{pipeline_id:uuid}/trigger`, which would otherwise claim
+`POST /pipelines/from-template/trigger`.
+
+**Visible consequence:** `GET /api/v1/pipelines/not-a-uuid` now answers 404
+rather than 422. A path matching no route is a 404; the 422 was the other route
+claiming it and then rejecting the value.
+
+### Fixed — an evaluation with no score was recorded as a zero
+
+`eval_task` is the LLM-as-judge. `float(data.get("score", 0.0))` meant a judge
+that returned a justification and omitted `score` had its row written
+`status="completed", score=0.0` — the worst possible mark, indistinguishable
+from a severe but considered judgement. The module's own docstring promises the
+opposite: "we fall back to a text justification with score=null". The log line
+did the same, writing `score=0.00` for an absent mark.
+
+**Clients reading `job_evaluations.score` will see `null` where they saw `0.0`**
+on those rows. A real 0.0 is still 0.0.
+
+`criteria` was in the signature, passed by the caller, and never read, so the
+criteria a rubric declares were compared with nothing. The judge's answer is not
+corrected — rewriting a measurement is how it becomes a fiction — the mismatch
+is logged, naming what is missing and what is extra.
+
+### Fixed — a trigger that could not read its metric counted as one whose condition was false
+
+`vibops.evaluate_triggers` runs every sixty seconds. Its summary said
+`{"triggered": 0, "skipped": 12, "errors": 0}` whether twelve rules were quietly
+in cooldown, Datadog was down for all twelve, or twelve cron expressions were
+invalid and would never fire again. `skipped` was incremented at six places for
+six unrelated reasons.
+
+The summary now carries **`unavailable`**: `skipped` means "evaluated, and it
+was not supposed to fire"; `unavailable` means "could not decide". A non-zero
+`unavailable` says an automation may be switched off, without reading a log.
+Additive — nothing in the product or the console consumed these keys.
+
+### Fixed — eight columns promised a server default the database did not have
+
+`_timestamps.updated_at_column()` declares `server_default=func.now()` and says
+in a comment that "the migration writes DEFAULT now()". For `alert_rules`,
+`budgets`, `cluster_rates`, `llm_backend_rates`, `memories`, `pricing_rules`,
+`tool_policy_overrides` and `workloads` it did not, while the other twenty-one
+tables carrying `updated_at` all had it. On a NOT NULL column that means an
+insert omitting `updated_at` failed on those eight and succeeded elsewhere.
+
+**Nothing could see it:** `alembic/env.py` does not set
+`compare_server_default`, which defaults to False, so autogenerate never
+compares server defaults in either direction. Migration `c4e8a1b06d92`.
+
+### Fixed — the internal service key was checked in a route body, and one copy refused with 403
+
+The shared `X-Internal-Key` check is copied five times under two names and had
+drifted into three shapes: a router dependency (three modules), an endpoint
+parameter (`audit`), and **a call inside the route body** (`llm_rates`). The
+third is invisible to the dependency tree, so `test_endpoint_auth.py` — the ADR
+0005 walker that exists to find exactly this — could not see it, and the next
+route on that router would have inherited nothing. Moved to the router.
+
+And `agent_model_rules` answered **403** where the other four answer 401 — same
+message, same situation, a different code depending on where you knocked, and
+contradicting its own line above returning 401 for an unconfigured key. For a
+wrong shared secret the caller failed to authenticate: 401. Invisible to the
+only caller, `llm-proxy`, which tests `== 200` and nothing else.
+
+### Changed — two annotations that lied about their column
+
+`notification_channels.id` and `cluster_resource_metrics.id` were annotated
+`Mapped[uuid.UUID]` over `String(36)` with `default=lambda: str(uuid.uuid4())`,
+so the value is a `str` and always was. SQLAlchemy takes the type from
+`mapped_column(...)`, so the annotation was documentation nothing compared to
+reality. Believing it cost an hour twice in the week of 06/10. Now `Mapped[str]`.
+
+### Changed — CI measures the product's coverage, and `e2e.yml` targets a runner that exists
+
+Both coverage jobs ran `--cov=.` from their package directory, counting `tests/`
+as covered product: **85 % reported against 69 % real** on core, 77 % against
+62 % on connectors. Floors moved 50 → 65 and 60, since a floor of 50 against a
+real 69 allowed a nineteen-point regression in silence.
+
+`e2e.yml` was pinned to `runs-on: self-hosted` with no runner registered, so a
+dispatch queued indefinitely rather than failing. Now `ubuntu-latest` — the job
+already did `npx playwright install chromium --with-deps`, and
+`e2e-pipeline.yml` builds the same stack there on every tag. **Not verified by
+execution:** a dispatch calls the real Anthropic API and may run two hours.
+
+### Added — six guards, each verified against its broken form
+
+- **which route wins**, asked of the routing table rather than of a client: the
+  decisions written out, plus a derived sweep requiring every route to be
+  reachable by a path its own pattern generates. 302 assertions.
+- **the model and the database agree on defaults**, two directions: a declared
+  `server_default` the database lacks is a hard failure; a Python-only default
+  gets a budget of 48, with both sides of the ratchet.
+- **the internal key is a dependency**, recognising the guard by what it does
+  rather than by name, and asking every internal endpoint to refuse a missing
+  key, a wrong key, and everything when none is configured — and to *stop*
+  refusing with the right one.
+- **coverage is scoped to the product**, and its floor is close enough to be one.
+- **no workflow waits for a runner nobody has.**
+- **an annotation does not promise a type the column lacks**, both directions.
+
+### Measured, for the record
+
+`app/api` raises `HTTPException` at **337** places and **290 (86 %)** had never
+been reached by a test — of which 55 are refusals: 22 × 401, 20 × 403, 8 × 402.
+A refusal no test has exercised is a door nobody has pushed on. By contrast,
+**0 of 288 routes are never called**, so the layer is exercised and the gaps are
+branches inside it. That is the next frontier; the internal-key family above is
+the first of it.
+
+Coverage: `app/workers` 58 % → 61 %, `app/api` 60 %, `app/` total 69 %.
+
+---
+
+## [0.54.2] — 2026-10-09
+
+_Section added on 09/10/2026, after the tag. The command that was supposed to
+insert this heading used `sed '0,/re/s///'`, a GNU range the macOS sed ignores
+without a word, so v0.54.2 shipped with its entries still filed under
+`[Unreleased]`. The silent no-op, in the tool used to document the silent
+no-ops._
+
 ### Fixed — two worker paths opened a session with no tenant scope
 
 Found by doing what ADR 0047 has been asking for: setting `APP_ROLE_PASSWORD` on
