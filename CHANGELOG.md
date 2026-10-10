@@ -9,28 +9,126 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.54.4] — 2026-10-10
+
+One fix a user can feel. Everything else is the route layer being taken apart,
+and it was verified to change nothing: the 287 operations of
+`docs/openapi.json` are the same set before and after, each with the same
+`security`, parameters, request body and responses, and the 159 component
+schemas are byte-identical. Two splits reordered the document — a route
+declared in a different file is serialised in a different place — and that
+reordering is the whole diff.
+
+### Fixed
+
+- **The agent's spend-trend tool called a route that does not exist.**
+  `agent/app/services/core_client.py` asked for `/api/v1/finops/spend-trend`;
+  the route is `/api/v1/finops/spend/trend`. The method calls
+  `raise_for_status()`, so any operator asking the agent for a spend trend got
+  an exception — and the tool is in `tools_catalog.py`, so the model offers it.
+  The MCP server calls the same tool and had the path right all along: one
+  question, two surfaces, one correct.
+
+  Nothing caught it. The test that covers the tool covers it well — it uses
+  `create_autospec` over CoreClient to check the dispatcher reaches the right
+  method with the right keywords — and it mocks the client, so the URL never
+  exists while it runs.
+
+### Changed
+
+- **Seven route modules became packages** (ADR 0049 decision 3), their queries
+  having left for `services/` earlier. The largest file in `core/app/api/` goes
+  from 1 327 lines to 564 — and that one, `greenops.py`, is next.
+
+  | | before | after |
+  |---|---|---|
+  | `finops.py` | 1 327 | 6 modules, largest 466 |
+  | `tenants.py` | 778 | 7 modules, largest 224 |
+  | `reselling.py` | 678 | 7 modules, largest 182 |
+  | `gateways.py` | 686 | 6 modules, largest 253 |
+  | `audit.py` | 665 | 6 modules, largest 182 |
+  | `sso.py` | 639 | 4 modules, largest 480 |
+  | `pricing.py` | 624 | 4 modules, largest 431 |
+
+  Two were split along an authentication boundary rather than a theme.
+  `tenants` exports two routers because whoever follows an invitation link has
+  no account yet; `gateways` separates what a person calls with a JWT from what
+  a machine calls with its gateway token, which the file's own order did not —
+  `/scan` sat next to `/ping` with opposite audiences.
+
+- **`GatewayService.latest_gpu_utilisation`** — the last query in
+  `api/v1/gateways.py` moved to the service, with the `is_org_uuid` guard its
+  siblings carry. ADR 0049's budget drops to 16 files / 30 queries, and
+  `test_tenancy_column`'s unguarded comparisons from 9 to 8.
+
+### Removed
+
+- **Three CI jobs that reported success without doing anything.** The Helm job
+  in `deploy.yml` announced six deployments while gated on a `KUBECONFIG`
+  secret that does not exist. Its `build-push` job rebuilt core, agent and
+  console — the same three as `release-images.yml` — and pushed them as
+  `0.54.2`, `0.54` and `sha-…`, amd64 only, unsigned, unscanned, pulled by
+  nothing; three redundant image builds per release, and three more Docker Hub
+  pulls against the ceiling that broke v0.54.3. And `update-install-repo` ran a
+  `sed` for `VIBOPS_VERSION` in a published file that pins by digest and holds
+  no such string: seven occurrences in the source, zero in the target, so it
+  printed "No version change — skipping" and exited green at every release.
+
+- Two dead constants in `reselling.py`, duplicated from `dataset.py`, which is
+  the only module that uses them.
+
+### CI
+
+- `Release Docker Images` and `Deploy` accept `workflow_dispatch` with a tag
+  input. Before, rebuilding a release meant deleting its tag and pushing it
+  again — rewriting a published tag to recover from a transient failure.
+- The Release step named `github.ref_name`, which on a dispatch is the branch.
+  The v0.54.3 rebuild therefore created a tag `main` and a Release called
+  "VibOps main". Both resolved through the version input now; the stray tag is
+  deleted.
+
+### Guards
+
+Eleven widened or written, after six were found to have stopped measuring
+while files moved. One had been green for hours seeing 52 of 77 modules — the
+failure it exists to prevent, happening to itself. New in `tests/`:
+
+- every `/api/v1/…` literal in the six surfaces is compared against
+  `openapi.json` — this is what found the spend-trend defect;
+- no image may be published by more than one workflow, and no external
+  repository may receive writes from more than one;
+- no guard may enumerate a source tree with a flat `glob`, and every source
+  path a guard builds must exist.
+
+### Tooling
+
+- `scripts/check-route-split.sh before|after <module>` — the seven checks of a
+  split, which refuse to pass. It found two defects in itself on first real
+  use, one of them a false "name lost" caused by `comm` sorting by locale where
+  python sorts by bytes.
+- `.claude/agents/contre-epreuve.md` and `route-splitter.md`, and
+  `docs/specs/SPEC_COUNTER_PROOF.md`.
+
+---
+
 ## [0.54.3] — 2026-10-09
 
-> **⚠ Tagged, not published.** The images for this version were never built.
-> `Release Docker Images` failed on Docker Hub's anonymous pull limit — every
-> Dockerfile starts `FROM python:3.11-slim`, and that workflow authenticates
-> only to ghcr, never to Docker Hub. Three releases in one evening, each firing
-> seven workflows that pull `postgres`, `redis`, `caddy` and `python`
-> anonymously, went past the 100-pulls-per-6-hours ceiling.
+> **⚠ Tagged on 09/10, built on 10/10.** This version was tagged with no
+> images: `Release Docker Images` failed on Docker Hub's anonymous pull limit —
+> every Dockerfile starts `FROM python:3.11-slim`, and that workflow
+> authenticates only to ghcr. Three releases in one evening, each firing seven
+> workflows that pull `postgres`, `redis`, `caddy` and `python` anonymously,
+> went past the 100-pulls-per-6-hours ceiling.
 >
-> **So `v0.54.3` is not installable**: pulling it answers `manifest unknown`,
-> and `scripts/check-install-drift.sh` will report any host as behind a version
-> that does not exist. The demo host stays on v0.54.2.
+> **Resolved on 10/10/2026.** The six images exist for linux/amd64 and
+> linux/arm64, `:latest` points at them, and `vibops.ai/install.sh` defaults to
+> v0.54.3. Two workflows had to be fixed before it could be finished: neither
+> could be re-run without re-pushing a published tag, and the Release step named
+> the branch rather than the version — see v0.54.4.
 >
-> **To finish it:** the ceiling resets by itself within about six hours. Then
-> re-run the failed jobs of that tag's `Release Docker Images` run. Nothing in
-> the code needs changing — the two `harness` test failures of that run were
-> `caddy:2-alpine` failing to download, not a Caddyfile being wrong.
->
-> **To stop it recurring:** authenticate Docker Hub in CI. A free account
-> doubles the allowance and counts per account rather than per shared runner IP.
-> That needs `DOCKERHUB_USERNAME` and a read-only token in the repository
-> secrets. Open on 09/10/2026.
+> **Still open:** authenticating Docker Hub in CI. A free account doubles the
+> allowance and counts per account rather than per shared runner IP. That needs
+> `DOCKERHUB_USERNAME` and a read-only token in the repository secrets.
 
 A patch, and most of its entries are the same defect in different places: a
 thing that does not happen, or happens wrong, and does not say so.
