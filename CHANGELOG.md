@@ -9,6 +9,157 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.54.6] — 2026-10-11
+
+Three things that were green and measured nothing, found by measuring rather
+than by re-reading. A throughput threshold that enforced the mean while its own
+row promised the p50. A 154-test suite that had never run once since it was
+written. And — committed one commit after describing the defect — a guard that
+accepted a workflow with no trigger. No product behaviour changes in this
+release: the instruments were what was wrong.
+
+### Fixed
+
+- **The frontend suite measured nothing, and the reason recorded was half
+  wrong.** `tests/test_frontend.py` — 154 Playwright tests against the console
+  — was declared dead with "0 passing, 154 errors, for two independent and
+  unconditional reasons". One of the two was not unconditional. Measured
+  11/10: **97 pass, 57 fail**, and the suite runs in 7 minutes instead of 12.
+  - `_alpine` read Alpine **v2** internals (`querySelector('[x-data]').__x.$data`)
+    while the console serves Alpine 3.15.12. Verified against the live console:
+    `.__x` is `undefined` and the expression raises `TypeError`. As
+    `_reset_state` evaluates it before every test, this one did block all 154.
+    It is `Alpine.$data(el)` now — the public Alpine 3 API — with reads and
+    reactive writes both verified (`d.loginUsername` written, the `x-model`
+    input follows). Note for later: `Object.keys` on that proxy returns 0, so
+    never enumerate it.
+  - `_login` sent an empty password, which is not a mistake: it is the
+    product's own dev-mode auto-login (`_tryAutoLogin` in `init.js`) and what
+    `.github/workflows/e2e.yml` builds with `AUTH_PASSWORD_HASH=` empty. The
+    401 measured came from a stack running `APP_ENV=production` — a property of
+    the target, not of the suite. The suite now skips naming the cause and the
+    remedy instead of dying 154 times in a session fixture, takes
+    `VIBOPS_E2E_USERNAME` / `VIBOPS_E2E_PASSWORD`, and `VIBOPS_E2E_REQUIRED=1`
+    turns that skip into a failure so wiring it into CI cannot make a workflow
+    green while measuring nothing.
+  - Three state properties had been renamed in the product and the suite still
+    wrote the old names, so those tests injected into properties that drive
+    nothing: `adminTab` → `settingsTab`, `commits` → `gitCommits`,
+    `commitsLoading` → `gitLoading`. Likewise `activeTab: "admin"`, a value the
+    product no longer has — it is `settings`. That single rename brought back
+    30 tests.
+  - `index.html` wraps the whole application in
+    `<template x-if="authenticated && !onboarding">`. On a console that knows
+    no cluster, `onboarding` is `true`, nothing renders and `.nav-tab` counts 0
+    — which is what made the suite look wholesale stale. The neutral state sets
+    it to `false`; the five tabs then appear.
+  - `_go` reached a screen by clicking a nav label. The nav now shows five
+    labels (Dashboard, Fleet, Agents, Automations, FinOps) and four of the six
+    the suite used are no longer among them, while every panel still exists
+    (`activeTab` accepts eleven values). Twenty tests depended on a nav label
+    to reach a screen unrelated to the nav; `_go` sets the tab by its product
+    value now, and what the nav shows is checked in one place.
+  - The file declared `TIMEOUT = 8_000` while Playwright applied its own 30 s
+    default to every action, so one vanished selector cost 30 seconds. The
+    declared timeout is the one that applies.
+  - A new `VIBOPS_E2E_STUB_API=1` answers for the whole `/api/` surface from the
+    test process. This suite injects its own Alpine state and asserts rendering;
+    the backend only gated it. Measured: answering just `/auth/login` and
+    `/auth/me` is not enough — `currentUser` fills, then another call takes a
+    401 from the real backend and `authenticated` falls back to `false`. The
+    integrated path stays covered by the Node suite in `e2e/`.
+
+  The 57 that remained were then worked through: **143 pass, 0 fail, 1 xfail**,
+  in 1 min 11 instead of 12 minutes, and `e2e.yml` runs the suite — so the
+  declared-debt list in `tests/test_a_guard_still_looks_where_it_promises.py`
+  is empty for the first time. Verified by removing the CI step again: the
+  guard names the file.
+
+  Only a third of what was left was the console moving. The rest were test
+  defects no run had ever exposed — a toast pushed as `message` where the
+  product reads `msg`; a count of attached elements where the product's guard
+  is `x-show`, which hides without removing, so the count never varied; an
+  assertion wrapped in `if toggle.is_visible()`, which passed without measuring
+  anything whenever the toggle was absent; `input[x-model.number='…']`, not a
+  valid selector — and the input is gone anyway, the product derives the
+  threshold now. Plus one order dependence: `_reset_state` never cleared
+  `apps`, so a previous test's table stayed rendered and two tests passed alone
+  and failed in the suite.
+
+  Three tests on the authentication path were moved out rather than fixed: with
+  `auth_enabled: false` the console shows no login form and holds no token at
+  all — `authToken` None, localStorage and cookies empty — while being
+  `authenticated`, which is correct when there is no auth. That path belongs to
+  the Node suite in `e2e/`, which has a real stack.
+
+  One measurement is recorded rather than resolved: **Ctrl+` / Cmd+K do not
+  toggle the chat panel.** The single keydown listener (`init.js:1259`) is
+  registered — counted by instrumenting `addEventListener` before page load —
+  the event carries exactly what its condition tests (`key='\``,
+  `ctrlKey=true`), `chatPanelOpen` is writable, and nothing calls
+  `stopPropagation`. The effect does not happen and the cause is not
+  established. Marked `xfail(strict=True)`: if the shortcut starts working, the
+  suite fails and the marker comes off.
+
+- **A guard that accepted a workflow which never fires.** The same defect as
+  everything above, committed one commit after describing it. The rendering
+  suite was wired into `e2e.yml`, whose only trigger is `workflow_dispatch`
+  (its nightly cron is commented out), and
+  `test_every_guard_is_executed_by_a_workflow` accepted it because it asked
+  whether a workflow *names* the file, never whether that workflow *runs*. It
+  read no triggers at all. So the declared-debt list was emptied while the 143
+  assertions still ran nowhere.
+  - The guard now ignores workflows that only start on demand (`push`,
+    `pull_request`, `pull_request_target` and `schedule` count — a schedule
+    fires).
+  - The suite gets its own `console-rendering` job in `ci.yml`, which is
+    push- and PR-triggered. It needs no PostgreSQL, no Redis and no core:
+    the suite stubs the whole `/api/` surface, so measured on 11/10 the 143
+    pass against the console alone, started by uvicorn with a `CORE_API_URL`
+    that leads nowhere. The integrated path stays in `e2e/`, which is why that
+    workflow is on-demand — its Node suite calls the real Anthropic API.
+  - The redundant `e2e.yml` step is removed.
+
+  First run on a runner, in the CI of f3b66f95: `Console ready`, then
+  **143 passed, 1 xfailed in 71.58s** — no skips, and three hundredths of a
+  second off the local figure.
+
+  Counter-proof, and the contrast is the point: making `ci.yml`
+  `workflow_dispatch`-only — which would mean nothing runs in CI at all — gave
+  **382 passed, 0 failures** under the old guard, and **335 failures** under the
+  new one. Removing the new job alone makes it name `tests/test_frontend.py`.
+  Workflow restored from a copy, digest identical.
+
+  Two orphans found on the way, neither breaking anything today: the i18n key
+  `scan_infra` is rendered by no template, and `convsOpen` survives in
+  `init.js` with no markup left. Worth a look: `<template>` tags do not balance
+  per file (`resources.html` ends on an unclosed opener, `secrets.html` has one
+  closer too many, `index.html` one too few) — measured as harmless, the llm,
+  automations and secrets panels all render correctly.
+
+- **An SLO threshold measured the mean while its row promised the p50.** The
+  throughput floor on `POST /api/v1/jobs` sat at 20 req/s for a concurrency of
+  10 — exactly `10 / 500 ms`, the boundary at which the assertion becomes
+  "mean ≤ 500 ms" while the same table row promises "p50 < 500 ms". The mean is
+  always above the p50 once the tail is long, so the boundary was already
+  stricter than the published promise. CI showed it on 11/10: p50=328 ms,
+  p99=975 ms — **both declared latency SLOs met** — and the job red on
+  19.7 req/s. Across the five runs whose figures are readable the measurement
+  lands at 19.7 · 20.2 · 20.9 · 21.6 · 26.2 against a threshold of 20, so the
+  red carried no information. The floor is 10 req/s now (mean ≤ 1000 ms, under
+  the row's own p99, so it can no longer preempt a latency assertion), which
+  still catches the one thing latency cannot see: that the requested
+  concurrency actually happened — a server serialising those ten requests would
+  return 2 req/s at the same mean.
+- **The guard that was supposed to prevent this allowed the boundary.**
+  `tests/test_slo_thresholds_are_the_documented_ones.py` has refused a
+  `min_rps` above `concurrency / p50` since 04/10; it compared with `>` and so
+  permitted the equal value. It compares with `>=` now. Verified by putting
+  20 req/s back: the tightened guard names it, the previous one stayed silent
+  on that row while failing on another — so it was running and able to fail.
+
+---
+
 ## [0.54.5] — 2026-10-11
 
 A safety control that reported itself enabled and did nothing. Everything else

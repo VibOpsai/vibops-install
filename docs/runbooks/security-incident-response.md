@@ -149,7 +149,9 @@ docker compose exec postgres psql -U vibops -c \
    WHERE username = '<username>';"
 ```
 
-Note: Normal lockout is automatic after 5 failed login attempts → 15-minute lock (`core/app/api/v1/auth.py` line 184).
+Note: Normal lockout is automatic after 5 failed login attempts → 15-minute lock, in `_login_db` of `core/app/api/v1/auth/login.py` (search for `failed_login_attempts >= 5`).
+
+The previous version of this line named `core/app/api/v1/auth.py` **at line 184**. The file became the package `auth/` on 11/10/2026 and the line number had rotted long before that. A runbook is read during an incident, when nobody has time to find out why a path does not exist — so it names the function and a string to search for, neither of which moves with an edit. `tests/test_the_restore_procedure_matches_the_product.py` is what caught the dead path.
 
 ### Check Docker Container Logs
 
