@@ -9,6 +9,114 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.54.5] — 2026-10-11
+
+A safety control that reported itself enabled and did nothing. Everything else
+is guards, tooling and one contract-identical split.
+
+### Security
+
+- **The per-org external-approval override did not gate.**
+  `ToolPolicyOverride.requires_external_approval` is set through
+  `POST /catalog/{action}/policy`, stored, merged over the connector
+  declaration by `api/v1/catalog.py`, and returned as **active** by
+  `GET /catalog`. Nothing read it in the decision path.
+
+  `PolicyEngine._find_catalog_entry` returns the *static* connector catalog.
+  Of the 32 connectors, 8 declare that flag and **none sets it to `True`** —
+  the rest fall through to the `False` default — so the engine's condition was
+  dead for every action a customer can call. And the engine is synchronous, so
+  it never sees the organisation's row. `create_job`
+  did fetch the override — and read only `requires_confirmation`.
+
+  An administrator could require external approval on an action, see it
+  displayed as required in the console, and have jobs execute with no gate.
+  `docs/roadmap.md` marked the feature (OPS-E03) as delivered.
+
+  Measured through the route, with a control: no override → 201;
+  `requires_confirmation` → 409, as designed; `requires_external_approval` →
+  **201, the job runs**. Two flags on the same row, set by the same route,
+  displayed side by side. One gated. The other did nothing.
+
+  Anyone on v0.54.4 or earlier who has set this flag is not protected by it.
+
+- **`confirmed: true` would have bought its way past the gate.** Both flags sat
+  in one `if` whose condition carried `not payload.confirmed`. Confirming means
+  the caller states they read the preview — the same caller. External approval
+  asks for somebody else. A gate the caller it constrains can open is not a
+  gate. Separated, and the test proving it was counter-proved by restoring the
+  old condition.
+
+- **The approval request could vanish in silence.**
+  `asyncio.create_task(ChannelService(db).notify_approval_request(...))` handed
+  the *request* session to a detached task. FastAPI closes it when the response
+  is rendered, and a detached task's exception goes nowhere: the job sat in
+  AWAITING_APPROVAL and nobody was told. A gate whose request disappears
+  quietly is worse than no gate, because it looks like it worked. This was the
+  only place in the repository passing a request session to a detached task; it
+  opens its own now.
+
+  Fixing the first defect is what made this one reachable: that path was
+  previously entered only by a declarative `require_approval` rule.
+
+**Not changed, and stated rather than left implicit:** `evaluate_system` — the
+pipeline and trigger path — deliberately skips destructive confirmation and the
+role check, with its reasoning written down. It also skips the external
+approval gate, and that part is *not* documented as deliberate. Pre-authorising
+a pipeline is not the same as a named approver signing off each run. That is a
+threat-model decision, not a defect to patch quietly.
+
+### Changed
+
+- **`compliance.py` is a package** (ADR 0049 decision 3): 537 lines → five
+  files, largest 298. The seam is not three themes — `/controls` is the
+  register, `/reports` the evidence pack with its 146-line background task, and
+  `/ai-act` a compatibility surface whose four aliases delegate rather than
+  duplicate. Verified: 14 routes under `/compliance` before and after,
+  `docs/openapi.json` identical, auth map identical, no top-level name lost.
+  Twelve of those fourteen are this package; `/compliance/check` and
+  `/compliance/check/results` come from `compliance_checks.py`, which declares
+  the same prefix on a router of its own — now recorded in the package
+  docstring, because nothing else said it.
+
+### CI
+
+- **`Tests LLM Proxy`** — six tests that no workflow ran, while
+  `vibops-llm-proxy` is built, signed, scanned and published at every release.
+  Found by a new guard, not by hand.
+- **`Tests counter-proof`** — see below.
+- Two guards pointing at `api/v1/compliance.py` after it became a package. One
+  was the guard that reports exactly that, doing its job; the other was in
+  `agent/tests`, outside the scan `check-route-split.sh` performed. That scan
+  covers the whole repository now, and its "verify these guards still bite"
+  note became a **check** that fails — it reported 7 of 7 passing while two
+  were broken.
+
+### Guards
+
+- Every `/api/v1/...` path a hand-written client uses is compared against the
+  contract. This is what found the v0.54.4 agent defect.
+- Every test file in every suite must be executed by some workflow. Written
+  after a by-hand measurement of the same question got it wrong.
+- Every declared exemption must correspond to a real finding. The one exemption
+  in the repository had been exempting nothing since its creation: `versions`
+  was not a watched source tree, so the flat glob it excused was invisible.
+- The budget hard cap is now observed **through the route**, not only in the
+  service. Six tests, four counter-proofs: the refusal removed, the `>=`
+  boundary made strict, tenant scoping dropped from the spend query, and the
+  hard cap swapped for the soft cap.
+
+### Tooling
+
+- **`counter-proof/`** — an MCP server with two deterministic tools:
+  `prove_it_can_fail` (break what a guard protects, verify it cries, restore
+  byte for byte) and `find_blind_guards` (flat globs over a source tree, and
+  paths to files that no longer exist). **Internal for now** — nothing is
+  published, and its README says so rather than documenting a `pip install`
+  that would fail. Its own validation found the vacuous exemption above.
+
+---
+
 ## [0.54.4] — 2026-10-10
 
 One fix a user can feel. Everything else is the route layer being taken apart,
