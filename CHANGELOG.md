@@ -5,6 +5,95 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.55.1] — 2026-10-12
+
+### Fixed
+
+- **`psql` exits 0 on a failed statement, and that hid the fix above.** The
+  seeder fix shipped with an SQL comment containing `` `DO $$ ... END $$` ``,
+  written inside a dollar-quoted block — where `$$` closes the string, so the
+  rest of the block is parsed as SQL:
+
+  ```
+  ERROR:  syntax error at or near ".."
+  LINE 166:   -- `DO $$ ... END $$`, l'echec annulait le bloc entier
+  ```
+
+  The script printed "Done." and exited 0, with **zero** workloads and **zero**
+  insights written. The guard added alongside saw nothing: `dedup_key` was
+  named, correctly. Two defects the same day, the second introduced by the
+  first's comment.
+
+  The `$$` is only one way to break that SQL. What is guarded is that a failure
+  shows: `ON_ERROR_STOP=1` on all eight `psql` invocations of the two seeders,
+  and a test that requires it. Verified end to end afterwards on a v0.55.1
+  stack — `seed-dev.sh` writes 18 workloads and 5 insights, and
+  `validate-seed.sh` passes every check including
+  `live-cost running_workloads > 0`, the one that failed in CI.
+
+- **Workload sync only ever visited the first gateway.** The nine attribute
+  reads in `_sync_all_gateways` were the first statements *of each iteration* of
+  `for gw in gateways:`, and `await session.commit()` sits inside that same loop.
+  The first gateway was fine; from the second on, `org_id = gw.org_id` touched an
+  instance the previous iteration's commit had expired, and the refresh is a lazy
+  load from async code:
+
+  ```
+  workload_sync_ok     org=… cluster=gpu-staging upserted=0
+  workload_sync_failed err=greenlet_spawn has not been called
+  ```
+
+  The comment directly above the offending line said exactly the right thing —
+  "read all gateway attributes before entering the commit loop" — and the code
+  did it one line too late. The mitigation was written and inert.
+
+  Measured on the demonstration host: **42 gateways**, **30**
+  `workload_sync_failed` in 30 minutes (the task runs every minute), and all 13
+  `workloads` rows still carrying `updated_at` = 2026-09-09, the seed date. A
+  month of syncing one gateway a minute, logged every time, while the table held
+  enough rows that a glance said nothing was wrong. The outer handler also
+  reported `{"error": …, "synced": 0}` — zero, although one gateway had
+  committed.
+
+  The snapshot now happens before the loop, so nothing is left for a commit to
+  expire; the loop body is unchanged, `gw` appearing nowhere else in it.
+  `core/tests/test_la_synchro_des_workloads_visite_toutes_les_passerelles.py`
+  requires both the absence of the `error` key and one `workload_sync_ok` per
+  gateway, because a task that visits nothing raises no error either. Restoring
+  the defect makes it fail with production's own message, verbatim.
+
+- **Both seed scripts broke on a v0.55.0 database, and took the workloads with
+  them.** Neither named `dedup_key` in its `INSERT INTO proactive_insights`.
+  The column is NOT NULL with a `''` default since migration `d5f9b2c3e47a`,
+  and `uq_insight_identity` covers `(org_id, insight_type, dedup_key)` — so two
+  rows of one type both took the empty key and the second raised
+  `UniqueViolation`. Reproduced on the migrated test database:
+  `seed-dev.sh` on its two `cost_optimization` rows, `seed-cloudsigma-demo.sh`
+  on its two `idle_gpu` rows.
+
+  Each script runs inside a single `DO $$ ... END $$`, so the failure rolled
+  back the **whole block**: in `seed-dev.sh` the workloads inserted at lines 257
+  and 275 vanished along with the offending insert at line 352. The tag's
+  "E2E Pipeline Tests" job failed on `live-cost running_workloads > 0 — =0`
+  while the seeder printed "0 workloads" and nothing else. Green on v0.54.6,
+  red on v0.55.0 — the regression was ours.
+
+  The migration's docstring said this change "cannot come alone" and named the
+  two worker tasks that built a `ProactiveInsight` directly. The workers were
+  checked; the seed scripts were not.
+  `core/tests/test_no_raw_insert_bypasses_the_insight_identity.py` closes that
+  path — `test_one_finding_one_insight_row.py` only forbids the Python
+  constructor, and the SQL route was uncovered. It carries a survey guard, since
+  an empty scan would declare the repository healthy, and it fails naming the
+  file when the key is dropped again.
+
+  The published v0.55.0 images are not affected: the defect is in repository
+  scripts, not in the product. Migrating an existing database is safe —
+  `local-standby.sh update` and the demo upgrade do not re-seed. Seeding a fresh
+  installation does, and that is what breaks.
+
+---
+
 ## [0.55.0] — 2026-10-12
 
 ### Fixed
