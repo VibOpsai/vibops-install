@@ -1,6 +1,6 @@
 # Updating the demonstration host
 
-_Last updated: 2026-10-04 · v0.52.0_
+_Last updated: 2026-10-11 · v0.54.6_
 
 > **When to use this runbook:** a release has been tagged and the public demo
 > should run it.
@@ -17,16 +17,63 @@ announced six successful deployments while the host stayed on v0.49.2 — with a
 is now skipped rather than green, and the run says so, but the conclusion stands:
 **this host is updated by hand.**
 
-The host runs Docker Compose with a hand-maintained `docker-compose.yml`. It is
-close to `install/docker-compose.yml` but not identical, and the differences are
-deliberate — do not overwrite it wholesale. **These three, and only these three:**
+The host runs Docker Compose with a hand-maintained `docker-compose.yml`. Three
+of the statements that stood here until 11/10/2026 were no longer true, and one
+of them had become a defect. Measured, host against `install/docker-compose.yml`,
+comments and image tags normalised away:
 
-- `caddy` mounts `./static`, which the host's own `Caddyfile` serves `/whisper`
-  and `/whisper-demo` from. The published file dropped that mount.
-- `core` publishes no port; a separate `vibops_port_fwd` container forwards
-  `127.0.0.1:8000`. Adding the published port mapping collides with it.
-- image tags are written out (`:v0.52.0`), not `${VIBOPS_VERSION:-…}`, which is
-  what step 3's `sed` assumes.
+- **Zero differences.** The base file is in sync with the published one. The
+  comparison was controlled before being believed: against the compose published
+  at v0.53.3 and at v0.52.0 it reports six differing lines, so it does detect.
+- **`caddy` no longer mounted `./static` — and that broke the demo.** The
+  04/10/2026 synchronisation took the published file wholesale, which is exactly
+  what the warning here said not to do, and the mount went with it.
+  `https://demo.vibops.ai/whisper` and `/whisper-demo` answered **404** from that
+  day until 11/10, while `docs/demo-script.md` sends a viewer to
+  `https://demo.vibops.ai/whisper-demo` in bold. The content had never left
+  (`/opt/vibops/static/whisper.html` and `whisper-demo.html` are still there);
+  only the mount was gone, and `docker compose exec caddy ls /static` said so.
+  Restored on 11/10 as `- ./static:/static:ro` on the `caddy` service, and both
+  paths answer 200.
+- **Image tags are not written out.** They are `${VIBOPS_VERSION:-v<old>}` and
+  `.env` carries `VIBOPS_VERSION=v<old>`, so step 3 is an edit to `.env`, not a
+  `sed` over the compose file.
+
+`core` still publishes no port — that one held — and a separate
+`vibops_port_fwd` container forwards `127.0.0.1:8000`.
+
+> **Why this drifted silently — and what now stops it.** The host's `Caddyfile`
+> was not in this repository; it existed only on the host, so nothing here could
+> notice that it served a path from a directory no compose file mounts. It is
+> versioned as of 11/10/2026:
+>
+> - `install/Caddyfile.demo` — the host's, comments and measured lessons included
+> - `install/docker-compose.demo.yml` — the one deviation, the `./static` mount
+> - `install/static/whisper-demo.html` — which was never in the repository at all
+> - `tests/test_what_caddy_serves_is_mounted.py` — checks that every `root *` in
+>   a versioned Caddyfile is mounted into `caddy`, and that every file a
+>   `rewrite` names exists on the host side of that mount
+>
+> **Versioning synchronises nothing.** The host keeps its own copy and CI cannot
+> reach it. After changing either side, copy to the other:
+>
+> ```bash
+> scp root@<host-ip>:/opt/vibops/Caddyfile install/Caddyfile.demo   # host → repo
+>
+> # repo ↔ host, ignoring this repository's own header
+> diff <(awk 'f || (!/^#/ && NF) {f=1; print}' install/Caddyfile.demo) \
+>      <(ssh root@<host-ip> cat /opt/vibops/Caddyfile) && echo identical
+> ```
+>
+> The `awk` prints from the first line that is neither a comment nor blank, so it
+> does not care how long the header is. It replaced `tail -n +22`, which was
+> written here on 11/10/2026 and was wrong by three lines the first time it was
+> run — the header is 24 lines, and the comparison reported a drift that was
+> only my own preamble. Verified the same day: with the `awk`, repository and
+> host are identical.
+>
+> A non-empty diff means the two have really drifted, and step 4's check of the
+> three public paths is what catches the consequence.
 
 `docker-compose.override.yml` carries the worker's kubeconfig, its stable gateway
 identity, and the `demo_pulse` service.
@@ -98,7 +145,14 @@ docker compose logs core | grep -i isolation           # the database role core 
 docker compose exec -T postgres psql -U vibops -d vibops_db \
   -tAc 'select count(*) from gateways' -tAc 'select count(*) from users'
 curl -s -o /dev/null -w '%{http_code}\n' https://demo.vibops.ai/
+for p in / /whisper /whisper-demo; do
+  printf '%-14s ' "$p"
+  curl -s -o /dev/null -w '%{http_code}\n' "https://demo.vibops.ai$p"
+done
 ```
+
+The three paths must all answer 200. `/whisper` and `/whisper-demo` are in this
+list because they are the ones that silently broke: see above.
 
 Every container must read `healthy`. An `unhealthy` one that answers requests is
 still a defect: it is how the `beat` scheduler sat broken across six releases.

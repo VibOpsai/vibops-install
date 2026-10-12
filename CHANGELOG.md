@@ -5,7 +5,314 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [0.55.0] — 2026-10-12
+
+### Fixed
+
+- **A guard reported a tool missing because it had found it.**
+  `scripts/check-tool-parity.sh` declared `get_siem_config` absent from the
+  agent catalogue. It is at `agent/app/services/tools_catalog.py:3546` and
+  always was. The same script, on the same tree, said "OK" locally and
+  "MISSING 1 tool(s)" in CI from identical input — 310 agent tools and 117 MCP
+  tools on both sides.
+
+  ```bash
+  if ! echo "$agent_tools" | grep -qxF "$tool"; then
+  ```
+
+  `grep -q` exits at its first match, `echo` then writes into a closed pipe and
+  takes an EPIPE, and `set -o pipefail` makes that failure the pipeline's
+  status — so `! pipeline` is true *because* grep found the name. The script
+  said so itself and nobody had read the line: `echo: write error: Broken
+  pipe`. It is a race between how much echo wrote and when grep exits, so the
+  verdict depends on where the name sorts and on the machine; any tool could
+  have been denounced. `tests/test_no_script_turns_a_match_into_a_miss.py`
+  forbids the pattern wherever `pipefail` is on, and found two more on its
+  first run (`bump-version.sh`, `check-route-split.sh`) — both small enough
+  that the write landed in the pipe buffer before grep could exit, which is why
+  they had never fired.
+
+- **A pipeline task reported a success having closed nothing.**
+  `_finish_pipeline` caught every exception, logged it and returned, while
+  `execute_pipeline` returns `{"status": "success"}` three lines below without
+  consulting it. Any write failure at closing time left the pipeline `running`
+  forever while Celery marked the run SUCCESS and a Slack notification went
+  out. The `raise` now sits behind the log, the shape `workers/job_tasks.py`
+  already uses in five places. A pipeline row that no longer exists does not
+  raise — an erasure (ADR 0046) is legitimate and a deleted row cannot stay
+  `running` — but it is logged instead of dropped.
+
+  Two writes stopped lying on existing columns at the same time:
+  `record_step_success` clears `PipelineStep.error`, so a step replayed
+  successfully no longer shows last run's `ImagePullBackOff` beside a green
+  status; and `finish_pipeline` writes `error` as given, `None` included, so a
+  pipeline finishing SUCCESS after a tolerated step failure
+  (`on_failure="continue"`) no longer serves that message beside a success. The
+  tolerated failure stays readable on the step and its `Job`, which is where
+  the console looks for detail.
+
+- **A VM anomaly that stopped was never closed.** The three detections in
+  `vm_anomaly_task` were guarded by their *numerator* — `vm_stopped > 0`,
+  `vm_cpu > 0`, `vm_mem > 0` — and the `_resolve` call sits inside the `else`
+  of those blocks. The day every VM restarts, `vm_stopped` is 0, the whole
+  block is skipped, and `vm_down` stays open forever on a cluster where nothing
+  is wrong. Only a fleet permanently keeping at least one VM stopped — the case
+  that does not need closing — could ever close. The guard now tests the
+  denominator alone.
+
+  Decided and held by a test rather than fixed: when the gateway goes silent or
+  the cluster leaves `cluster_metrics`, the anomaly stays open. Absence of data
+  is not evidence the condition ended, and the stale-anomaly check already
+  surfaces anomalies open for more than an hour.
+
+- **Six more anomaly reads did not read what they claimed.** The node filter
+  was `context::text LIKE '%"<name>"%'`; measured on an event whose context is
+  `{"node": "node-1"}`, the pattern for `node_1` also matched — `_` is a LIKE
+  wildcard — so a node named `node_1` answered for `node-1`'s event, its own
+  anomaly never opened, and it closed the other one; a node named `%` answered
+  for every event in the cluster. Now `context->>'node' = :node`.
+  `gpu_snapshots` did not filter `gateway_id` although the caller groups on it
+  and labels the event with it, so two gateways declaring one cluster name read
+  each other's samples and a 5% fleet beside a 95% fleet averaged to 50%, while
+  `node_loss` fired on the smaller one every pass. `resolve_events_for_*`
+  recomputed `datetime.now()` per call, so four conditions ending together got
+  four `resolved_at`. And `gateways_with_cluster_metrics` selected a column
+  nobody reads, with an `IS NOT NULL` that did not filter what it announced:
+  SQLAlchemy persists Python `None` into JSONB as JSON `null`, so those rows
+  passed and only a Python `isinstance` guard in another file caught them.
+
+- **Four passages a client reads announced something false.** The GPU health
+  check gave the latest sample as current utilization with no time bound, so a
+  cluster silent for three weeks displayed a three-week-old figure as "GPU
+  utilization on X at 4%" and recommended redistributing on top of it. The same
+  check picked its redistribution target by `avg(gpu_pct) ASC LIMIT 1` with no
+  sample floor, so a single stray 0% reading beat a cluster measured a hundred
+  times — the exact profile of a cluster that just died, which the advice then
+  named as the destination. The capacity forecast compared two half-weeks and
+  printed the gap as "+X%/week" while dividing it by 3.5 for the projection
+  beside it, so the number shown was half what its unit claimed. And the budget
+  warning called `max(gpu_total)` of under-utilized clusters "N idle GPUs" with
+  a dollar figure that was 30% of current burn, unrelated to that fleet.
+
+- **The waste estimate contradicted the client's own configuration.**
+
+  ```python
+  waste_monthly = (100 - avg_pct) / 100 * 2.0 * 24 * 30
+  ```
+
+  The `2.0` was a hardcoded "$2/GPU-hour" while `ClusterRate.rate_per_gpu_hour`
+  holds the rate the client configured and that `workloads`, `metrics`,
+  `finops/spend` and `finops/vm` all read. And there was no size factor at all:
+  the rest of the formula is one GPU-month, so a 4-GPU and a 512-GPU cluster
+  both announced "~$1,224/month" at 15% utilization. Fleet size now comes from
+  the query and the rate from a single batched read keyed on the `(org,
+  cluster)` pair; with no rate configured the dollar sentence disappears and
+  `rate_available: false` says so, the contract `api/v1/workloads.py` already
+  applies.
+
+### Changed
+
+- **The SLO gate on `POST /api/v1/jobs` was failing one release in seven on
+  noise.** Seven CI measurements of its p50: 263, 280, 338, 357, 400, 412 and
+  577 ms, against a 500 ms threshold. The 577 failed this release; re-run on
+  **the same commit** the same test returned 263 ms and 28.1 req/s against
+  15.4 — a factor of 2.2 on latency with identical server code. The job runs
+  only `uvicorn`, no worker and no beat, so none of the commit's code executed
+  there at all.
+
+  The noise belongs to this call rather than to the runner: in the red run the
+  three GETs stayed flat (52 → 55 ms on `GET /jobs`) and the burst on this same
+  endpoint moved 4%, while the single request took 44%. Unverified hypothesis:
+  it is the only call in the list that writes — a `jobs` row plus a Redis
+  enqueue — and disk-sync time on a shared runner varies far more than its CPU.
+
+  The threshold is now 900 ms, and what that costs is written beside it: at 900
+  it takes 2.5× the observed median to fail, so a regression that merely
+  doubled latency would pass. The p99 budget of 1500 ms stays the real latency
+  promise. A threshold that fails one run in seven blocks releases without
+  saying anything about the product, and gets raised blind at the first failure
+  — which is how a guard stops measuring. Making this measurable again means a
+  baseline recorded on the same runner, or a trimmed statistic over far more
+  iterations; both are a project, not a threshold.
+
+- **The insight identity key covers `idle_gpu`, which saved a seeded finding.**
+  Simulating the collapse read-only on the demonstration database before
+  applying it: 1 657 rows for 16 groups, and 35 distinct titles before, 16
+  after. The 19 vanishing titles were listed one by one — seventeen are worker
+  repeats of one condition with a changing figure, and two were seeded. One of
+  those, "1 underutilized GPU in Zurich", would have been deleted: `idle_gpu`
+  was not in the key table, so both seeded rows took the empty key and fell
+  into one group where the other won on recency. Keyed on
+  `context->>'cluster'`, which both carry, the collapse yields 17 groups and 17
+  titles. `idle_gpu` is the one entry no code produces; the migration says so
+  rather than dressing it as a product rule.
+
+- **The idle figure is a number of GPUs nobody reserved.**
+  `list_idle_clusters` gained `avg(gpu_total) - avg(gpu_used)` — averaged, not
+  taken at the peak, since a `max(gpu_total) - min(gpu_used)` would add one
+  instant's fleet to another's allocation. Both columns are shown: the fleet is
+  what there is to shrink, the unallocated average is what sleeps in it. It
+  stays "unallocated" and not "idle", because `gpu_pct` is an allocation ratio
+  and a GPU reserved by a pod computing nothing counts as allocated; real
+  idleness is measured per device by `/finops/waste`.
+
+
+### Fixed
+
+- **Two anomaly detectors had never been able to create anything.**
+  `k8s_anomaly_task` and `vm_anomaly_task` built their `INSERT` with nine
+  columns, `title` not among them, while `anomaly_events.title` is NOT NULL with
+  no default — in the model and in migration `7ad8aac9da83`. Every creation
+  raised `NotNullViolation`, `get_sync_db` rolled the pass back, and the task
+  returned its dictionary without a row or an error.
+
+  The proof was in the data rather than the code: on 12/10 the demonstration
+  database held `idle_gpu` (4) and `gpu_idle` (1), both from the ORM path, and
+  **zero** `node_not_ready`, `memory_pressure`, `disk_pressure`, `vm_down`,
+  `vm_cpu_high`, `vm_memory_high`. A month of running, not one event of those
+  six types. The seven call sites now pass a title in the form the two working
+  tasks use — a short noun phrase naming the condition and the place.
+
+  **Neither task had any test**, which is what let this live, and it is the
+  third time this shape has hit this subsystem: on 09/10 `anomaly_task` lost its
+  creations because a stdlib logger received structlog keywords, raised, rolled
+  back and reported success. `test_une_anomalie_k8s_arrive_en_base.py` drives
+  the task end to end and reads the table rather than the returned dictionary —
+  which is the figure that lied. Verified by removing `title` again: three tests
+  fail and the healthy-node control does not move.
+
+- **A health check was called a restart.** `_check_deployment_health` groups by
+  action and counts both `restart_service` and `health_check`, but titled every
+  result "Service restarted Nx in 1 hour" while the description correctly said
+  "the action 'health_check'". Three health observations in an hour — what
+  monitoring on a fifteen-minute schedule does — announced instability on a
+  healthy cluster. Measured: 31 successful `health_check` jobs on the demo, all
+  carrying a cluster, and zero `deployment_health` insight, because three in the
+  *same* hour are needed and the 31 span a month. Latent, not visible, and it
+  would have surfaced with any more frequent scheduler. The title names the
+  action now.
+
+  And `health_check` does belong in this check — verified rather than assumed.
+  It is not a periodic probe: the action is dispatched by the Grafana alert
+  webhook (`api/v1/grafana_webhooks.py`, the `action == "health_check"` branch),
+  and no `beat_schedule` entry creates it. A `health_check` job exists because
+  something alerted, so three in an hour on one cluster are three alerts, which
+  is precisely the instability this check looks for. The demo's 31 are 30 seeded
+  rows and one triggered by the agent, which disproves nothing either way. Only
+  the title was wrong.
+
+- **Two open events lost a whole pass.** `has_single_open_event` called
+  `scalar_one_or_none()`, so a second open event of the same type raised
+  `MultipleResultsFound` up through `detect_anomalies`, rolling back everything
+  including anomalies already detected on other clusters. Nothing guaranteed the
+  uniqueness it assumed: `ix_anomaly_events_cluster_open` is not unique and the
+  deduplication behind it is a `SELECT` then an `INSERT`, so two concurrent
+  workers are enough to create the state that breaks the next pass. The query
+  carries `LIMIT 1` now — same answer for zero or one row, `True` instead of a
+  raise for two.
+
+### Changed
+
+- **Worker SQL: 84 queries down to 40, behaviour unchanged.** Three extractions
+  run in parallel on disjoint files: `proactive_agent_task.py` 16 → 0 into a new
+  `services/insight_sources.py`, `pipeline_tasks.py` 10 → 0 into
+  `services/pipeline_service.py`, and the four anomaly tasks 18 → 0 into
+  `services/anomaly_service.py`. 47 new tests, each written so that replacing
+  the extracted function with `return []` fails a named test — the trap measured
+  on 07/10, where six of eight extracted methods could be emptied unnoticed
+  because the tests only asserted HTTP 200.
+
+  Identity of behaviour was proved, not assumed: for the insight extraction a
+  script replays the seven `_check_*` from both versions against a fake session
+  that compiles every statement to the PostgreSQL dialect — 16 of 16 identical
+  SQL texts, same emission order.
+
+  Part of the drop is accounting rather than real, and the ratchet says so: the
+  success branch of `pipeline_tasks` called `db.get(Job, job_id)` three times to
+  write three attributes and the service calls it once. The identity map already
+  served the second and third, so PostgreSQL never saw more than one SELECT —
+  this ratchet counts written calls, not round trips.
+
+  `gateway_heartbeat.py` keeps its 15 queries on purpose: it runs on a
+  synchronous session from `system_sync_session(engine)`, and moving them means
+  deciding that question first.
+
+### Fixed
+
+- **1 645 insight rows for 16 findings, and the deduplication was working
+  exactly as written.** Measured on the demonstration database on 12/10:
+  `cost_optimization` held 784 rows for three clusters, `stale_anomaly` 783 for
+  a single finding. `proactive_agent` runs every five minutes and its dedup
+  window was one hour, so a condition that persists produces 24 rows a day —
+  33 days × 24 = 792 expected against 784 observed. Nobody had measured the
+  consequence: the insight list a customer looks at was 98 % duplicates, and
+  the notification fired once an hour for as long as the condition lasted.
+
+  A finding's identity is now a database constraint rather than a convention:
+  `uq_insight_identity` on `(org_id, insight_type, dedup_key)`, with the key
+  each check already used as its `context_key`. `dedup_key` is `''` and never
+  NULL — two NULLs are distinct in PostgreSQL, which would have left the
+  783-row case undeduplicated.
+
+  `app/services/insight_service.record_insight` is the only place that creates
+  one: a single `INSERT ... ON CONFLICT DO UPDATE` replacing the dedup `SELECT`
+  plus the `INSERT`, atomic where the pair was not. It returns whether the row
+  is new, so the notification fires once per finding instead of once per hour.
+
+  The constraint could not land alone. Of the three places that created an
+  insight, two did it unconditionally — `security_scan_task` and
+  `compliance_check_task` — so their second run would have raised
+  `IntegrityError`. Both go through the service in the same commit, keyed on
+  `test_name` and `control_id`: the finding, not the run that found it.
+
+  The migration collapses 1 645 rows to 16, keeping the first sighting's
+  `created_at`, the group's `last_seen_at` and cardinality in `occurrences`,
+  the latest observation's severity and text, and `acknowledged` if any row in
+  the group was — an acknowledged finding must not come back unread.
+
+  **Why eleven green tests could not see it.** `tests/test_proactive_agent.py`
+  drove a fake session and asserted `db.add` was called with the right object.
+  It stubbed the dedup query itself, so the window that was wrong was never
+  executed. Those tests now record the upsert's bound values — they still
+  measure which condition produces which insight — and the identity is checked
+  against a real database in `test_one_finding_one_insight_row.py`, including
+  the collapse, which imports the migration's own SQL rather than a copy.
+
+  The worker ratchet added an hour earlier asked for its own reduction: 85 → 84.
+
+### Added
+
+- **A ratchet on the worker layer's SQL, which nothing was counting.** The
+  ADR 0049 ratchet watches `app/api`, because that is what the ADR named.
+  Measured 12/10: `app/workers` executes **85 queries across 18 files** —
+  more than three times the route layer, now at 25. Two tests hold it: the
+  count may not rise without a justification written in the file, and may not
+  sit above what the code needs.
+
+  It deliberately does **not** say that worker SQL must move to `services/`.
+  The ADR decides that for routes only, and the reasoning does not transpose:
+  a Celery task builds its own engine, does not share a pool across event
+  loops, and several of those queries write a result no service has a reason to
+  own. That decision is still open. What matters more for this layer is already
+  guarded elsewhere — `test_background_work_opens_a_scope.py` checks a task
+  opens a tenant scope, without which it reads zero rows, processes nothing and
+  reports success.
+
+  The number corrects one I reported earlier the same day. A hand count with
+  `(db|session)\.execute\(` gave 56; it missed `sess.execute(`, fifteen
+  queries in `gateway_heartbeat.py` where the session comes from
+  `system_sync_session(engine)`. In the other direction, counting `.get(` by
+  method alone would have tripled the figure — `environ.get`, `payload.get`,
+  `data.get` are dictionary lookups, and only `db.get(` is a primary-key
+  SELECT. So the receiver list is the thing that lies here, as the method list
+  did for routes, and `test_no_new_query_receiver_appears` refuses to trust it:
+  every receiver of the `execute/scalar/stream` family must be declared as a
+  session or as something else, and an undeclared one fails the test by name
+  instead of quietly leaving the count.
+
+  A fourth test keeps that declaration honest, and earned its place on its
+  first run by catching my own: I had declared `svc` as a non-SQL receiver,
+  and `svc.fetch(` never appears in the watched family at all.
 
 ---
 
