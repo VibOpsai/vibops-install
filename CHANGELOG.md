@@ -5,6 +5,280 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.55.2] — 2026-10-13
+
+### Added
+
+- **Nothing published `vibops-mcp`, so it sat six months behind.** Measured on
+  the index: **0.1.0, uploaded 2026-04-19**, while the repository was at 0.55.1.
+  Its public page therefore carried the old vendor-foregrounding summary and two
+  dead project URLs — the `.io` domain, which does not exist, and the lowercase
+  GitHub organisation, a 404 — both of which the repository's own
+  `pyproject.toml` had corrected long ago. They were wrong only in the metadata
+  of a release nobody had superseded.
+
+  `publish-pypi.yml` publishes `mcp/` on a version tag through OIDC trusted
+  publishing, so it carries no token: `id-token: write` and nothing else. It
+  fails until the project is declared on PyPI's side, and failing loudly is the
+  point. Two pre-flight checks run before the upload, because a PyPI version is
+  permanent: `twine check`, and an assertion that the built version equals the
+  tag — which catches tagging without having run `scripts/bump-version.sh`.
+  Tested locally: passes on `v0.55.1`, refuses `v0.55.0`, `v1.0.0` and
+  `v0.55.1-rc1`. No `skip-existing`, because a silent skip would report a
+  success without publishing.
+
+  The SDK is deliberately not published: `sdk/README.md` promises
+  `pip install vibops` and the name is absent from the index, but reserving a
+  name there is permanent and commits to support — the maintainer's call, not a
+  technical consequence.
+
+- **Every announced tool sub-total is now counted, and two were wrong.** The
+  server exposes 117 tools and three independent measurements agree, because
+  `check-tool-parity.sh` counts the total on every push. The sub-totals were
+  counted by nobody: `# ── Action tools (37) ──` sat above 60 registrations and
+  `# ── Governance tools (27) ──` above 29, so the five section comments summed
+  to 92 for a server exposing 117.
+
+  The README was right throughout — its eight families match their tables
+  exactly and document the 117 name by name. What looked like a discrepancy is
+  two legitimate groupings: `get_vm_usage` is registered under Observation and
+  documented under Hypervisors, being an observation tool about VMs. The guard
+  checks each grouping against itself and confronts them only by their totals.
+
+  Twice this guard measured nothing, and the counter-proof said so: its pattern
+  knew only the README's `(18 tools` form and not the code's `tools (60)`, so
+  all five sections were skipped; and a title with no parentheses escaped the
+  check entirely, until a test required every group to announce a number.
+
+### Changed
+
+- **The published MCP repository stops foregrounding one vendor.** Maintainer's
+  decision. `mcp/` is mirrored verbatim on tag, so five places were corrected
+  across the whole mirrored directory rather than the file the question was
+  about: the README's three installation sections became one generic
+  configuration block — the two JSON blocks were identical to the character,
+  which is the point of MCP — plus an alphabetical table of where each client
+  reads it; the **package description on PyPI**, the most visible mention of
+  all; a module docstring; the issue template; and a test fixture naming a
+  vendor model. The symmetric enumeration of supported providers in
+  `tools/governance.py` is kept: it is factual, and removing it would make a
+  tool's documentation poorer rather than more neutral.
+
+
+- **`sso/oidc.py` is a package — 541 lines, split per ADR 0049 decision 3.** It
+  crossed the ~450-line threshold the day before, when the issuer-verification
+  fix added a function and forty lines of comment. The seam is not "routes one
+  side, machinery the other" — there were 156 lines of route against 385 — but
+  the role of each piece, and each piece was placed from the names it depends
+  on, computed by AST at extraction rather than guessed: `_state.py` (the HMAC
+  state protecting the callback from CSRF), `_providers.py` (URLs and issuers
+  derived from the provider name, **zero free names**), `_token.py`,
+  `_provisioning.py`, `routes.py`. Nothing over 200 lines.
+
+  `scripts/check-route-split.sh` reports eight checks green, and it had to be
+  fixed first to get there: it did not support a nested module. Its reference
+  files went to a directory it never created, and — the part that matters — its
+  importability check built `from app.api.v1.sso/oidc import …`, a syntax error,
+  so **the check could never succeed**. A false failure rather than a false
+  pass, but a check that cannot succeed measures nothing, and for a non-nested
+  module it had never been wrong. `sso/` is already a split package, so nested
+  modules will recur.
+
+  Two findings the split surfaced, which is what the procedure is for.
+  `_VALID_PROVIDERS` existed **twice** in this package — in the old `oidc.py`
+  and in `config.py` — and the `oidc.py` copy had no reader anywhere; it now
+  lives in `_providers.py` and `config.py` imports it, one vocabulary in one
+  place. And the two guards keyed on `sso/oidc.py` failed loudly at the split
+  with a `FileNotFoundError` naming the vanished file, which their own comment
+  says is the intent. Retargeted, then counter-proved by removing
+  `system_scope()` from both routes: the guard fails naming the handler.
+
+  Recorded about check 8: it reported "no guard names a vanished file" while two
+  guards named one. The general guard it delegates to recognises paths built
+  from `parents[n] / "..."`, not bare strings in a data table, so it cannot see
+  those keys. No silent hole — a stale key crashes at runtime by design — but
+  the message is wider than the measurement.
+
+### Added
+
+- **The SSO `id_token`'s issuer was never verified, and the refusal that said
+  so was dead code.** `_verify_id_token` called `pyjwt.decode` with `audience=`
+  and no `issuer=`. Measured on the project's PyJWT 2.15.0: without that
+  parameter any `iss` is accepted; with it, `InvalidIssuerError` is raised. So
+  the `except pyjwt.InvalidIssuerError` branch and its
+  "id_token issuer mismatch." message could never fire — the product announced
+  a protection it was unable to emit, on the authentication path.
+
+  What remained as a binding was `aud == oidc_client_id` and the public key from
+  the provider's JWKS. Not enough: for `google` that JWKS is a single global
+  endpoint hardcoded in `_get_jwks_uri`, and Microsoft serves the same signing
+  keys across tenants. The `iss` claim is precisely what separates one tenant
+  from another.
+
+  **The fix had a trap, and a test holds it.** Azure puts the issuer URL
+  followed by `/v2.0` in `iss`, while the JWKS URL is built from the form
+  without the suffix — so a strict comparison would refuse every valid Azure
+  token while announcing "issuer mismatch", a refusal that looks like a
+  detection and is an outage. PyJWT accepts a sequence (verified), so
+  `_expected_issuers` returns both forms for Azure, both of Google's historical
+  forms, and stays strict for Okta and `custom`. An organisation with SSO
+  enabled and no issuer URL is now refused with a message naming that cause,
+  rather than verified without an issuer — that is the one refusal this series
+  *adds*, deliberately.
+
+  Behaviour change on a live authentication path, taken because no installation
+  is on OIDC today. Counter-proved four ways: `issuer=` removed (the pre-fix
+  state) fails the issuer test; Azure's `/v2.0` form removed fails the Azure
+  test; the empty-issuer tuple verifying anyway fails the configuration test;
+  the trailing slash left in place fails the table test.
+
+- **The four refusals of `policy/scope.py` are now exercised.** `check_scope`
+  is the fence every submitted action crosses — `api/v1/jobs/create.py` through
+  `services/job_admission.py`, and `api/v1/pipelines/trigger.py` directly — and
+  its four refusals are what stops a member of one team acting on another's
+  namespace, cluster, environment or action.
+
+  One property nothing else protected: at `scope.py:36` the cluster is read
+  under **two** keys, `payload.get("cluster") or payload.get("context")`,
+  because kubectl connectors say `context` and the rest of the product says
+  `cluster`. Had either stopped being read, an action aimed at a cluster outside
+  the fence would cross it by using the other key — no error, no trace, no test
+  falling. Both keys are now held, and required to produce the same message.
+
+  Both directions of the `None` rule are held too. `None` in `allowed_*` means
+  *no restriction*, deliberately: a team without a list is not a team without
+  rights, and the opposite would mean adding a team to a user removes their
+  access. Treating `None` as an empty list fails five tests including both
+  witnesses — the inversion closes everything and reads like a hardening.
+
+  And one correction recorded in the file itself: its org-admin test holds the
+  property, not the line. The short-circuit exists twice — at the top of
+  `check_scope` and inside each of the five `UserContext` predicates — so
+  removing the one in `scope.py` alone makes no test fail. Measured by doing it;
+  the digest moved and nothing fell. Both layers must go for the test to fail. A
+  docstring claiming to pin a line it does not pin is exactly the green that
+  measures nothing.
+
+- **The four refusals of `/auth/refresh` are now exercised, 281 → 273 overall
+  with the above, and 37 → 29.** That endpoint keeps a session alive and it authenticates nothing
+  beforehand — the token presented *is* the identification — so its four
+  refusals are all that separates the call from issuing a token to anyone.
+
+  Two of them carry a security property rather than a politeness.
+  `login.py:165` checks `data.get("type") != "refresh"`, which is what stops an
+  access token being spent as a refresh token: without it a thirty-minute token
+  exchanges for a fresh one indefinitely, so it is worth as long as its
+  signature rather than thirty minutes. The test presents a real access token,
+  the one the product hands out at every login. And `login.py:203` compares the
+  password-hash fingerprint `create_refresh_token` embeds — there is no
+  revocation list, so that comparison is the **only** mechanism by which
+  changing a password closes the sessions already open.
+
+  Counter-proved four ways, and the fourth is the one worth having: comparing
+  the fingerprint backwards — closing *every* session instead of the stale ones
+  — fails the positive witness at the same time. Closing too much is a defect
+  too, and no test that only checks the refusal would see it.
+
+  The file's fifth refusal is deliberately left alone: it already has a test,
+  acquired on 02/10 when it turned out **no session could be renewed on a Helm
+  installation** — the user read went out without system scope, matched no
+  branch of the ADR 0047 policy, returned zero rows, and the server blamed the
+  account for a perfectly valid token.
+
+- **The seven refusals of `app/auth.py` are now exercised, 288 → 281 and
+  44 → 37.** That file is not one file among others: it is the dependency every
+  protected route mounts, by security invariant 1 —
+  `APIRouter(dependencies=[Depends(get_current_user)])`. None of its seven
+  refusals had its message named by any test, so if one of them had stopped
+  refusing, nothing in the suite would have fallen.
+
+  Each test calls the function and checks both the code and the message, and
+  each carries a positive witness — a `developer`, an org admin, a service
+  account, a token that resolves — without which a function refusing everyone
+  would pass all seven. Counter-proved by disarming each guard in turn: the two
+  `decode_token` branches swapped, signature verification turned off, anonymous
+  access made unconditional, both role doors neutered, the API token's
+  `expires_at` condition removed, the `is_active` filter removed. Seven
+  mutations, seven named failures.
+
+  Two findings while writing them. The "token missing" refusal **does not fire
+  in development mode** — `_authenticate` returns `UserContext.anonymous()`
+  there, which is the warning every log in this repository prints — and the
+  suite runs in `development`, so a test written without noticing observes no
+  refusal at all. The test now holds both halves, and the second is the one that
+  protects something: were the `app_env` comparison to break, production would
+  authenticate without a token, silently. `staging`, `prod`, `dev`, `test` and
+  the empty string are all checked to refuse.
+
+  And **the file committed the very evasion it documents.** Its first version
+  quoted, in quotes, to warn against it, the exact message used as the ratchet's
+  gaming example. The quotation was enough: the count fell from 288 to 271 for
+  seven tests, the other ten being the sites carrying that message. Measured by
+  comparing the count with and without the file. The quotation is gone, the
+  budget falls by seven rather than seventeen, and both files now record why —
+  it is the sharpest demonstration that this ratchet measures a string, not
+  coverage.
+
+- **A ratchet on the service layer, which nothing was counting — and it is not
+  a volume cap.** `api/` and `workers/` each had one; `services/`, the
+  destination of the ADR 0049 refactor, had none. Measured by commit date:
+  `services/` held **58 queries across 16 files** on 12/09 and **336 across
+  55** today. The ADR's own Consequences section says that growth is "the
+  expected shape", so a budget forbidding any rise would turn the refactor's
+  success into a test failure. This one asks a rise to be **justified** — by
+  naming the origin layer whose budget fell by as much in the same commit —
+  while the second property can only fall.
+
+  Writing it exposed four blind spots in the two existing ratchets, 74 of the
+  336 queries, 22% of the real figure:
+
+  - **`self._db` — 43 queries in 9 files.** `\bdb\.` matches inside
+    `self.db.` because the dot is a word boundary, but not inside `self._db.`
+    because `_` is a word character. Nine files read exactly zero under the
+    worker predicate while executing queries, led by `pricing_service.py` (9)
+    and `cluster_rate_service.py` (8). The same shape as the `sess` undercount
+    of the same day, one spelling further.
+  - **`refresh` — 31 calls, a SELECT each**, in no method list in the
+    repository.
+  - **`query` — the legacy ORM API, and the worst of the four.**
+    `rollback_service.py:45` and `:83` run `db.query(Memory).filter(...)
+    .first()`. The file contains no `select(` at all, so it escapes the route
+    ratchet's strict predicate *and* its broad one — the predicate written
+    precisely to catch a statement built in one place and run in another. Both
+    existing ratchets classify that file as holding no SQL.
+  - **`get` qualified by receiver — 12 queries.** The worker ratchet counts
+    `get` in its budget but excludes it from its receiver guard, for a sound
+    reason: 205 `.get(` calls here across 62 receivers, of which 12 are on a
+    session. A session spelled anew that queried only through `.get(` would
+    escape that budget *and* that guard. A dedicated test closes it.
+
+  The second property is the one that can only fall: **an object whose name
+  promises a computation does not query.** Five offenders, 25 queries —
+  `compliance_checker.py` alone holds 16, including a raw
+  `SELECT version_num FROM alembic_version` at line 470, on Alembic's migration
+  table, from a compliance service. Five files of the same family hold zero,
+  which is what makes the rule tenable rather than pious: `job_admission.py`
+  carries the eight admission gates of `POST /jobs`, extracted from a 303-line
+  route, without a single query.
+
+  What no call-based predicate can see is written in the docstring rather than
+  papered over: `erasure_service.py:114` is one written site and ~47 statements
+  (a loop over the 47 `org_id`-bearing tables); `audit.log_action()` makes four
+  round trips from call sites counted as zero; `channel_service.py:440` opens a
+  second psycopg2 session inside an async service; nested `selectinload` fans
+  out; and lazy loading in the five synchronous files issues SELECTs with no
+  call syntax at all.
+
+  Every property was counter-proved by mutating the tree and watching the named
+  test fail — a new query, a removed one, a new session spelling, a session
+  hiding behind `.get(`, SQL added to `job_admission.py`, `compliance_checker.py`
+  renamed out of the perimeter, and a declared `Result` that is not one. The
+  rename is the known way to silence the second property, so a survey guard
+  freezes the perimeter's size and names both the largest offender and the
+  counter-example.
+
+---
+
 ## [0.55.1] — 2026-10-12
 
 ### Fixed
