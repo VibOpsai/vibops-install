@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.55.3] — 2026-10-13
+
+### Fixed
+
+- **`Publish to PyPI` failed at its very first step on its first flight, and
+  both defects were in the workflow I had just written.**
+
+  `actions/checkout` reported `fatal: repository '…/vibops/' not found`.
+  Declaring `permissions` on a job **replaces** the default set rather than
+  adding to it, and the first version carried only `id-token: write` — so the
+  `GITHUB_TOKEN` lost `contents: read`. This repository is private, and GitHub
+  answers 404 rather than 403 for a private repository the token may not see, so
+  a missing permission presented itself as a missing repository. The job died
+  before building anything.
+
+- **And the version/tag check made recovery impossible**, which only shows when
+  you need to recover. On a `workflow_dispatch`, `GITHUB_REF_NAME` is the branch
+  name, so it would compare "main" against "0.55.2" and refuse every time —
+  forbidding the one way out when a tag ships with a broken workflow, which is
+  exactly the situation it created. It is now conditioned on
+  `github.ref_type == 'tag'`, where it protects something: a publication
+  triggered by a tag.
+
+  The other seven tag workflows passed, so `VibOpsai/vibops-mcp` received
+  everything that was waiting — the vendor neutralisation, the sub-total guard
+  and the `oidc.py` split. Only PyPI did not.
+
 ## [0.55.2] — 2026-10-13
 
 ### Added
