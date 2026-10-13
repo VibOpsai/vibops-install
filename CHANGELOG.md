@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **The server announced the MCP library's version, not its own.** Found by
+  speaking MCP to the binary freshly installed from PyPI — `initialize` on
+  stdin, the response read from stdout:
+
+  ```
+  serverInfo {"name": "vibops", "version": "1.30.0"}
+  ```
+
+  `1.30.0` is the version of the `mcp` SDK, while the package was 0.55.3.
+  `FastMCP` has no `version` parameter (its signature in 1.30.0 takes `name`,
+  `instructions`, `website_url`, `icons` and twenty others, not that one); the
+  low-level server accepts one and it defaults to `None`, and that `None` is
+  what makes the library fall back to its own. A client reading it learned
+  nothing about this product. Nothing was broken, which is the problem: a field
+  that exists, is filled, and does not inform.
+
+  The assignment goes through a private attribute for want of a public route, and
+  that is acceptable only because the observable is held by a test:
+  `test_the_announced_version_is_ours.py` queries
+  `create_initialization_options()` — the method the library itself calls to
+  build its answer — rather than the attribute. Counter-proved two ways: removing
+  the assignment restores 1.30.0, and *renaming* the internal does too, because
+  Python accepts any attribute name and raises nothing. A test on the assignment
+  would have passed in the second case.
+
 ## [0.55.3] — 2026-10-13
 
 ### Fixed
