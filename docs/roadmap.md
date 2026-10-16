@@ -456,7 +456,7 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   shape `_query_mig_state` returns, and no A100 has confirmed the node labels behave
   as the connector assumes.
 - [ ] **Filter the tool catalogue per task** — `tools=self._effective_tools` sends all
-  304 definitions on every turn, at three call sites in `agent_service.py`. A cost and
+  318 definitions on every turn, at three call sites in `agent_service.py`. A cost and
   accuracy problem, not a correctness one: tokens spent every turn, and selection
   degrades as the catalogue grows.
 

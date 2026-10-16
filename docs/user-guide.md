@@ -4062,4 +4062,4 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ### Chat Panel
 
-The chat panel (right sidebar) is available from any tab. It provides natural language access to all 308 tools via the VibOps agent. Click the chat icon in the header to open/close.
+The chat panel (right sidebar) is available from any tab. It provides natural language access to all 318 tools via the VibOps agent. Click the chat icon in the header to open/close.

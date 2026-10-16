@@ -62,3 +62,12 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
+
+# ── Where the gateway runs ────────────────────────────────────────────────────
+# On a cluster with GPU nodes, pin it to a pool that runs no GPU workload: the
+# gateway shares the node's root filesystem, and a model cache filling it takes
+# the gateway down with the workload. Uncomment and name your CPU pool.
+# `values.yaml` carries what was measured.
+#
+# nodeSelector:
+#   k8s.scaleway.com/pool-name: my-cpu-pool

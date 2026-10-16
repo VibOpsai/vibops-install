@@ -179,5 +179,35 @@ rbac:
   # passerelle qui pourrait s'accorder des droits n'aurait plus de limite.
   allowWrite: false
 
+# ── Where the gateway runs ────────────────────────────────────────────────────
+#
+# Pin the pod to a pool that carries no GPU workload. Empty means "anywhere",
+# which is right for a cluster whose nodes are interchangeable and wrong for one
+# with GPU nodes.
+#
+# **Why this exists, measured twice.** The gateway shares its node's root
+# filesystem with whatever else lands there. On 05/10/2026, on a Scaleway
+# Kapsule whose root volume is 20 GB whatever the instance type — 16.4 GB
+# allocatable as ephemeral storage — a GPU workload filled it: images 11.1 GB
+# plus the NVIDIA driver 1.3 GB plus a model cache 2.1 GB reached 17.0 of 17.0,
+# seven DiskPressure flips in 3h27, the container killed while `kubectl` still
+# showed `1/1 Running`. The gateway was evicted with it. So it is pinned to a
+# CPU pool, and a model cache belongs on a PVC rather than the root.
+#
+# That pinning had no expression here, so it was patched by hand on the
+# Deployment — and on 16/10/2026 the patch was found naming
+# `pool-par-2-laughing-tereshkova`, a pool deleted since. The pod had been
+# `Pending` for ten days, the gateway silent, the fleet showing the cluster
+# offline, and nothing anywhere said why. A hand patch is lost by a
+# `helm upgrade` or by a pool being replaced, and it is lost quietly.
+#
+#   nodeSelector:
+#     k8s.scaleway.com/pool-name: pool-par-1-distracted-saha
+#
+# Tolerations are deliberately not offered. The need here is to keep the gateway
+# **off** the GPU nodes, and a nodeSelector does that; a toleration would be for
+# putting it on a tainted node, which is the opposite.
+nodeSelector: {}
+
 # ── Extra environment variables ───────────────────────────────────────────────
 env: {}
