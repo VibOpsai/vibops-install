@@ -91,14 +91,14 @@ networkScan:
 # Seconds between two polls for assigned jobs.
 pollInterval: 15
 
-# Connecteurs supplementaires que cette passerelle a le droit d'executer, en
-# plus de ceux qu'`allowlist.py` classe comme etant de site.
+# Extra connectors this gateway is allowed to run, on top of the ones
+# `allowlist.py` classifies as site connectors.
 #
-# `allowed_connectors()` lit VIBOPS_ALLOW_CONNECTORS depuis l'environnement
-# depuis toujours, et un test de connect/ le garantit — mais le chart ne
-# l'exposait pas, donc la seule facon d'elargir etait un `kubectl set env` que
-# le prochain `helm upgrade` effacait sans le dire. Constate le 19/10/2026 en
-# ouvrant KAIConnector sur la passerelle de demonstration.
+# `allowed_connectors()` has always read VIBOPS_ALLOW_CONNECTORS from the
+# environment, and a test in connect/ guarantees it — but the chart did not
+# expose it, so the only way to widen was a `kubectl set env` that the next
+# `helm upgrade` erased without saying so. Found on 19/10/2026 while opening
+# KAIConnector on the demonstration gateway.
 #
 # allowConnectors:
 #   - KAIConnector

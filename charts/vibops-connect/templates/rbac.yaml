@@ -50,22 +50,21 @@ rules:
   - apiGroups: [""]
     resources: ["pods/proxy"]
     verbs: ["get"]
-  # Les files de l'ordonnanceur KAI (NVIDIA Run:ai), et le CRD qui dit s'il est
-  # installe. En lecture seule : KAIConnector observe les files, il n'en ecrit
-  # aucune.
+  # The KAI Scheduler (NVIDIA Run:ai) queues, and the CRD that says whether it
+  # is installed. Read-only: KAIConnector observes queues, it never writes one.
   #
-  # Absentes a la creation du connecteur le 19/10/2026, et le defaut qui en
-  # resultait est exactement celui que ce depot paie le plus souvent : KAI a ete
-  # mesure depuis un kubeconfig d'administrateur, qui peut tout, et jamais
-  # depuis le compte de service du produit, qui ne pouvait pas lire ses files.
-  # Le connecteur passait, l'allowlist autorisait l'action, les tests etaient
-  # verts, et par la passerelle la reponse etait « Forbidden: ... cannot list
-  # resource queues.scheduling.run.ai ». Prouver qu'une integration fonctionne
-  # avec une autre identite que celle du produit ne prouve rien.
+  # Missing when the connector was created on 19/10/2026, and the defect that
+  # followed is the one this repository pays for most often: KAI was measured
+  # from an administrator kubeconfig, which can do anything, and never once
+  # from the product's own service account, which could not list its queues.
+  # The connector passed, the allowlist permitted the action, the tests were
+  # green, and through the gateway the answer was "Forbidden: ... cannot list
+  # resource queues.scheduling.run.ai". Proving an integration works under an
+  # identity that is not the product's proves nothing.
   #
-  # `customresourcedefinitions` est nomme separement parce que `kai_status`
-  # commence par `kubectl get crd queues.scheduling.run.ai` : sans ce droit il
-  # repondrait « pas installe » sur un cluster qui le porte.
+  # `customresourcedefinitions` is named separately because `kai_status` begins
+  # with `kubectl get crd queues.scheduling.run.ai`: without that right it
+  # would answer "not installed" on a cluster that carries it.
   - apiGroups: ["scheduling.run.ai"]
     resources: ["queues"]
     verbs: ["get", "list", "watch"]
