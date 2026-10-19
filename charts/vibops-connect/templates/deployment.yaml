@@ -72,6 +72,10 @@ spec:
             - name: VIBOPS_POLL_INTERVAL
               value: {{ .Values.pollInterval | quote }}
             {{- end }}
+            {{- if .Values.allowConnectors }}
+            - name: VIBOPS_ALLOW_CONNECTORS
+              value: {{ join "," .Values.allowConnectors | quote }}
+            {{- end }}
             {{- if .Values.gateway.hypervisorName }}
             - name: VIBOPS_HYPERVISOR_NAME
               value: {{ .Values.gateway.hypervisorName | quote }}

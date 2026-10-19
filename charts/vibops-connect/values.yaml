@@ -91,6 +91,19 @@ networkScan:
 # Seconds between two polls for assigned jobs.
 pollInterval: 15
 
+# Connecteurs supplementaires que cette passerelle a le droit d'executer, en
+# plus de ceux qu'`allowlist.py` classe comme etant de site.
+#
+# `allowed_connectors()` lit VIBOPS_ALLOW_CONNECTORS depuis l'environnement
+# depuis toujours, et un test de connect/ le garantit — mais le chart ne
+# l'exposait pas, donc la seule facon d'elargir etait un `kubectl set env` que
+# le prochain `helm upgrade` effacait sans le dire. Constate le 19/10/2026 en
+# ouvrant KAIConnector sur la passerelle de demonstration.
+#
+# allowConnectors:
+#   - KAIConnector
+allowConnectors: []
+
 # ── Plusieurs hyperviseurs sur une passerelle ─────────────────────────────────
 # Laisser vide pour n'en declarer qu'un, avec les blocs proxmox/xenOrchestra/
 # vsphere ci-dessous. Avec une liste, chaque entree doit porter un nom distinct :
