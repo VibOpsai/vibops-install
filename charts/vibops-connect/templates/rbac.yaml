@@ -72,6 +72,17 @@ rules:
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list"]
 {{- if .Values.rbac.allowWrite }}
+  # Capping a KAI queue. `patch` only, and only on `queues`: `kai_set_queue_limit`
+  # changes one field of an existing queue and never creates or deletes one, so
+  # `create` and `delete` are deliberately absent — the connector could not use
+  # them, and a gateway should not hold a verb its code cannot exercise.
+  #
+  # Inside allowWrite because it is a write: a gateway deployed for observation
+  # only keeps reading the queues and cannot change them, which is the posture
+  # that flag exists to offer.
+  - apiGroups: ["scheduling.run.ai"]
+    resources: ["queues"]
+    verbs: ["patch"]
   # ── Ecriture (rbac.allowWrite) ──────────────────────────────────────────────
   #
   # Volontaire et nomme. Sans ces verbes, VibOps observe et n'agit pas : un
