@@ -71,6 +71,18 @@ rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list"]
+  # Training jobs, read only. `list_training_jobs` discovers which of these
+  # operators is installed from the cluster's own CRDs — already readable above —
+  # and then lists their objects, which needs this.
+  #
+  # The groups are named and the verbs are reads. A gateway has no business
+  # creating or deleting someone's training run: VibOps observes it, prices it
+  # and relates it to its KAI queue, and submission stays with whatever the team
+  # already uses. A group whose operator is not installed simply matches nothing.
+  - apiGroups: ["kubeflow.org", "trainer.kubeflow.org", "ray.io", "x-k8s.io"]
+    resources: ["pytorchjobs", "mpijobs", "tfjobs", "xgboostjobs", "paddlejobs",
+                "jaxjobs", "trainjobs", "rayjobs", "jobsets"]
+    verbs: ["get", "list", "watch"]
 {{- if .Values.rbac.allowWrite }}
   # Capping a KAI queue. `patch` only, and only on `queues`: `kai_set_queue_limit`
   # changes one field of an existing queue and never creates or deletes one, so
