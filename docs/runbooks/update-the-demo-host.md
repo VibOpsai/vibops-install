@@ -1,6 +1,6 @@
 # Updating the demonstration host
 
-_Last updated: 2026-10-11 · v0.54.6_
+_Last updated: 2026-10-21 · v0.57.1_
 
 > **When to use this runbook:** a release has been tagged and the public demo
 > should run it.
@@ -38,6 +38,13 @@ comments and image tags normalised away:
 - **Image tags are not written out.** They are `${VIBOPS_VERSION:-v<old>}` and
   `.env` carries `VIBOPS_VERSION=v<old>`, so step 3 is an edit to `.env`, not a
   `sed` over the compose file.
+
+  The fallback is a trap worth knowing: measured on 21/10/2026, the host's seven
+  fallbacks still read `:-v0.54.2` while `.env` pinned `v0.57.1`. They have never
+  been wrong, because `.env` has always carried the variable — but the day it
+  does not, `docker compose up -d` rolls this host back three minor versions
+  without an error, and the comparison in step 2 reports those seven lines every
+  time, which is how they stopped being read.
 
 `core` still publishes no port — that one held — and a separate
 `vibops_port_fwd` container forwards `127.0.0.1:8000`.
@@ -128,8 +135,14 @@ defects; leave the host's deliberate differences alone.
 
 ### 3. Bump the image tags and apply the fixes you chose
 
+The command below is what the bullet above says: the version lives in `.env`,
+not in the compose file. A `sed` over `docker-compose.yml` — which is what stood
+here until 21/10/2026, contradicting that bullet by four paragraphs — changes
+only the fallbacks and leaves the host on whatever `.env` still pins.
+
 ```bash
-sed -i 's|:v<old>|:v<new>|g' docker-compose.yml
+sed -i 's/^VIBOPS_VERSION=.*/VIBOPS_VERSION=v<new>/' .env
+grep '^VIBOPS_VERSION' .env       # read it back before pulling
 docker compose config -q          # must be silent
 docker compose pull
 docker compose up -d
@@ -162,7 +175,58 @@ still a defect: it is how the `beat` scheduler sat broken across six releases.
 - `APP_ENV=development`, so core's anonymous access is enabled. Caddy only
   exposes the console and two gateway paths, which bounds it — but it is not the
   production posture the manual describes.
-- Core connects as `vibops`, a superuser, so the row level security of ADR 0047
-  does not apply. Core says so on every start, at `warning` level.
+- ~~Core connects as `vibops`, a superuser, so the row level security of ADR 0047
+  does not apply.~~ **No longer true, and nothing here said so.** Measured on
+  21/10/2026 while upgrading to v0.57.1: core announces
+  `Isolation : connecté en « vibops_app », RLS applicable` at `info` level on
+  every start. The role changed under this paragraph at some release between
+  v0.54.6 and v0.57.1, and the runbook kept describing the old posture for two
+  weeks — the step that would have caught it is step 4's
+  `docker compose logs core | grep -i isolation`, which was already in the
+  procedure and whose output nobody compared to this list. Read what that line
+  says rather than trusting this bullet.
 - No Cloudflare Origin CA certificate in `/etc/ssl/cloudflare`, so the
   Cloudflare → origin leg is still in clear — see `origin-tls.md`.
+
+## The host is not the whole demo: two gateways run elsewhere
+
+Everything above updates the Compose host. The GPU part of the demonstration —
+KAI queues, NVLink topology, training jobs — does not execute there. It executes
+in a `vibops-connect` pod on the Scaleway Kapsule cluster, which polls this host
+for jobs. A release that fixes a connector changes nothing visible in the demo
+until that pod is upgraded too.
+
+There are **two** of them on the same physical cluster, registering it under two
+different names, and they are not interchangeable:
+
+| release | namespace | registers as | gateway id | writes |
+|---|---|---|---|---|
+| `connect-demo` | `vibops-demo` | `scw-par` | `05695cd7-…` | `rbac.allowWrite=true` |
+| `vibops-connect` | `vibops-connect` | `scw-par1` | `75321381-…` | default (read only) |
+
+`connect-demo` is the one the demonstration drives. The second belongs to the
+other organisation that coexists on this cluster; it holds no write verb on KAI
+queues, which is the chart default and correct for it.
+
+```bash
+export KUBECONFIG=~/.kube/scw-par1.yaml
+helm upgrade <release> oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
+  --version <chart> -n <namespace> --reuse-values --atomic --wait --timeout 10m
+kubectl get pods -n <namespace> \
+  -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready'
+```
+
+`--reuse-values` keeps the token out of the command line, and `--atomic` returns
+the release to its previous revision if the new pod never becomes ready.
+
+> **A pinned `image.tag` defeats a chart upgrade silently.** On 21/10/2026
+> `vibops-connect` carried `image.tag: v0.52.8` in its values, from its install
+> on 05/10. `helm upgrade --version 0.30.11 --reuse-values` reported *Upgrade
+> complete*, revision 8, chart 0.30.11 — and the pod kept running v0.52.8, same
+> pod name, zero restarts. The chart moved; the image did not. `--reuse-values`
+> reuses a user-supplied tag by design, and the empty-tag fallback to
+> `appVersion` only applies when no tag is set.
+>
+> Read the pod's image after every upgrade, never the Helm output. To unpin:
+> `--set image.tag=` in the same upgrade, after which the release follows the
+> chart's `appVersion` the way `connect-demo` already did.

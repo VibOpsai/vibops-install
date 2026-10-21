@@ -83,19 +83,22 @@ rules:
     resources: ["pytorchjobs", "mpijobs", "tfjobs", "xgboostjobs", "paddlejobs",
                 "jaxjobs", "trainjobs", "rayjobs", "jobsets"]
     verbs: ["get", "list", "watch"]
-{{- if .Values.rbac.allowWrite }}
+{{- $ecrit := .Values.rbac.write | default dict }}
+{{- if or .Values.rbac.allowWrite $ecrit.schedulerQueues }}
   # Capping a KAI queue. `patch` only, and only on `queues`: `kai_set_queue_limit`
   # changes one field of an existing queue and never creates or deletes one, so
   # `create` and `delete` are deliberately absent — the connector could not use
   # them, and a gateway should not hold a verb its code cannot exercise.
   #
-  # Inside allowWrite because it is a write: a gateway deployed for observation
-  # only keeps reading the queues and cannot change them, which is the posture
-  # that flag exists to offer.
+  # The smallest useful write on this chart, which is why it has its own family:
+  # a site that wants queue governance and nothing else grants
+  # `rbac.write.schedulerQueues` and keeps everything below refused.
   - apiGroups: ["scheduling.run.ai"]
     resources: ["queues"]
     verbs: ["patch"]
-  # ── Ecriture (rbac.allowWrite) ──────────────────────────────────────────────
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.workloads }}
+  # ── Ecriture (rbac.allowWrite ou rbac.write.workloads) ──────────────────────
   #
   # Volontaire et nomme. Sans ces verbes, VibOps observe et n'agit pas : un
   # `kubectl scale` ou un `helm upgrade` lance par un job est refuse par l'API
@@ -113,9 +116,6 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
     verbs: ["create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["pods/exec", "pods/portforward"]
-    verbs: ["create"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
     verbs: ["create", "update", "patch", "delete"]
@@ -125,12 +125,23 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
     verbs: ["create", "update", "patch", "delete"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.exec }}
+  # A shell inside a running pod. Its own family because it is a different
+  # capability from deploying one, and a reviewer reads it differently.
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.networking }}
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.namespaces }}
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create"]

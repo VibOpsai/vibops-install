@@ -7,6 +7,242 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.57.1] — 2026-10-21
+
+### Fixed
+
+- **A queue the scheduler does not know is refused, the way an absent scheduler
+  is.** `submit_training_job` checked that KAI was installed and not that the
+  queue existed. A job sent to a misspelled queue was accepted and its pod sat
+  Pending for ever, because the scheduler does not complain about a queue it
+  does not know. The refusal now names the queues that do exist. Found by
+  creating a real `batch/v1` Job on a demonstration cluster while intending to
+  exercise a refusal path; the Job and its namespace were removed and the
+  removal verified.
+
+### Changed
+
+- **`docs/commercial/` is no longer under the public-figures guard.** Three
+  tests and the frozen-archive list are gone. Those documents are not
+  maintained, and the guard's only remaining effect was to oblige someone to
+  retype them: the same two 2-pagers went 366 → 368 → 370 actions in two days,
+  once per release that registered a new action, each edit made because the
+  build had stopped and none because a reader had been misled. What this gives
+  up is written where the tests were — a new commercial document may now quote a
+  figure the product denies, and nothing will say so. `README.md`,
+  `mcp/README.md` and the public site stay checked.
+
+## [0.57.0] — 2026-10-20
+
+### Added
+
+- **Run a training job from VibOps, and prove it was admitted.**
+  `submit_training_job` lands a job on the cluster, and a verification predicate
+  reports what actually happened to it. Pending is UNKNOWN, not DISPROVEN: a pod
+  that has not been scheduled yet has not failed.
+- **Read the training jobs, their queue and their GPU request.**
+  `list_training_jobs` finds the operators present rather than assuming one. On
+  a cluster with none it answers "no training operator installed" and says how
+  many CRDs it looked through, instead of answering an empty list.
+- **Record which tools a turn reached for, and whether they worked.** The
+  training dataset gains an anonymised trajectory per exchange — the shape of
+  each call and its outcome, never its arguments — alongside the existing count.
+  A thumbs-up was the only signal before; a trajectory with verdicts is one that
+  does not need a human.
+
+### Fixed
+
+- **The reward signal never reached storage — two breaks in one path.** 185
+  exchanges collected on the demonstration host, `with_feedback: 0`, after a day
+  of clicking. The console's relay carried no Authorization header, so the
+  agent's `/feedback` answered 401; and the agent then built an unscoped
+  `CoreClient` whose service token carries an empty `org_id`, which core
+  correctly refused with 403 against the exchange's organisation. Both are now
+  held by tests that look at what goes on the wire.
+- **NVIDIA is a vendor, not the rule.** GPU resource names and the queue label
+  were read from the vendor table rather than written for one manufacturer.
+
+## [0.56.9] — 2026-10-20
+
+### Added
+
+- **Cap a queue, so an unbounded exposure can be closed.** `kai_set_queue_limit`
+  writes the cap, reads it back, and refuses in five named cases rather than
+  one. Measured on a real installation: the default queue sat at `quota 0, limit
+  -1` — burst unbounded.
+- **Read the NVLink domain, and refuse to imply one.** `get_gpu_topology`
+  reports the domains a cluster exposes, and reports their absence as absence —
+  not as zero, and not as a number it could not measure.
+
+### Fixed
+
+- **A GB200 was reported as a B200.** The workload detector matches SKUs by
+  pattern, and a pattern contained in another has to be tested after it. A
+  structural test now asserts that ordering for every containing pair, so the
+  next SKU cannot reintroduce it.
+- **The reading now says what it does not contain.** A parent queue has no
+  reserved cost of its own; it reported one.
+- **The tools described themselves in the scheduler's vocabulary, not the
+  operator's.** Four descriptions rewritten.
+- **A chart change was pushed without a version.** The RBAC change shipped under
+  a number that already designated something else.
+
+### Changed
+
+- **CI refuses to republish a chart version instead of overwriting it.**
+  chart-releaser skips an existing version silently, and the `helm push` that
+  follows replaces an OCI tag without a word, so a chart change pushed without
+  moving `version` republished the same number with different contents, in
+  green. It happened to 0.30.0 and 0.30.6. The check runs at the point where the
+  overwrite would happen, because no CI job fetches git history.
+
+## [0.56.8] — 2026-10-19
+
+### Fixed
+
+- **The same quota/limit inversion came back through the other action.** The
+  first fix had been applied to one action's rendering; the phrase now lives in
+  the shared resource summary, and a test asserts that both actions word it
+  identically.
+
+## [0.56.7] — 2026-10-19
+
+### Fixed
+
+- **The figures were right and the table was not.**
+- **The three scheduler actions can now be routed to a cluster.**
+
+## [0.56.6] — 2026-10-19
+
+### Fixed
+
+- **It answered "not installed" about a machine that was not the cluster.**
+- **The organisation's tool policy was never read — a missing slash.** The
+  generic client methods built `/api/v1catalog` and got a 404, which read as "no
+  policy".
+
+### Changed
+
+- **The release-images workflow states a measured wall, not an estimate.** Per
+  image: worker 11m09, core 8m50, connect 5m37, agent 5m03, llm-proxy 3m20,
+  console 3m14.
+- **The day's comments and docstrings were translated to English**, per the
+  repository's language rule.
+
+## [0.56.5] — 2026-10-19
+
+### Fixed
+
+- **The gateway could not read the scheduler's queues, and could not name its
+  cluster.** The product's own service account was missing the RBAC the chart
+  had never granted — invisible for as long as the feature was verified with an
+  administrator's kubeconfig instead of the account the product actually uses.
+
+## [0.56.4] — 2026-10-19
+
+### Fixed
+
+- **Three fields the browser sent and the agent never received.** `cluster`,
+  `gateway_id` and `confirm` were declared at both ends and dropped by the
+  console in the middle, silently, because the model did not declare them. A
+  question about scheduler queues therefore probed the default gateway, and a
+  destructive action an operator had confirmed arrived unconfirmed.
+- **Every answer said "on this cluster" and named no cluster.**
+- **The gateway refused the new connector, and the chart could not open it.**
+- **The connector count stopped measuring the day the scheduler connector
+  shipped.**
+
+### Changed
+
+- **The accessibility scan has a timeout that fits it.** 75 surfaces, measured
+  at 2.8 minutes.
+
+## [0.56.3] — 2026-10-19
+
+### Added
+
+- **Read NVIDIA Run:ai's scheduler queues, and put a price on them.** Measured
+  on a real installation: 6 queues, 4 schedulable, with the reserved cost
+  computed per queue rather than declared.
+
+### Fixed
+
+- **A real installation found two defects the fixtures could not.** Which is the
+  point: a mock validates an action that has no effect.
+
+## [0.56.2] — 2026-10-16
+
+### Fixed
+
+- **The Tool Policy screen now changes what the agent does.** It did not.
+- **A dying SSE stream says why instead of closing in silence**, and "agent
+  unavailable" no longer destroys the evidence of what went wrong.
+- **`deploy_model` failed on every Hugging Face model id**, and a deployment
+  served a model nobody had asked for.
+- **A cluster name is resolved, not rewritten into a kind context.**
+- **Polling a job was blocked as a duplicate call.**
+- **Three frontend defects**, including an overscroll fix that had been aimed at
+  the wrong element.
+
+## [0.56.1] — 2026-10-16
+
+### Fixed
+
+- **`deploy_webapp` reserves the GPUs its schema advertises.**
+- **`deploy_model` can tell the server which model to load.**
+- **Two claims in the demonstration script had become false**, one of which
+  could have bitten during a live demonstration.
+
+## [0.56.0] — 2026-10-16
+
+The largest release of the series, 39 commits, on three fronts.
+
+### Added
+
+- **A migration layer.** Assess a migration from the job that gathered the
+  inventory; decide what migrates from the vSphere inventory; a campaign, which
+  is the plan — waves, cap, window; the executor and the gesture that lets it
+  move; rollback to ESXi with the proof that stops a split brain; five routes;
+  and six agent tools, with three deliberately left out.
+- **The gateway can be pinned to a pool** (chart 0.29.6 → 0.30.0).
+
+### Fixed
+
+- **A cluster holding an L4 and an H100 announced itself as an L4.**
+- **`vme_convert_image` reported a success it had not observed.**
+- **The chain broke at 29 VMs, in two places.**
+- **A campaign's items were readable by the neighbouring tenant.**
+- **Five DAST controls announced a verdict they had never reached**, and the
+  coverage gate was reading through a blind spot and understating by ten points.
+
+### Changed
+
+- **The refusal ratchet of ADR 0052 reached zero**, in three agent waves: 134
+  tests, then 73, then 98, taking the unnamed refusals from 123 to 64 to 6 to
+  none — and five real defects came out of the exercise.
+- **`core/app` and the heaviest guards are in English**, in five passes, along
+  with the ratchet's own blind spots that the first passes exposed.
+
+## [0.55.5] — 2026-10-14
+
+### Fixed
+
+- **A caller with no organisation reached every organisation's tenants routes.**
+  Seventeen sites, up to tenant erasure: `""` is not the system scope, so the
+  comparison was skipped entirely. The agent's own service token carries exactly
+  that.
+- **One message served three status codes** on the recommendations routes,
+  flattening a tenancy refusal into "operation failed".
+
+### Changed
+
+- **No authorization refusal is left without a test**, and the public mirrors
+  now receive a tag along with the content.
+
+## [0.55.4] — 2026-10-13
+
 ### Fixed
 
 - **The server announced the MCP library's version, not its own.** Found by
@@ -33,6 +269,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the assignment restores 1.30.0, and *renaming* the internal does too, because
   Python accepts any attribute name and raises nothing. A test on the assignment
   would have passed in the second case.
+- **The DAST scanner announced an isolation it had never checked.** Its three
+  requests all answered 500 — its synthetic tenants had stopped being uuids —
+  while it reported "cross-org scope isolation verified".
+- **CC8.1 served its own `CompileError` as evidence** in SOC 2 reports, 21 times
+  out of 21, for six months.
+- **A guard asked whether anything publishes, not whether this does.**
+
+### Changed
+
+- **The twenty-one tests excluded from the default suite since April now run**,
+  seven of them having been red the whole time; an excluded marker must now be
+  run somewhere or be declared.
+- **`compliance_checker` becomes a package**, eight checks by family — with ADR
+  0049 amended to say that a service is not split by size, and how one is
+  measured.
+- **The five compliance tests nothing had run since April.**
 
 ## [0.55.3] — 2026-10-13
 

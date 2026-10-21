@@ -192,6 +192,40 @@ rbac:
   # passerelle qui pourrait s'accorder des droits n'aurait plus de limite.
   allowWrite: false
 
+  # Which writes, rather than all of them.
+  #
+  # Measured on 21/10/2026 on a gateway with `allowWrite: true`:
+  # `kubectl auth can-i --list` returned 87 rules, 21 of them carrying a write
+  # verb, granted to the pod as a whole. An operator who wanted one capability
+  # — capping a scheduler queue, say — had to grant all twenty-one, because
+  # `allowWrite` was a single switch. ADR 0054 counted that as one of three
+  # gaps.
+  #
+  # Each family below is granted by `allowWrite: true` (unchanged, so an
+  # existing release keeps exactly what it had) **or** by its own flag. Setting
+  # one family and leaving `allowWrite: false` grants that family alone.
+  #
+  # The three things absent from every family are still absent, and they are the
+  # three that would turn a gateway into a pivot: `secrets`, the RBAC API, and
+  # write on `nodes`.
+  write:
+    # pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs,
+    # configmaps, services, PVCs, and the two scale subresources. What a
+    # deployment or a `kubectl scale` needs.
+    workloads: false
+    # pods/exec and pods/portforward. Separate because a shell inside a running
+    # pod is a different capability from deploying one, and reviewers read it
+    # differently.
+    exec: false
+    # ingresses and horizontal pod autoscalers.
+    networking: false
+    # creating a namespace.
+    namespaces: false
+    # `patch` on the scheduler's queues — what `kai_set_queue_limit` needs, and
+    # the smallest useful grant on this list. One field of an existing queue:
+    # no create, no delete.
+    schedulerQueues: false
+
 # ── Where the gateway runs ────────────────────────────────────────────────────
 #
 # Pin the pod to a pool that carries no GPU workload. Empty means "anywhere",
@@ -221,6 +255,26 @@ rbac:
 # **off** the GPU nodes, and a nodeSelector does that; a toleration would be for
 # putting it on a tainted node, which is the opposite.
 nodeSelector: {}
+
+# ── Egress and ingress ───────────────────────────────────────────────────────
+#
+# Ingress is denied entirely — nothing needs to reach the gateway, it polls
+# outward and this chart ships no Service. Egress stays open minus the
+# link-local range, which is where instance metadata lives on several clouds
+# and where no connector has any business. See the template for why a
+# deny-by-default egress list is not something we can write for someone else's
+# site.
+#
+# Measured on 21/10/2026 from inside a running gateway: arbitrary public hosts
+# on 443 reachable, and the metadata address reachable too, with no
+# NetworkPolicy anywhere on the cluster because this chart shipped none.
+networkPolicy:
+  enabled: true
+  # Cut from the otherwise-open egress. A site that wants a real deny-by-default
+  # posture replaces this with its own list, or disables the policy and ships
+  # its own.
+  egressExcept:
+    - 169.254.0.0/16
 
 # ── Extra environment variables ───────────────────────────────────────────────
 env: {}
