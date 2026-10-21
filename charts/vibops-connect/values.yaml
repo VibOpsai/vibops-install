@@ -256,6 +256,44 @@ rbac:
 # putting it on a tainted node, which is the opposite.
 nodeSelector: {}
 
+# ── What the kernel enforces about this pod ──────────────────────────────────
+#
+# Measured on 21/10/2026 and recorded in ADR 0054: neither the pod nor the
+# container set a `securityContext` at all. The process ran as uid 1000 because
+# the **image** says so, not because the cluster required it — so nothing stopped
+# a privilege escalation at the kernel's level, no syscall filter applied, and
+# every Linux capability the runtime grants by default was still held.
+#
+# This is the chart buying confinement from the kernel, which is the position
+# ADR 0054 takes: the primitives are the kernel's, Kubernetes exposes them here,
+# and the work is declaring them rather than writing a runtime.
+podSecurityContext:
+  # Refuses to start a container whose image would run as root, which turns an
+  # image regression into a failure at admission rather than a silent root pod.
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  # The runtime's default syscall filter. Not a profile we wrote — one the
+  # container runtime maintains, which is the point.
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  # **Off by default, and deliberately.** Turning it on mounts `emptyDir` at
+  # `/tmp` and `/home/vibops`, which is what the measured container needs:
+  # connectors write a temporary kubeconfig through `NamedTemporaryFile` and
+  # helm keeps its cache under HOME. What is *not* measured is whether anything
+  # writes elsewhere under `/app` at runtime, and the failure mode of being
+  # wrong here is a gateway that will not start at a customer site.
+  #
+  # Everything above holds without it, costs nothing, and cannot break a
+  # deployment. This one is a site's decision, taken with its own evidence.
+  readOnlyRootFilesystem: false
+
 # ── Egress and ingress ───────────────────────────────────────────────────────
 #
 # Ingress is denied entirely — nothing needs to reach the gateway, it polls

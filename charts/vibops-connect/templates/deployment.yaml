@@ -20,9 +20,17 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "vibops-connect.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: connect
           image: {{ include "vibops-connect.image" . }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: VIBOPS_CORE_URL
@@ -124,11 +132,26 @@ spec:
             - name: {{ $key }}
               value: {{ $val | quote }}
             {{- end }}
-          {{- if .Values.kubeconfig.secretName }}
+{{- $lectureSeule := (.Values.containerSecurityContext | default dict).readOnlyRootFilesystem }}
+          {{- if or .Values.kubeconfig.secretName $lectureSeule }}
           volumeMounts:
+            {{- if .Values.kubeconfig.secretName }}
             - name: kubeconfig
               mountPath: {{ .Values.kubeconfig.mountPath }}
               readOnly: true
+            {{- end }}
+            {{- if $lectureSeule }}
+            # With a read-only root, these two have to come from somewhere.
+            # Measured inside a running gateway on 21/10/2026: `/` was already
+            # unwritable to uid 1000, while `/tmp`, `/app` and `/home/vibops`
+            # were writable — and both `kubectl` and `helm` write there, the
+            # connectors creating a temporary kubeconfig through
+            # `NamedTemporaryFile` and helm keeping its cache under HOME.
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/vibops
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -136,9 +159,17 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.kubeconfig.secretName }}
+      {{- if or .Values.kubeconfig.secretName $lectureSeule }}
       volumes:
+        {{- if .Values.kubeconfig.secretName }}
         - name: kubeconfig
           secret:
             secretName: {{ .Values.kubeconfig.secretName }}
+        {{- end }}
+        {{- if $lectureSeule }}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
+        {{- end }}
       {{- end }}
