@@ -209,15 +209,35 @@ other organisation that coexists on this cluster; it holds no write verb on KAI
 queues, which is the chart default and correct for it.
 
 ```bash
-export KUBECONFIG=~/.kube/scw-par1.yaml
+export KUBECONFIG=<the site's kubeconfig>
 helm upgrade <release> oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
-  --version <chart> -n <namespace> --reuse-values --atomic --wait --timeout 10m
+  --version <chart> -n <namespace> \
+  --reset-then-reuse-values --atomic --wait --timeout 10m
 kubectl get pods -n <namespace> \
   -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready'
 ```
 
-`--reuse-values` keeps the token out of the command line, and `--atomic` returns
-the release to its previous revision if the new pod never becomes ready.
+`--atomic` returns the release to its previous revision if the new pod never
+becomes ready, and neither flag puts the token on the command line.
+
+> **`--reset-then-reuse-values`, not `--reuse-values`, and this was learned by
+> breaking it.** `--reuse-values` hands the template the previous release's
+> computed values — in which a key the chart has just invented does not exist.
+> On 21/10/2026 the first upgrade to a chart that had gained a `networkPolicy`
+> block failed outright:
+>
+> ```
+> Error: UPGRADE FAILED: templates/networkpolicy.yaml:1:14
+>   executing … at <.Values.networkPolicy.enabled>:
+>   nil pointer evaluating interface {}.enabled
+> ```
+>
+> The template was made nil-safe, but the deeper problem is not a template bug:
+> with `--reuse-values`, **a new default never applies**. The `securityContext`
+> added in chart 0.31.2 would have shipped and silently done nothing — green,
+> and measuring nothing. `--reset-then-reuse-values` takes the chart's defaults
+> first, then the release's own values, then anything on the command line, which
+> is what an upgrade should mean.
 
 > **A pinned `image.tag` defeats a chart upgrade silently.** On 21/10/2026
 > `vibops-connect` carried `image.tag: v0.52.8` in its values, from its install

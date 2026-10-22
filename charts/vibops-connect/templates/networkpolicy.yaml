@@ -1,4 +1,5 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy | default dict }}
+{{- if ne $np.enabled false }}
 # Measured on 21/10/2026, from inside a running gateway: a TCP connection to
 # arbitrary public hosts on 443 succeeded, and so did one to the link-local
 # address that carries instance metadata on several clouds. No NetworkPolicy
@@ -24,6 +25,19 @@
 # enforced depends on the CNI, which is the customer's choice — which is an
 # argument for shipping the policy, not for omitting it: a policy the CNI
 # ignores changes nothing, and one it honours closes a real path.
+# **Why the nil-safe form, measured the hard way.** The first version of this
+# template read `.Values.networkPolicy.enabled` directly. On 21/10/2026 the very
+# first `helm upgrade --reuse-values` against an existing release failed with
+# `nil pointer evaluating interface {}.enabled`: Helm reuses the previous
+# release's values, where a key this chart had just invented does not exist. The
+# upgrade was refused rather than applied, which is the correct failure — but it
+# would have refused at every customer site too.
+#
+# So absence is read as the chart's own default, enabled, rather than as nil.
+# A site that wants it off sets `networkPolicy.enabled: false` explicitly, and
+# `ne $np.enabled false` honours that while an upgrade that never mentioned the
+# key still gets the policy. Same reasoning for `egressExcept`: an upgraded
+# release that never set it still loses the metadata range.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -50,7 +64,7 @@ spec:
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
-            {{- with .Values.networkPolicy.egressExcept }}
+            {{- with $np.egressExcept | default (list "169.254.0.0/16") }}
             except:
               {{- toYaml . | nindent 14 }}
             {{- end }}

@@ -7,7 +7,105 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **An upgrade from a release that predates a chart key no longer fails.**
+  `helm upgrade --reuse-values` hands the template the previous release's
+  computed values, in which a key the chart has just invented does not exist.
+  The first upgrade to 0.31.3 failed outright — `nil pointer evaluating
+  interface {}.enabled` — refused rather than applied, and it would have
+  refused at every customer site. Chart 0.31.4 reads the block nil-safely, and
+  absence now means the chart's own default rather than nil, so an upgrade that
+  never mentioned `networkPolicy` still gets the policy.
+
+  The deeper problem is not the template: with `--reuse-values` a **new default
+  never applies at all**, so the `securityContext` added in 0.31.2 would have
+  shipped and silently done nothing. The runbook now says
+  `--reset-then-reuse-values`.
+
+## [0.57.3] — 2026-10-21
+
+### Added
+
+- **The kernel enforces what the image used to merely assert.** Chart 0.31.2.
+  Neither the pod nor the container carried a `securityContext`: the process ran
+  as uid 1000 because the image said so, not because the cluster required it, so
+  an image regression would have produced a root pod silently, no syscall filter
+  applied, and every capability the runtime grants by default was still held.
+  Now declared — `runAsNonRoot` with uid/gid 1000 and `fsGroup`, a
+  `RuntimeDefault` seccomp profile, `allowPrivilegeEscalation: false`, and every
+  capability dropped.
+
+  `readOnlyRootFilesystem` ships **off**, which is the measurement talking: `/`
+  was already unwritable to uid 1000 inside a running gateway, while `/tmp`,
+  `/app` and `/home/vibops` were writable and both kubectl and helm use them.
+  Enabling it mounts `emptyDir` at the first two, wired so the flag is one word;
+  what is not measured is whether anything writes under `/app` at runtime, and
+  the failure mode of being wrong is a gateway that will not start at a customer
+  site.
+
+## [0.57.2] — 2026-10-21
+
+The three gaps ADR 0054 measured, all in the component customers install on
+their own clusters. Verified afterwards on real hardware: a subprocess that saw
+the gateway token and 25 variables now sees neither and inherits four, and the
+link-local metadata address that accepted a connection now times out.
+
+### Fixed
+
+- **A subprocess no longer inherits credentials it has no use for.** Measured
+  inside a running gateway, through the connectors' own `run_command` rather
+  than the container's declared environment: `VIBOPS_TOKEN` visible, 25
+  variables inherited. One default caused it — `env=None` reaching
+  `create_subprocess_exec`, where None means inherit everything — and every
+  kubectl, helm and git the product ran could read the credential a gateway
+  authenticates to core with, along with every other connector's.
+
+  The environment is now built from three declared layers, with
+  `NEVER_FORWARDED` applied over all of them, so a forbidden name cannot return
+  through a connector, a prefix, the operator passthrough, or an explicit
+  dictionary — four connectors were doing the last of those, each building
+  `{**os.environ, …}`. The distinction that makes it safe rather than merely
+  strict: a binary we launch may read its **own** credentials, because kubectl
+  against EKS execs a plugin that reads `AWS_*` and cutting that would break
+  every cloud site; it may not read another connector's, and around forty such
+  names belong to connectors that speak HTTP from Python and launch nothing.
+
+### Added
+
+- **A gateway grants one capability rather than all of them.** Chart 0.31.0.
+  `kubectl auth can-i --list` returned 87 rules on a gateway's service account,
+  21 of them carrying a write verb, granted to the pod as a whole — so an
+  operator who wanted queue governance alone, one `patch` on one resource, had
+  to grant all twenty-one. `rbac.write` now names five families: workloads,
+  exec, networking, namespaces, schedulerQueues. `allowWrite: true` still grants
+  exactly what it granted, asserted against the list measured before the split.
+- **The chart ships a NetworkPolicy.** There was none anywhere on the cluster
+  because the chart shipped none, and the pod could open a connection to any
+  public host and to the link-local metadata address. Ingress is now denied
+  entirely — nothing needs to reach a gateway, it polls outward — and egress
+  stays open minus that range. Deny-by-default egress is deliberately *not*
+  shipped: a gateway reaches a vCenter, a BMC or a cloud API at addresses the
+  customer chooses, and a list we wrote would be wrong at the first site and
+  would fail as a network fault rather than a configuration one.
+
+### Changed
+
+- **The demo host runbook says what v0.57.1 actually measured.** Core no longer
+  connects as the `vibops` superuser — it announces `vibops_app`, RLS
+  applicable, and the runbook had claimed the opposite for two weeks while step
+  4 already grepped for that exact line. Step 3 edited `docker-compose.yml` by
+  `sed`, four paragraphs below a note explaining the version lives in `.env`.
+  And a new section: the host is not the whole demo — the GPU part executes in
+  gateway pods elsewhere, there are two of them registering one cluster under
+  two names, and a pinned `image.tag` makes `helm upgrade --reuse-values` report
+  *Upgrade complete* while the pod keeps the old image.
+- **Two ADRs.** 0054, what confines the gateway, measured — written because a
+  vendor announcement raised the question and the useful answer turned out to be
+  about us; amended the same day with what shipped. 0055, an R&D window before a
+  group goes into production, on a fleet that already has its own CLI: four
+  branches, two unknowns that decide between them, and what does not exist on
+  our side listed before what does.
 
 ## [0.57.1] — 2026-10-21
 
