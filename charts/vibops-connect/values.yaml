@@ -89,7 +89,20 @@ networkScan:
   timeoutMs: 500
 
 # Seconds between two polls for assigned jobs.
-pollInterval: 15
+#
+# **Three, not fifteen, and it is a latency decision.** Measured on 22/10/2026:
+# a conversational turn that reaches one tool takes 19 seconds end to end, of
+# which 3-4 are the model and the rest is waiting — this poll and the agent's
+# own. At 15 seconds a fresh install would add up to twelve more per wave, so a
+# question that touches three tools could sit half a minute in queues nobody
+# can see. The demonstration instance has run at 3 for some time; the default
+# had stayed at 15, which means every new site felt five times slower than the
+# one a prospect is shown.
+#
+# The cost of 3 is an HTTP GET to core every three seconds per gateway, which
+# is nothing next to what it buys. A site with hundreds of gateways and no
+# interactive use can raise it.
+pollInterval: 3
 
 # Extra connectors this gateway is allowed to run, on top of the ones
 # `allowlist.py` classifies as site connectors.
