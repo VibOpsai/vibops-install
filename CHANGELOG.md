@@ -7,8 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The agent meters its own model calls.** Every call's tokens — input, cache
+  read, cache write, output — and latency are recorded per request and handed
+  to core's inference logs after the exchange, under `agent_id = "vibops-agent"`
+  and the caller's organisation, so the FinOps agent-usage view now includes
+  the product's own consumption. Priced only when `LLM_USD_PER_MTOK_INPUT` and
+  `LLM_USD_PER_MTOK_OUTPUT` are set; otherwise the row says `unpriced`, never
+  `$0`. Until now the agent's consumption was on no metered path and
+  `inference_logs` held nothing about it. ADR 0057.
+
 ### Fixed
 
+- **The kubectl pass-through runs reads only, at the connector.** `kubectl_exec`
+  was declared "execute a command inside a running pod", marked non-destructive,
+  and implemented as an arbitrary kubectl runner — an operator-role API caller
+  could `kubectl delete` through it with no confirmation, and the MCP verb
+  allowlist never reached the connector. Both pass-throughs now refuse any
+  non-reading verb before a process starts, name the verb, and point to the
+  catalogued action; the catalogue entry says what the code does. ADR 0056.
 - **An upgrade from a release that predates a chart key no longer fails.**
   `helm upgrade --reuse-values` hands the template the previous release's
   computed values, in which a key the chart has just invented does not exist.

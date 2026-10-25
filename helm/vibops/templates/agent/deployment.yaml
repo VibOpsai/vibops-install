@@ -50,6 +50,17 @@ spec:
                 secretKeyRef:
                   name: {{ include "vibops.fullname" . }}-core
                   key: JWT_SECRET_KEY
+            # The agent hands its own model usage to core's internal ingestion
+            # endpoint (ADR 0057), which checks this shared key. Same source
+            # as the JWT secret, for the same reason: one value, one owner.
+            # Measured on 25/10/2026: the Compose install passes it through
+            # `.env`; this chart did not pass it at all, so every hand-off would
+            # have been refused with a 401 and the cost never measured.
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops.fullname" . }}-core
+                  key: INTERNAL_API_KEY
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
           volumeMounts:
