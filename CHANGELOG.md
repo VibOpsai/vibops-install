@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.58.0] — 2026-10-25
+
 ### Added
 
 - **The agent meters its own model calls.** Every call's tokens — input, cache
@@ -20,6 +24,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The internal inference-log batch writes under the system scope.** A
+  service caller carries the shared key and no tenant, so row level security
+  refused every row — measured on the demonstration instance the first time
+  the agent handed over its usage. The llm-proxy had been refused the same
+  way since RLS landed, silently; the table was empty for that reason.
 - **The kubectl pass-through runs reads only, at the connector.** `kubectl_exec`
   was declared "execute a command inside a running pod", marked non-destructive,
   and implemented as an arbitrary kubectl runner — an operator-role API caller
