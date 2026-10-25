@@ -1456,18 +1456,20 @@ The Tool policy table lists all 258 actions across every registered connector. E
 | **Risk** | A red `⚠ destruct.` badge for actions that modify or delete infrastructure. |
 | **Confirmation** | Blue toggle — ON means the agent will pause and ask before executing. |
 | **Approval** | Amber toggle — ON means an external approval notification is sent before execution. |
+| **Writes** | Shown only for the two pass-through actions (`run_kubectl`, `kubectl_exec`). ON by default: a write (delete, apply, scale, label, drain, …) passes after confirmation, is audited, and runs **without verification** — the catalogued action for the same change carries a proof. Turn it OFF to keep the command to reads only for your organisation. |
 
 **To configure an action:**
 
 1. Admin → **Tool policy** sub-tab
 2. Use the search field or the **All / Active overrides / Destructive** filters to find the action
-3. Click the **Confirmation** or **Approval** toggle to enable/disable
+3. Click the **Confirmation**, **Approval** or **Writes** toggle to enable/disable
 4. Changes apply immediately — no restart needed
 
 **Behavior of overrides:**
 
 - Overrides are **per-org** — your configuration does not affect other tenants
 - Overrides are **additive** — you can only raise the safety level, not remove a confirmation that is built into the connector
+- **Writes** is the one exception, and it closes a path rather than raising a gate: a pass-through write always needs confirmation; turned OFF, it is refused by name, and the refusal says why — *this write would pass without verification; the catalogued action would carry one*
 - All changes are recorded in the **Audit** log with the admin's identity and timestamp
 
 **Example policies:**

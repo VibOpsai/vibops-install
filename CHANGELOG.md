@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.59.0] — 2026-10-25
+
+### Added
+- **A pass-through write runs on the organisation's word** (ADR 0058). `run_kubectl` and `kubectl_exec` run writes again, confirmed, audited and without verification — open by default — unless the organisation turned them off in its tool policy (`allow_writes`, a *Writes* toggle in the console on those two rows only, `PATCH /api/v1/catalog/{action}`). The policy engine refuses a write by name when it is off — *this write would pass without verification; the catalogued action would carry one* — asks for confirmation once allowed, audits it, and grants it on the job in a column of its own (`jobs.policy_grants`). Every executor merges that grant into the payload under a reserved key after dropping whatever the caller wrote there, so a grant forged in a payload, a trigger or a pipeline step buys nothing; the connector lifts its bound on that grant alone and marks the result as unverified. The MCP `run_kubectl` tool drops its own verb list and relays the engine's answer, with a `confirmed` argument. Migration `7d3e9b2c4a61`.
+- **Node maintenance, metadata, manifests and config, catalogued with their proof** (ADR 0059). Nine Kubernetes writes — `cordon_node`, `uncordon_node`, `drain_node`, `label_resource`, `annotate_resource`, `apply_manifest` (server dry-run and diff with `dry_run: true`), `set_configmap`, `set_secret_value` — each destructive with a preview and a declared post-action proof, plus `exec_in_pod`, a diagnostic inside a container bounded to a named list of read-only binaries (no shell, nothing that writes). Five reads serve as proofs — `get_node`, `get_resource`, `get_configmap`, `get_secret_keys`, `get_manifest_status` — and tell *not found* apart from *could not look*; eight predicates judge them in the agent. A secret value travels to kubectl on stdin only and never appears in a result, a log or a preview.
+
 ## [0.58.0] — 2026-10-25
 
 ### Added

@@ -1077,8 +1077,11 @@ Body fields (all optional):
 |-------|------|-------------|
 | `requires_confirmation` | `boolean \| null` | Override confirmation flag; `null` removes the override |
 | `requires_external_approval` | `boolean \| null` | Override approval flag; `null` removes the override |
+| `allow_writes` | `boolean \| null` | Pass-through actions only (`run_kubectl`, `kubectl_exec`): may the command write — confirmed, audited, without verification. Open by default; `false` keeps the command to reads only for the org. `400` on any other action. |
 
 Returns the full `ToolEntry` object with updated values and `"overridden": true`.
+
+`ToolEntry` carries `pass_through` (the action runs what it is handed) and `allow_writes` — `null` for every action that is not a pass-through, the organisation's current decision otherwise.
 
 ---
 
