@@ -1454,7 +1454,7 @@ The Tool policy table lists all 258 actions across every registered connector. E
 |--------|-------------|
 | **Action** | The action name (monospace). A yellow `override` badge appears if your org has an active policy override. |
 | **Risk** | A red `⚠ destruct.` badge for actions that modify or delete infrastructure. |
-| **Confirmation** | Blue toggle — ON means the agent will pause and ask before executing. |
+| **Confirmation** | Blue toggle — ON means the agent will pause and ask before executing. ON by default on every destructive action since v0.62.0 (ADR 0062); before that the agent asked only for 32 of them. |
 | **Approval** | Amber toggle — ON means an external approval notification is sent before execution. |
 | **Writes** | Shown only for the two pass-through actions (`run_kubectl`, `kubectl_exec`). ON by default: a write (delete, apply, scale, label, drain, …) passes after confirmation, is audited, and runs **without verification** — the catalogued action for the same change carries a proof. Turn it OFF to keep the command to reads only for your organisation. |
 
@@ -1468,7 +1468,8 @@ The Tool policy table lists all 258 actions across every registered connector. E
 **Behavior of overrides:**
 
 - Overrides are **per-org** — your configuration does not affect other tenants
-- Overrides are **additive** — you can only raise the safety level, not remove a confirmation that is built into the connector
+- **Confirmation** can be turned on for any action, and off for a destructive one. Off, the agent no longer asks in chat and answers the platform's own `confirmed` gate itself, on your organisation's behalf — the gate itself stays: every other caller (API, SDK, MCP, triggers) still has to confirm
+- A `confirmed: true` written by the model never lifts the pause: only your confirmation of the turn, or your organisation's decision to ask nothing, does (ADR 0062)
 - **Writes** is the one exception, and it closes a path rather than raising a gate: a pass-through write always needs confirmation; turned OFF, it is refused by name, and the refusal says why — *this write would pass without verification; the catalogued action would carry one*
 - All changes are recorded in the **Audit** log with the admin's identity and timestamp
 

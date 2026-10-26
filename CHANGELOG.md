@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.62.0] — 2026-10-26
+
+### Fixed
+- **Confirmation in chat follows the catalogue, and the model's word never counts** (ADR 0062). Measured on 26/10/2026 on the demonstration agent: of 107 destructive actions, the agent paused on the 32 named in a hand-maintained list and on none of the other 75 — `ray_submit_job`, `ray_node_maintenance`, `drain_node` among them — and every destructive call the model made carried a `confirmed: true` it had written itself, which the gate read as the operator's. Now `GET /api/v1/catalog` reports every destructive action as requiring confirmation unless the organisation turned it off (the console's *Confirmation* toggle shows ON on those rows), the agent reads that merged decision for every action, strips any `confirmed` the model wrote before judging a call, and puts the engine's flag back only on the operator's confirmation or when the organisation asks nothing for that action. The policy engine is unchanged: a destructive action still needs `confirmed` from every caller.
+
 ## [0.61.1] — 2026-10-26
 
 ### Added
