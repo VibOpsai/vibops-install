@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.61.1] — 2026-10-26
+
+### Added
+- **A Ray node's maintenance, end to end** (ADR 0061 §6). `ray_node_maintenance` cordons a node that carries Ray pods, deals with the jobs of the clusters it carries as asked (`jobs`: refuse by default, wait, or stop), drains it so KubeRay re-creates the workers elsewhere, and is proven by `ray_node_maintenance_status`: node cordoned and empty, every Ray cluster whole again (UNKNOWN while workers land elsewhere). Refused by name when the node carries a Ray head unless `allow_head`, and when jobs run unless told what to do with them. `ray_node_maintenance_end` uncordons, with its proof. Needs the chart's `nodes` and `ray` families.
+
 ## [0.61.0] — 2026-10-26
 
 ### Added
