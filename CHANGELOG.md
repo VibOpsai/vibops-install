@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.60.1] — 2026-10-26
+
+### Fixed
+- **Two pieces of evidence the tool filter was missing** (ADR 0060, found before the first deployment). An organisation's stored secrets now count: a secret named after a platform or one of its keys (`scaleway_api_key`, `outscale-prod`) configures that connector for the organisation, since seven of the sixteen connectors take their credentials in the payload through `@secret:NAME`; names only, values never read. And `SLURM_DEMO_MODE` configures Slurm — a demo without a cluster is a Slurm the operator chose, and the demonstration scenarios depend on it.
+
 ## [0.60.0] — 2026-10-26
 
 ### Added
