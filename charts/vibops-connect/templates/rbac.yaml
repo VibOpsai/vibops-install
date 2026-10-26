@@ -83,6 +83,12 @@ rules:
     resources: ["pytorchjobs", "mpijobs", "tfjobs", "xgboostjobs", "paddlejobs",
                 "jaxjobs", "trainjobs", "rayjobs", "jobsets"]
     verbs: ["get", "list", "watch"]
+  # Ray clusters and Serve applications as KubeRay publishes them (ADR 0061):
+  # the Ray connector reads them to find the head's dashboard service, which
+  # it then reaches through `services/proxy` above. Read-only here.
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters", "rayservices"]
+    verbs: ["get", "list", "watch"]
 {{- $ecrit := .Values.rbac.write | default dict }}
 {{- if or .Values.rbac.allowWrite $ecrit.schedulerQueues }}
   # Capping a KAI queue. `patch` only, and only on `queues`: `kai_set_queue_limit`
@@ -165,6 +171,23 @@ rules:
   - apiGroups: [""]
     resources: ["pods/eviction"]
     verbs: ["create"]
+{{- end }}
+{{- if $ecrit.ray }}
+  # Operating Ray (ADR 0061): scaling a RayCluster is a `patch`; submitting,
+  # stopping and deleting a job go to the dashboard through the API server's
+  # service proxy, which is a POST or a DELETE — `create` and `delete` on
+  # `services/proxy`. That verb reaches any service of the namespaces this
+  # role spans, which is why it is a family of its own and never implied by
+  # `allowWrite`.
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters"]
+    verbs: ["patch"]
+  - apiGroups: ["ray.io"]
+    resources: ["rayjobs"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["create", "delete"]
 {{- end }}
 {{- if $ecrit.secrets }}
   # Secrets (ADR 0059): `set_secret_value` and `get_secret_keys`. Never implied

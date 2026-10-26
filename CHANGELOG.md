@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.61.0] — 2026-10-26
+
+### Added
+- **Ray connector** (ADR 0061). Ten actions on Ray and KubeRay, everything through kubectl: six reads (`ray_list_clusters`, `ray_cluster_status`, `ray_list_jobs`, `ray_get_job`, `ray_job_logs`, `ray_serve_status`) and four writes with their proof (`ray_submit_job`, `ray_stop_job`, `ray_delete_job`, `ray_scale_cluster`). The dashboard is reached through the Kubernetes API server's service proxy — the gateway's own service account, RBAC, the cluster's audit log, no new egress — with the head's service and port read from `RayCluster.status`. Three predicates in the agent: a job admitted (queued is UNKNOWN, not failed), a job stopped, workers matching the request (provisioning is UNKNOWN). Gateway chart 0.31.20: reads on `rayclusters` and `rayservices`, and a named family `rbac.write.ray` (patch rayclusters, create/delete rayjobs, create/delete `services/proxy`), never implied by `allowWrite`. Measured on the demo cluster against Ray 2.52.0 and KubeRay 1.7.1.
+
 ## [0.60.1] — 2026-10-26
 
 ### Fixed

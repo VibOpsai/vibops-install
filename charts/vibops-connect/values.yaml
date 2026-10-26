@@ -250,6 +250,11 @@ rbac:
     # them; the operator who enables this knows it, and the connector never puts
     # a value in a result or a log. Not implied by `allowWrite`, ever.
     secrets: false
+    # `patch` on rayclusters, `create`/`delete` on rayjobs, and `create`/`delete`
+    # on services/proxy — what the Ray connector needs to scale a cluster and to
+    # submit, stop or delete a job through the dashboard (ADR 0061). The proxy
+    # verb reaches any service in scope; not implied by `allowWrite`, ever.
+    ray: false
 
 # ── Where the gateway runs ────────────────────────────────────────────────────
 #
