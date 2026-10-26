@@ -218,9 +218,12 @@ rbac:
   # existing release keeps exactly what it had) **or** by its own flag. Setting
   # one family and leaving `allowWrite: false` grants that family alone.
   #
-  # The three things absent from every family are still absent, and they are the
-  # three that would turn a gateway into a pivot: `secrets`, the RBAC API, and
-  # write on `nodes`.
+  # `allowWrite` still grants none of the three that would turn a gateway into a
+  # pivot: `secrets`, write on `nodes`, and the RBAC API. Since 25/10/2026 the
+  # first two have a named family of their own below — off by default, and
+  # never implied by `allowWrite` — because an operator must be able to drain a
+  # node or set a secret through the product (ADR 0059), and must say so by
+  # name. The RBAC API has no family and will not get one.
   write:
     # pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs,
     # configmaps, services, PVCs, and the two scale subresources. What a
@@ -238,6 +241,15 @@ rbac:
     # the smallest useful grant on this list. One field of an existing queue:
     # no create, no delete.
     schedulerQueues: false
+    # `patch` and `update` on nodes, and `create` on pods/eviction: cordon,
+    # uncordon, drain, label and annotate a node (ADR 0059). Capacity, not a
+    # workload — not implied by `allowWrite`, ever.
+    nodes: false
+    # get/list/watch/create/update/patch on secrets: set_secret_value and
+    # get_secret_keys (ADR 0059). A gateway that can read secrets can exfiltrate
+    # them; the operator who enables this knows it, and the connector never puts
+    # a value in a result or a log. Not implied by `allowWrite`, ever.
+    secrets: false
 
 # ── Where the gateway runs ────────────────────────────────────────────────────
 #

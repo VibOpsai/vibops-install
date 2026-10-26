@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.60.0] — 2026-10-26
+
+### Added
+- **The catalogue an organisation receives is the one its sites configure** (ADR 0060). Sixteen platform connectors declare the environment keys that configure them; every gateway reports on each ping which of the connectors it serves are configured on its site, core keeps the last report (`gateways.connector_status`) and says the same for its own environment in `GET /api/v1/catalog`. The agent derives a tool's owners from the catalogue and withholds a tool only when every owner is reported unconfigured somewhere and configured nowhere — a shared action stays while any owner may have it, platform tools are never touched, and no evidence, an unreachable core or a gateway that predates the report send the full catalogue. What is withheld is named in the prompt with what brings it back. Measured on the real catalogue: a Kubernetes-only organisation receives 263 tools (~39,600 tokens) instead of 480 (~61,200). Migration `4c7a2e8b9d15`.
+- **An inference log keeps the cache split of its prompt** (ADR 0057). Two columns, `cached_prompt_tokens` and `cache_write_tokens`, ingested from the agent (which measured them since 25/10/2026 and could only send the sum) and from the proxy when an OpenAI-compatible backend reports `prompt_tokens_details.cached_tokens`; summed per agent and per day in `GET /api/v1/finops/agent-usage`, listed in `GET /api/v1/finops/inference-logs`, and shown as a *Cached* share in the console's agent usage table. One 88,636-token chat turn on the demo read as paid in full; the share the cache served is now a measurement. Migration `3b8f1c9e2d47`.
+
+### Fixed
+- **Gateway chart 0.31.17: the RBAC the new actions need, granted by name.** Measured on 25/10/2026 through the demo gateway: the workloads family could create a ConfigMap it was not allowed to read, so `set_configmap` and its proof answered Forbidden — the family now reads ConfigMaps too. Two new opt-in families, never implied by `allowWrite`: `rbac.write.nodes` (`patch`/`update` on nodes and `create` on pods/eviction — cordon, uncordon, drain, label, annotate) and `rbac.write.secrets` (get/list/watch/create/update/patch on secrets — `set_secret_value`, `get_secret_keys`). The RBAC API stays absent whatever is enabled.
+
 ## [0.59.0] — 2026-10-25
 
 ### Added

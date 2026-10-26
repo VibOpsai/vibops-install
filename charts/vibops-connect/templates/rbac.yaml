@@ -116,6 +116,14 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
     verbs: ["create", "update", "patch", "delete"]
+  # Reading a ConfigMap, in the family that already writes them. Measured on
+  # 25/10/2026 through the demo gateway: `set_configmap` and `get_configmap`
+  # answered "Forbidden" — the family could create a ConfigMap it was not
+  # allowed to look at, so a set (a read, then a patch) and its proof both
+  # failed. The write was there since the split; the read never was.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
     verbs: ["create", "update", "patch", "delete"]
@@ -145,6 +153,29 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create"]
+{{- end }}
+{{- if $ecrit.nodes }}
+  # Node maintenance (ADR 0059): cordon, uncordon, drain, label, annotate,
+  # taint — `patch` and `update` on nodes, and the eviction subresource a
+  # drain creates. Never implied by `allowWrite`: this family is its own named
+  # grant, because it touches site capacity rather than a workload.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+{{- end }}
+{{- if $ecrit.secrets }}
+  # Secrets (ADR 0059): `set_secret_value` and `get_secret_keys`. Never implied
+  # by `allowWrite` either — a gateway that reads secrets is a gateway that
+  # could exfiltrate them, and the operator who enables this knows it. Reading
+  # is part of it because a set is a read-then-patch, and because the proof of
+  # a set reads the key names back; the connector never puts a value in a
+  # result or a log.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -181,6 +212,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
     verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "replicasets"]
     verbs: ["create", "update", "patch", "delete"]
