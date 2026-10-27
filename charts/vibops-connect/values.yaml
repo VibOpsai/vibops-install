@@ -255,6 +255,10 @@ rbac:
     # submit, stop or delete a job through the dashboard (ADR 0061). The proxy
     # verb reaches any service in scope; not implied by `allowWrite`, ever.
     ray: false
+    # `create`/`delete` on computedomains — what nvlink_create_compute_domain and
+    # nvlink_delete_compute_domain need on a GB200/GB300 NVL72 (ADR 0063). The
+    # reads are in the base role; not implied by `allowWrite`, ever.
+    nvlink: false
 
 # ── Where the gateway runs ────────────────────────────────────────────────────
 #
@@ -345,4 +349,19 @@ networkPolicy:
     - 169.254.0.0/16
 
 # ── Extra environment variables ───────────────────────────────────────────────
+# ── DSX Event Bus (NVIDIA DSX OS AI factory, ADR 0064/0065) ──────────────────
+#
+# Set exchangeUrl to turn on the permanent DSX Flex subscriber: the gateway
+# listens for power-breach alerts on the bus and pushes each verified one to
+# core, which fires this organisation's dsx trigger rules. Off when empty.
+# Keep infraSigningKey and token in a managed secret, as for the hypervisor
+# credentials above.
+dsx:
+  exchangeUrl: ""        # mqtt://host:1883 or mqtts://host:8883
+  infraAgentId: ""       # this site's id in grid/v1/infra/<id>/powerbreach/enforcement (default: vibops)
+  flexJwks: ""           # JSON Web Key Set of the Flex agents' public keys, to verify alerts
+  infraKid: ""           # the kid naming this site's signing key
+  infraSigningKey: ""    # PEM private key that signs the enforcements this site publishes
+  token: ""              # OAuth2 access token for the bus, if the operator assigns one
+
 env: {}

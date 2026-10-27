@@ -124,6 +124,36 @@ spec:
             - name: XO_TOKEN
               value: {{ .Values.xenOrchestra.token | quote }}
             {{- end }}
+            {{- if .Values.dsx.exchangeUrl }}
+            # The DSX Event Bus of the AI factory next to this gateway (ADR
+            # 0064/0065). Set, the gateway keeps a permanent subscriber on the
+            # Flex breach topic and pushes each verified alert to core, which
+            # fires the tenant's dsx trigger rules. The signing key is what lets
+            # this gateway publish an enforcement; keep it in a managed secret
+            # the way you keep the other credentials above.
+            - name: DSX_EXCHANGE_URL
+              value: {{ .Values.dsx.exchangeUrl | quote }}
+            {{- if .Values.dsx.infraAgentId }}
+            - name: DSX_INFRA_AGENT_ID
+              value: {{ .Values.dsx.infraAgentId | quote }}
+            {{- end }}
+            {{- if .Values.dsx.flexJwks }}
+            - name: DSX_FLEX_JWKS
+              value: {{ .Values.dsx.flexJwks | quote }}
+            {{- end }}
+            {{- if .Values.dsx.infraKid }}
+            - name: DSX_INFRA_KID
+              value: {{ .Values.dsx.infraKid | quote }}
+            {{- end }}
+            {{- if .Values.dsx.infraSigningKey }}
+            - name: DSX_INFRA_SIGNING_KEY
+              value: {{ .Values.dsx.infraSigningKey | quote }}
+            {{- end }}
+            {{- if .Values.dsx.token }}
+            - name: DSX_EXCHANGE_TOKEN
+              value: {{ .Values.dsx.token | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.kubeconfig.secretName }}
             - name: KUBECONFIG
               value: {{ printf "%s/config" .Values.kubeconfig.mountPath | quote }}

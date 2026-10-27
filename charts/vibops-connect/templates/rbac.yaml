@@ -89,6 +89,13 @@ rules:
   - apiGroups: ["ray.io"]
     resources: ["rayclusters", "rayservices"]
     verbs: ["get", "list", "watch"]
+  # ComputeDomains (ADR 0063): the NVIDIA DRA driver's objects for Multi-Node
+  # NVLink on a GB200 or GB300 NVL72. Read to list them and to refuse a drain
+  # that would cut a domain under a running job; writing them is the `nvlink`
+  # family below.
+  - apiGroups: ["resource.nvidia.com"]
+    resources: ["computedomains", "computedomaincliques"]
+    verbs: ["get", "list", "watch"]
 {{- $ecrit := .Values.rbac.write | default dict }}
 {{- if or .Values.rbac.allowWrite $ecrit.schedulerQueues }}
   # Capping a KAI queue. `patch` only, and only on `queues`: `kai_set_queue_limit`
@@ -187,6 +194,14 @@ rules:
     verbs: ["create", "delete"]
   - apiGroups: [""]
     resources: ["services/proxy"]
+    verbs: ["create", "delete"]
+{{- end }}
+{{- if $ecrit.nvlink }}
+  # Multi-Node NVLink (ADR 0063): create and delete the ComputeDomain a job
+  # claims to run inside one NVLink domain of an NVL72 rack. Capacity of the
+  # rack, not a workload — never implied by `allowWrite`.
+  - apiGroups: ["resource.nvidia.com"]
+    resources: ["computedomains"]
     verbs: ["create", "delete"]
 {{- end }}
 {{- if $ecrit.secrets }}
