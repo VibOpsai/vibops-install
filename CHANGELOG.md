@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.63.1] — 2026-10-27
+
+### Fixed
+- **The gateway proxy routes `/events` straight to core.** The installer Caddyfile's direct-to-core matcher covered `ping|jobs` but not the `POST /gateways/{id}/events` added in v0.63.0 (ADR 0065), so a DSX Flex breach the gateway pushes would reach the console, which answers 401 to a gateway token. Added `events` to the alternation in all four Caddyfiles. Caught by the root integration suite in CI, not by the pre-commit hook.
+- **The pre-commit hook now runs the root integration suite** (`tests/`) when a change touches `core`, `connectors`, `console`, `connect`, `charts`, `install`, `scripts` or `tests` — the cross-surface tests CI runs and the hook did not, which is how the Caddyfile gap reached a tag. About 70 s more; a documentation-only commit skips it.
+
 ## [0.63.0] — 2026-10-27
 
 ### Added
