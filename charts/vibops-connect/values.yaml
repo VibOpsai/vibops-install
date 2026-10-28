@@ -364,4 +364,16 @@ dsx:
   infraSigningKey: ""    # PEM private key that signs the enforcements this site publishes
   token: ""              # OAuth2 access token for the bus, if the operator assigns one
 
+# ── DPS, NVIDIA Dynamic Power Software (ADR 0066) ────────────────────────────
+#
+# Set host to turn on the DPS tools: the gateway reads power state and applies
+# capping policies through dpsctl against this server — the executing hand for
+# a DSX Flex power_cap hint. Keep accessToken in a managed secret. simulate
+# answers from canned data with no server, for demos. A non-default dpsctl port
+# goes through the generic `env` map below as DPSCTL_PORT.
+dps:
+  host: ""               # the DPS server dpsctl connects to (DPSCTL_HOST)
+  accessToken: ""        # bearer token dpsctl authenticates with (DPS_ACCESS_TOKEN)
+  simulate: ""           # "1" for canned demo answers, no server
+
 env: {}

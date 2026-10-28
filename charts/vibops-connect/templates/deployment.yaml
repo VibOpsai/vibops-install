@@ -154,6 +154,23 @@ spec:
               value: {{ .Values.dsx.token | quote }}
             {{- end }}
             {{- end }}
+            {{- if .Values.dps.host }}
+            # NVIDIA Dynamic Power Software, the hand a DSX Flex power_cap hint
+            # reaches for (ADR 0066). Set, the gateway can read DPS power state
+            # and put a resource group under a capping policy, through dpsctl
+            # against this server. The token is what dpsctl authenticates with;
+            # keep it in a managed secret, as for the other credentials above.
+            - name: DPSCTL_HOST
+              value: {{ .Values.dps.host | quote }}
+            {{- if .Values.dps.accessToken }}
+            - name: DPS_ACCESS_TOKEN
+              value: {{ .Values.dps.accessToken | quote }}
+            {{- end }}
+            {{- if .Values.dps.simulate }}
+            - name: DPS_SIMULATE
+              value: {{ .Values.dps.simulate | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.kubeconfig.secretName }}
             - name: KUBECONFIG
               value: {{ printf "%s/config" .Values.kubeconfig.mountPath | quote }}
