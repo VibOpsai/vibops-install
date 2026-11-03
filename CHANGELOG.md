@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.70.0] — 2026-11-03
+
+### Added
+- **The agent reads the LLM configuration the onboarding wizard stores — per organisation, without a restart.** The wizard's first step writes `llm_provider`, `llm_api_key`, `llm_base_url` and `ollama_base_url` as secrets of the organisation, and until now nothing read them: the agent took its provider and key from the environment alone, and the manual asked for a restart that applied nothing. Measured on 03/11/2026 on a fresh quickstart install — configure the AI in the wizard, skip `.env`, and the agent answered 500 with no body. Now the organisation's secrets win over the environment field by field, read under the agent's scoped service identity, cached sixty seconds per organisation in a bounded cache; any failure to read them leaves the environment in force. `.env` remains the instance default and the way to configure a provider before any organisation exists. `GET /api/v1/agent/config` answers for the caller's organisation and carries `source: "secrets" | "env"`.
+- **A missing key explains itself.** With no key in the environment and none in the secrets, the agent no longer dies in its constructor as a bare 500: the chat answers a 503 in words that name the wizard and `.env`.
+
+### Changed
+- The wizard's note, the manual's §5 and the quickstart's step 3 say what is now true: applied on the next message, no restart, no `.env` edit required.
+
 ## [0.69.0] — 2026-11-03
 
 ### Changed

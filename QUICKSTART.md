@@ -133,7 +133,11 @@ This takes about 30–60 seconds on first run (Docker needs to download the serv
 
 ### Step 3 — Configure your AI provider
 
-Open the file called `.env` that was just created in the `vibops` folder.
+Two ways, pick one. **In the console:** the onboarding wizard that opens on your
+first login asks for the provider and the key in its first step, and the agent
+uses them from your next message — nothing to edit, nothing to restart. **In the
+file:** open the file called `.env` that was just created in the `vibops-install`
+folder.
 
 > **Can't find it?** The file starts with a dot — it may be hidden.
 > - Mac Finder: press `Cmd + Shift + .` to show hidden files

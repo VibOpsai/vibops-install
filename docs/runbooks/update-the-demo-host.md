@@ -221,13 +221,14 @@ with mode 600 and is never printed.
 - `APP_ENV=development`, so core's anonymous access is enabled. Caddy only
   exposes the console and two gateway paths, which bounds it — but it is not the
   production posture the manual describes.
-- **Before upgrading to v0.69.0 or later, add `VIBOPS_DEV_LICENCE=1` to
-  `/opt/vibops/.env`** (or install a key). From that version the unlimited
-  "Development" licence is no longer implied by `APP_ENV=development`: without
-  the flag this host, with its forty-odd gateways, would fall under the 15-day
-  trial — five gateways, and every action refused once the trial anchored on its
-  first start has expired. The flag reaches `core`, `worker` and `beat` through
-  the compose's `env_file`.
+- **An enterprise licence key in `.env`** — `VIBOPS_LICENCE_KEY`, customer
+  "VibOps Demo", valid until 2027-10-01, read on 03/11/2026 from
+  `/api/v1/licence`. A key takes precedence over everything else, so v0.69.0,
+  which stops implying the unlimited "Development" licence from
+  `APP_ENV=development`, changes nothing here: the forty-odd gateways stay
+  under the key. `VIBOPS_DEV_LICENCE=1` is for a demonstration instance that
+  has **no** key; this one does not need it, and the runbook said the
+  opposite for a few hours on 03/11/2026 before the key was read.
 - ~~Core connects as `vibops`, a superuser, so the row level security of ADR 0047
   does not apply.~~ **No longer true, and nothing here said so.** Measured on
   21/10/2026 while upgrading to v0.57.1: core announces
