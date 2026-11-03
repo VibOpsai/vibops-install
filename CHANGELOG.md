@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.68.2] — 2026-11-03
+
+**Do not deploy v0.68.1.** Its `core` and `worker` images carry kombu 5.7.0,
+released that morning, which requires redis-py >= 6.1 and refuses the pinned
+5.2.1 at the first message: every `POST /api/v1/jobs` answered 500 and the
+worker could not reach the broker. v0.68.0 is unaffected (kombu 5.6.2).
+
+### Fixed
+- **`kombu` pinned to 5.6.2** in `core/requirements.txt`. Celery 5.4.0 allows any kombu below 6, so nothing held the transitive dependency; the SLO job — the only CI path that sends a real message, the core suite mocks `.delay()` — went red from the first run of the day with no change to code, runner, Python or any other package, and installing 5.7.0 locally reproduced the `VersionMismatch`. The install smoke test and the E2E pipeline of v0.68.1 failed on the same cause, after the images and the install repository had been published. Lift the pin together with the move of `redis` to 6.x.
+
 ## [0.68.1] — 2026-11-03
 
 Guides and CI only; no product code changed. The images are rebuilt with the
