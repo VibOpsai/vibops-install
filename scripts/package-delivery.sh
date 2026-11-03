@@ -249,7 +249,7 @@ core:
     #     -c "from app.auth import hash_password; print(hash_password('motdepasse'))"
     authPasswordHash: "CHANGEZ_MOI"
     # Licence hors ligne (RS256, verifiee sans aucun appel sortant). Vide =
-    # essai de 14 jours, apres quoi les plafonds de l'essai s'appliquent.
+    # essai de 15 jours, apres quoi les plafonds de l'essai s'appliquent.
     licenceKey: ""
     # Tout le reste — cles de signature, cle de coffre, mots de passe de la base
     # et du broker — est genere a l'installation et conserve pour la vie de la

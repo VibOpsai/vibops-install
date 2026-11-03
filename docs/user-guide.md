@@ -2003,7 +2003,7 @@ The License tab displays the status of your VibOps subscription and the associat
 
 | Information | Description |
 |-------------|-------------|
-| **Plan** | Trial (14 days) / Starter / Growth / Scale |
+| **Plan** | Trial (15 days) / Starter / Growth / Scale |
 | **GPUs under management** | Number of GPUs currently declared vs maximum allowed by your plan |
 | **Users** | Active accounts vs maximum |
 | **Clusters** | Connected clusters vs maximum |

@@ -30,17 +30,17 @@ images:
   core:
     repository: ghcr.io/davidmacamara-boop/vibops-core
     tag: ""
-    digest: "sha256:22bc5ed6679c3fc9a70f173419180cd001bf77d72c0d9507b7aef1a6f4e98c19"
+    digest: "sha256:e54fa4452719db0f3a4f8ddba2179cca05326ce3bd03ce7b543f1846b567c831"
     pullPolicy: IfNotPresent
   agent:
     repository: ghcr.io/davidmacamara-boop/vibops-agent
     tag: ""
-    digest: "sha256:22d5553b211f74a5a1c6994a32835aaaa4d03d5016a507c1b6acee7cb68b9c1e"
+    digest: "sha256:b2f70801d551ce902f4682fb424ed4d9d03975ca1fa89086d2ba6771e7c9ca21"
     pullPolicy: IfNotPresent
   console:
     repository: ghcr.io/davidmacamara-boop/vibops-console
     tag: ""
-    digest: "sha256:55d1c29023883c8cd4f67c9977f48c56a8a7ef209cb0b2386da9888e674bfc60"
+    digest: "sha256:9bab1cd6d2247f42e8c45080735823a2e1facc1f670dd1244a1247b40dfdb773"
     pullPolicy: IfNotPresent
 
 # ── Namespace ─────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ core:
     # since an empty webhook secret accepts any source.
     githubWebhookSecret: ""
     grafanaWebhookSecret: ""
-    # Licence VibOps — laisser vide pour trial 14 jours
+    # Licence VibOps — laisser vide pour trial 15 jours
     # Obtenir une clé : contacter david@vibops.ai
     # La clé est un JWT RS256 signé par VibOps. Aucun secret partagé requis côté client.
     licenceKey: ""

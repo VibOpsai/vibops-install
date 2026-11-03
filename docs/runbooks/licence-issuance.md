@@ -1,6 +1,6 @@
 # Runbook — Issuing a VibOps licence
 
-How a customer gets a licence after the 14-day trial, who can issue one, and
+How a customer gets a licence after the 15-day trial, who can issue one, and
 where the key that signs them lives.
 
 This runbook exists because none of it did. `scripts/onboard-client.sh` pointed
@@ -127,17 +127,29 @@ process start — so restarting reopened fourteen days.
 
 ## 5. What expiry actually does
 
-Checked in exactly three places, all of which return **402**:
+Checked in exactly four places, all of which return **402**:
 
 - creating a gateway
 - creating a user
 - sending an organisation invite
+- creating a job — every action the agent, the MCP server or the API runs
+  (since 03/11/2026; until then an expired trial changed nothing an operator
+  could see)
 
 Everything else keeps running: gateways ping, metrics are stored, energy is
-measured, the console works. **You can no longer add; you can still see.**
+measured, the console works, the history is readable. **You can no longer add
+or act; you can still see.**
 
-That is the right degradation, and it is quiet — nobody notices until someone
-tries to add something. Tell the customer before day fourteen, not during.
+That degradation is quiet — the fleet looks the same, and the first refused
+action is how the expiry is noticed. Tell the customer before day fifteen, not
+during.
+
+Which install gets the trial: every one that carries no key, whatever `APP_ENV`
+says. The unlimited "Development" licence needs `VIBOPS_DEV_LICENCE=1` and is
+ignored in production; the test suite and `core/.env.example` set it, no shipped
+file does. A demonstration instance that runs with `APP_ENV=development` and more
+gateways than the trial allows needs that flag — or a key — before it is
+upgraded to v0.69.0.
 
 The GPU ceiling is separate from expiry and is checked on every heartbeat. Since
 01/10/2026 it reports rather than blocks: metrics are kept, the ping answers

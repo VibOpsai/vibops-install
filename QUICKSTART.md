@@ -750,7 +750,7 @@ Variables marked **auto-generated** are set by `make quickstart` and do not need
 
 | Variable | Default | Description |
 |---|---|---|
-| `VIBOPS_LICENCE_KEY` | _(empty)_ | RS256 JWT licence key — omit for 14-day trial (10 GPUs · 5 users · 5 clusters) |
+| `VIBOPS_LICENCE_KEY` | _(empty)_ | RS256 JWT licence key — omit for 15-day trial (10 GPUs · 5 users · 5 clusters) |
 | `LLM_BASE_URL` | _(empty)_ | Base URL for OpenAI-compatible endpoints (vLLM, Mistral, on-prem) |
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint — change to `http://localhost:11434` for local dev |
 | `JWT_EXPIRE_HOURS` | `24` | Token validity in hours |

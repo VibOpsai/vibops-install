@@ -53,7 +53,7 @@ REDIS_URL=""
 ANTHROPIC_KEY=""
 ADMIN_PASSWORD="vibops-admin"
 SLACK_WEBHOOK=""
-VERSION="${VIBOPS_VERSION:-0.68.2}"
+VERSION="${VIBOPS_VERSION:-0.69.0}"
 NAMESPACE="vibops"
 CHART_REPO="https://davidmacamara-boop.github.io/vibops"
 LICENCE_KEY=""    # JWT RS256 fourni par VibOps — omit pour trial 14j
@@ -126,7 +126,7 @@ echo ""
 info "Organisation : ${ORG}"
 info "Segment      : ${SEGMENT_LABEL}"
 info "Host         : ${HOST}"
-info "Licence      : ${LICENCE_KEY:+fournie}${LICENCE_KEY:-trial 14 jours}"
+info "Licence      : ${LICENCE_KEY:+fournie}${LICENCE_KEY:-trial 15 jours}"
 info "Version      : ${VERSION}"
 info "Namespace    : ${NAMESPACE}"
 [[ "$DRY_RUN" == true ]] && warn "Mode DRY-RUN activé — aucune ressource ne sera créée"
@@ -265,7 +265,7 @@ echo -e "  Segment  : ${CYAN}${SEGMENT_LABEL}${NC}"
 if [[ -n "$LICENCE_KEY" ]]; then
   echo -e "  Licence  : ${GREEN}active${NC}"
 else
-  echo -e "  Licence  : ${YELLOW}trial 14 jours${NC} — contacter david@vibops.ai pour une clé"
+  echo -e "  Licence  : ${YELLOW}trial 15 jours${NC} — contacter david@vibops.ai pour une clé"
 fi
 echo ""
 

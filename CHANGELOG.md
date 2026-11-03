@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.69.0] — 2026-11-03
+
+### Changed
+- **Every install without a key runs the 15-day trial; the unlimited "Development" licence is opt-in.** Until now `_load_licence()` granted it to any process whose `APP_ENV` was not `production`, and a Compose install never sets `APP_ENV`: a prospect's trial was neither limited nor expiring while `make quickstart` announced "trial mode — 14 days". Measured on a fresh quickstart install on 03/11/2026 (`customer=Development, plan=enterprise, expires_at=null`). The bypass now needs `VIBOPS_DEV_LICENCE=1`, is ignored in production with a warning, and no shipped file sets it — the test suite and `core/.env.example` do. `APP_ENV=production` is deliberately not the install default: the console's cookies become `Secure`, which Options B and C over plain HTTP could not log in through; the licence regime no longer depends on it.
+- **The trial lasts 15 days** (`TRIAL_DAYS`), and every document, script and the quickstart epilogue say so.
+- **Expiry stops actions.** It refused new gateways, users and invites and let every action through; `POST /api/v1/jobs` now answers 402 "Licence expired. Renew to run actions." before the admission gates. The product stays readable — fleet, metrics, history — and stops acting. The issuance runbook describes the four refusals.
+
+### Upgrade note
+- **A demonstration instance that runs `APP_ENV=development` with more gateways than the trial allows must add `VIBOPS_DEV_LICENCE=1` to its `.env` (or install a key) before upgrading.** Without it, it falls under the trial's five gateways and an expiry anchored on its first start. The demo host runbook carries the step.
+
 ## [0.68.2] — 2026-11-03
 
 **Do not deploy v0.68.1.** Its `core` and `worker` images carry kombu 5.7.0,

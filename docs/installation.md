@@ -157,7 +157,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.68.2
+  ghcr.io/davidmacamara-boop/vibops-core:v0.69.0
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -215,12 +215,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.68.2 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.68.2 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.68.2 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.68.2 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.68.2 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.2 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.69.0 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.69.0 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.69.0 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.69.0 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.69.0 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.69.0 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -323,15 +323,20 @@ Allow outbound HTTPS (port 443) → your-vibops-server.com
 | Key | Required | Where to get it |
 |-----|----------|----------------|
 | LLM API key | Depends on provider — not needed for Ollama | Claude: [console.anthropic.com](https://console.anthropic.com/settings/keys) · OpenAI: [platform.openai.com](https://platform.openai.com/api-keys) · or your own provider |
-| VibOps licence key | No (14-day trial auto-starts) | david@vibops.ai |
+| VibOps licence key | No (15-day trial auto-starts) | david@vibops.ai |
 
 ---
 
 ## 3. Get a licence
 
-VibOps starts a **14-day trial** automatically, with trial limits: **10 GPU, 5
+VibOps starts a **15-day trial** automatically, with trial limits: **10 GPU, 5
 users, 5 clusters**. No key required — skip to step 3 to install and come back
-here when ready to activate.
+here when ready to activate. The trial applies to every install, whatever
+`APP_ENV` says: until 03/11/2026 a Compose install, which leaves `APP_ENV` at its
+`development` default, ran an unlimited and unexpiring "Development" licence
+while announcing a trial. That licence now needs `VIBOPS_DEV_LICENCE=1`, which
+no shipped file sets. When the trial ends, the product stays readable and stops
+acting: creating a gateway, a user, an invite or a job answers 402.
 
 | Plan | GPU | Users | Clusters |
 |---|---|---|---|
@@ -465,7 +470,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.68.2` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.69.0` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -932,7 +937,7 @@ core:
   secret:
     authPasswordHash: ""               # generate below; empty = auth disabled
 
-    # Licence — leave empty for 14-day trial
+    # Licence — leave empty for 15-day trial
     licenceKey: ""
 
     # ── Email / SMTP (required for password reset in multi-user mode) ──
@@ -1043,7 +1048,7 @@ with a disposable pod that the cluster really does drop what a policy denies.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.68.2 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.69.0 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -1591,7 +1596,7 @@ docker run -d --name vibops-connect --restart unless-stopped \
   -e VIBOPS_CORE_URL="https://vibops.mycompany.com" \
   -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
   -e VIBOPS_TOKEN="kR7…" \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.2
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.69.0
 ```
 
 Those three variables gate start-up: Connect exits immediately without any one
@@ -1935,7 +1940,7 @@ the policies do not constrain, nor on a cluster whose CNI ignores NetworkPolicy.
 
 | Category | Variable | Auto-generated | Required |
 |----------|----------|:--------------:|:--------:|
-| **Licence** | `LICENCE_KEY` | | optional — 14-day trial without |
+| **Licence** | `LICENCE_KEY` | | optional — 15-day trial without |
 | **Database** | `POSTGRES_PASSWORD`, `DATABASE_URL` | ✓ `make quickstart` | |
 | **Security** | `SECRET_KEY`, `JWT_SECRET_KEY`, `VAULT_KEY` | ✓ `make quickstart` | |
 | **Auth** | `AUTH_PASSWORD_HASH` | | ✓ `make hash PASSWORD=…` |
@@ -1967,7 +1972,7 @@ the policies do not constrain, nor on a cluster whose CNI ignores NetworkPolicy.
 | `JWT_SECRET_KEY` | `change-me` | JWT signing key — shared with Agent — **change in prod** |
 | `JWT_EXPIRE_HOURS` | `24` | Access token lifetime in hours |
 | `AUTH_PASSWORD_HASH` | `""` | bcrypt hash — empty disables password auth (dev mode) |
-| `LICENCE_KEY` | `""` | RS256 JWT licence key — omit for the 14-day trial. `VIBOPS_LICENCE_KEY` is accepted as an alias |
+| `LICENCE_KEY` | `""` | RS256 JWT licence key — omit for the 15-day trial. `VIBOPS_LICENCE_KEY` is accepted as an alias |
 | `VAULT_KEY` | `""` | Fernet key for secret encryption — generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `APP_ENV` | `development` | `development` \| `production` |
 | `LOG_LEVEL` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
