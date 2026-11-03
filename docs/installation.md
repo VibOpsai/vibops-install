@@ -157,7 +157,7 @@ stolen key could not make.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/davidmacamara-boop/vibops/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.68.0
+  ghcr.io/davidmacamara-boop/vibops-core:v0.68.1
 ```
 
 The identity flags are not optional decoration. Without them you would be
@@ -215,12 +215,12 @@ Mirror both registries into one of your own, then point the deployment at it.
 ```bash
 # On a machine with network access — copies manifests by digest, no rebuild
 for image in \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.68.0 \
-  ghcr.io/davidmacamara-boop/vibops-agent:v0.68.0 \
-  ghcr.io/davidmacamara-boop/vibops-console:v0.68.0 \
-  ghcr.io/davidmacamara-boop/vibops-worker:v0.68.0 \
-  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.68.0 \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.0 \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.68.1 \
+  ghcr.io/davidmacamara-boop/vibops-agent:v0.68.1 \
+  ghcr.io/davidmacamara-boop/vibops-console:v0.68.1 \
+  ghcr.io/davidmacamara-boop/vibops-worker:v0.68.1 \
+  ghcr.io/davidmacamara-boop/vibops-llm-proxy:v0.68.1 \
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.1 \
   docker.io/library/postgres:16-alpine \
   docker.io/library/redis:7-alpine \
   docker.io/library/caddy:2-alpine \
@@ -465,7 +465,7 @@ bash install.sh --domain vibops.example.com --llm-key sk-ant-xxx
 | Option | Default | Purpose |
 |---|---|---|
 | `--domain` | *(none)* | Domain for the reverse proxy. **Enables automatic HTTPS** — see below |
-| `--version` | latest release | Image tag to deploy, e.g. `v0.68.0` |
+| `--version` | latest release | Image tag to deploy, e.g. `v0.68.1` |
 | `--llm-key` | *(none)* | LLM provider API key. Can also be set later in `.env` |
 | `--llm-model` | `claude-sonnet-5` | Model name, interpreted by the active provider |
 | `--llm-provider` | `claude` | `claude`, `openai`, `ollama` or `nemotron` |
@@ -1043,7 +1043,7 @@ with a disposable pod that the cluster really does drop what a policy denies.
 
 ```bash
 docker run --rm --entrypoint python \
-  ghcr.io/davidmacamara-boop/vibops-core:v0.68.0 -c \
+  ghcr.io/davidmacamara-boop/vibops-core:v0.68.1 -c \
   "from app.auth import hash_password; print(hash_password('yourpassword'))"
 # → 6e243a826c9e1d064c53ef577b5fa733:a5dc8542838e5faf... (salt:hash, scrypt)
 # Paste the whole line, colon included, in authPasswordHash above
@@ -1472,19 +1472,28 @@ four, and called the final button **"Register Gateway"** instead of **Connect**.
 Corrected by driving the console in a browser.
 
 > **Check `vibops.coreUrl` in the generated command before running it.** The
-> console builds that value from the address *you* are using. With the default
-> Helm install the chart creates no ingress, so the console is usually reached
-> through `kubectl port-forward` — and the command then reads
-> `--set vibops.coreUrl=http://localhost:8003`, which no pod can reach. Replace
-> it with the address the gateway will use:
->
-> - same cluster as VibOps: `http://vibops-core.vibops.svc.cluster.local:8000`
-> - a remote site: your public ingress host, e.g. `https://vibops.mycompany.com`
+> console puts there the address *it* reaches core by: the address in your
+> browser when that is not a loopback one, otherwise its own internal URL —
+> `http://core:8000` on a Compose install, the in-cluster service on a Helm
+> install. That value is right for a gateway inside the same network and wrong
+> for a remote site, where it must be the host the gateway will call:
+> `https://vibops.mycompany.com`, or `http://SERVER_IP` on a Compose install,
+> which answers on port 80 through its reverse proxy. The command says so in a
+> comment when the console was opened from `localhost`. Until 01/10/2026 the
+> console used the browser's address even through a `kubectl port-forward`, and
+> printed `http://localhost:8003`, which no pod can reach.
 
-> **The command passes the token as `--set vibops.token=…`**, which leaves it in
-> your shell history and in `helm get values`. Method C below creates a
-> Kubernetes Secret and references it with `vibops.existingSecret` instead;
-> prefer that for anything beyond a test.
+> **The command stores the token in a Kubernetes Secret** (`kubectl create
+> secret … vibops-connect-token`) and passes `vibops.existingSecret`; it does
+> not put the token on the Helm command line, where `helm get values` would keep
+> it readable. Until 01/10/2026 it did, and this paragraph told the reader to
+> prefer Method C for that reason; the two paths now agree.
+
+> **The command leaves the gateway read-only.** `rbac.allowWrite` is `false` by
+> default in the chart, so the gateway comes online and reports, and every
+> action the agent attempts on that cluster is refused by the API server. Add
+> `--set rbac.allowWrite=true` — or one of the `rbac.write.*` families — before
+> running it on a cluster the agent is meant to act on. Method C shows where.
 
 > **The onboarding wizard covers the same ground, and step 1 cannot be skipped.**
 > On a fresh install with no gateway, logging in opens the five-step wizard, and
@@ -1533,6 +1542,7 @@ helm upgrade --install vibops-connect ./charts/vibops-connect \
   --set gateway.clusterName="$SITE_NAME" \
   --set vibops.coreUrl="https://vibops.mycompany.com" \
   --set vibops.existingSecret="vibops-connect-token" \
+  --set rbac.allowWrite=true \
   --wait
 ```
 
@@ -1558,6 +1568,18 @@ empty, every in-cluster install declares `in-cluster`, so the second Kubernetes
 site collides with the first and appears in the fleet with no cluster — its
 metrics arriving all the while. Name it after the site.
 
+**`rbac.allowWrite` decides whether the agent can act on this cluster.** The
+chart's ClusterRole is read-only by default — `get`, `list`, `watch` — so a
+gateway installed without it comes online, reports everything, and sees every
+deploy, scale, restart, delete or drain refused by the API server rather than by
+VibOps. Set `--set rbac.allowWrite=true` for a cluster the agent is expected to
+operate; it adds the write verbs on the resources the agent manipulates and
+never on Secrets or RBAC objects. `rbac.write.workloads`, `rbac.write.exec`,
+`rbac.write.networking`, `rbac.write.namespaces` and
+`rbac.write.schedulerQueues` grant one family at a time instead. Measured on
+21/10/2026 with `kubectl auth can-i --list`: `allowWrite: true` grants 87 rules,
+21 of them carrying a write verb.
+
 ### Method D — Docker, on a host that is not a cluster
 
 Connect does not need Kubernetes. It runs as a plain container anywhere that can
@@ -1569,7 +1591,7 @@ docker run -d --name vibops-connect --restart unless-stopped \
   -e VIBOPS_CORE_URL="https://vibops.mycompany.com" \
   -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
   -e VIBOPS_TOKEN="kR7…" \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.0
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.1
 ```
 
 Those three variables gate start-up: Connect exits immediately without any one

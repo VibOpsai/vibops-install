@@ -9,6 +9,74 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.68.1] — 2026-11-03
+
+Guides and CI only; no product code changed. The images are rebuilt with the
+same sources and a new version string.
+
+### Fixed
+- **The quickstart, corrected from a real run of the public clone** on an Apple Silicon Mac: the clone creates `vibops-install`, not `vibops`; the console is served on port 80 through the reverse proxy, not on 8003 (troubleshooting, Option B and C URLs and the Option C firewall step said 8003, and opened 8000, which listens on the loopback); account creation is `make pilot-create-client` alone — the `make hash` / `AUTH_PASSWORD_HASH` steps targeted a variable the product does not read; `docker compose up -d agent` instead of `restart`, which does not re-read `.env`; the images are amd64 and arm64 since 8 October, not amd64 only; the trial allows 5 clusters, not 2. The install README and the Makefile hints said the same things.
+- **The gateway connection phase, told the same way in the three guides.** The quickstart's section contradicted the console and `docs/connect-quickstart.md` (local chart path and "no public Helm repository", token on the command line, `coreUrl` on port 8000, no `gateway.clusterName`, button names that do not exist). Rewritten on the command the console prints, with what none of the guides said: the chart's ClusterRole is read-only by default (`rbac.allowWrite: false`), so every action the agent attempts is refused by the API server on a cluster that looks connected; and in development mode a gateway stays Online for 24 hours after its last heartbeat (120 s in production). The connect guide and the manual's §6 carry both facts; the manual's two Method A warnings described the console before its 01/10 fix.
+- **A core test drew two `uuid4()` at collection**, giving each process different test ids; `uuid5` on a name instead.
+
+### Changed
+- **CI: the two core passes run side by side**, each on a Postgres tuned for a throwaway database (`fsync=off`, tmpfs), with a 40-minute ceiling per pass; a newer push to main cancels the run it supersedes. A run went from 12–23 minutes to 9–13, bounded by the coverage pass. Four xdist workers were tried, measured at no gain on the runner, and not merged (#56).
+- **A current figure in a maintained document is marked and recomputed**: `<!-- fig:NAME -->` markers, `scripts/update-figures.py` (`--check` for the CI's verdict), and three guards in the public-figures suite. The user guide said 258 and 205 catalogued actions for 441; the API reference said 218 routes for 237. `scripts/update-docs.sh`, which read a sprint tag that no longer exists, is removed.
+- **Roadmap reconciled with the log since 15 October**: seven entries already done ticked with their measurement (post-action verification at 110 of 122 destructive actions proven), the tool-catalogue filter closed as decided differently (ADR 0053/0060/0072), ADR 0045 to 0073 recorded. The two October audits are versioned; the demo host runbook records the upgrade to v0.68.0 and the two gateways that run outside Compose.
+
+## [0.68.0] — 2026-11-01
+
+### Added
+- **Network operations: the Aruba Central and Juniper Mist connectors** (ADR 0073). Two cloud-control-plane connectors — core-side, classified central in the gateway allowlist (ADR 0060) — carry the ADR 0067 blast-radius contract to the network: a destructive network action (a switch-port bounce, a device reboot or move, a factory-reset, a halt, an SSID create/update/delete) resolves at the confirmation gate the clients and downstream devices that port or device serves *right now*, read live from the monitoring API, then proves the effect against the live state. Aruba Central: 10 reads + 7 writes; Juniper Mist: 7 reads + 4 writes + 3 diagnostic utilities. Four predicates join the closed verification set — `port_up`, `device_online`, `device_offline` (a halt's success is the device being off, so it earns its own predicate rather than a false disproof from `device_online`), and `wlan_matches_request` (one action whose proof direction reads its verb) — each reading a shape the connector normalises, so the predicate knows no vendor dialect (Aruba Up/Down, Mist connected/disconnected). The claim is kept precise: an offline network change-impact category exists (Forward Networks, NetBrain, Batfish, HPE's own Mist digital twin); what no incumbent does at the point of action is the live, per-action blast radius inside a governed agent's gate, then proven and audited. Documented in technical-architecture §8.6; connector specs in `docs/`. The reads, contracts and proofs are built and tested; the exact write API paths (Classic vs New Central; Mist device-action endpoints) are confirmed against a vendor sandbox before the writes are trusted in production. The registry instantiates 39 connectors.
+
+## [0.67.0] — 2026-10-31
+
+### Added
+- **Operational memory — recall an action's prior proven outcomes at the confirmation gate** (ADR 0068). A destructive, verified turn writes an `(action, target-shape)` key beside its verdict (`training_exchanges` carries the key), and at the gate the agent reads the org's prior outcomes for that same action and carries them into the preview ("the last two drains here: one proven, one disproven"). The key's shape is value-stripped so the corpus may leave the instance.
+
+### Fixed
+- **The OTEL metrics exporter is shut down** (`setup()`/`shutdown()` with an autouse test fixture) so its non-daemon export thread no longer hangs the pre-commit hook.
+- **The models declare the index and unique constraint the migrations already made**, so the migration drift check passes again.
+
+### Changed
+- Documented the operation state machine and its blast-radius consult in technical-architecture §8.5 (ADR 0067–0070).
+- Dependabot holds `mcp` on 1.x until a deliberate 2.x migration (2.x moved `FastMCP`).
+
+## [0.66.0] — 2026-10-31
+
+### Added
+- **The agent resolves the blast radius at the confirmation gate** (ADR 0067). Before a destructive action that declares an `impact`, the agent reads it and puts what the infrastructure answers into the preview — the operation graph, now consulted at the gate rather than only available as a tool.
+- **The agent's operation is a declared state machine** (ADR 0070): the states and transitions are declared and the live paths proven to honour them (Stage 1), confirm-before-destroy is enforced at the one system chokepoint (Stage 2), and the gate's consults (blast radius, memory) are made explicit (Stage 3).
+
+## [0.65.2] — 2026-10-29
+
+### Added
+- **The operation graph — blast radius from live reads** (ADR 0067). Stage 1 and Stage 2: `describe_node_impact` and `describe_workload_impact`, computed live from the cluster, as a global `impact` contract the catalogue carries — not a per-connector feature (the contract names no connector; connectors fill it).
+- **A behavioural eval harness for the agent** (ADR 0069), checking the operation's invariants deterministically.
+
+### Fixed
+- DSX signing imports `jwt` at module load so it cannot race a cold `cryptography` import.
+
+## [0.65.1] — 2026-10-29
+
+### Security
+- **Closed two audit HIGHs**: a Slurm command-injection path and a credential leak.
+- The CVE gate now scans the DSX transport and crypto dependencies (paho-mqtt, PyJWT, cryptography).
+
+### Changed
+- The maintained docs read 37 connectors, DSX and DPS included.
+- Dependabot version updates for pip and github-actions.
+
+## [0.65.0] — 2026-10-28
+
+### Fixed
+- **A destructive DSX shed without `confirmed` is refused, not a silent no-op** — the gateway enforcement path now requires confirmation like every other destructive action.
+
+## [0.64.0] — 2026-10-28
+
+### Added
+- **A DSX Flex power_cap has an executing hand in DPS** (ADR 0066). The power-cap hint carried by a DSX Flex breach is enforced through `dpsctl` against the resource group's nodes, and proven by reading the applied policy back (`power_policy_applied`): `dpsctl check status` reports allocated policy names, never watts. A repeatable DSX Flex / DPS probe against a real bus accompanies it.
+
 ## [0.63.1] — 2026-10-27
 
 ### Fixed

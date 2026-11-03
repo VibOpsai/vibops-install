@@ -1,6 +1,6 @@
 # Updating the demonstration host
 
-_Last updated: 2026-10-21 · v0.57.1_
+_Last updated: 2026-11-02 · v0.68.0_
 
 > **When to use this runbook:** a release has been tagged and the public demo
 > should run it.
@@ -45,6 +45,12 @@ comments and image tags normalised away:
   does not, `docker compose up -d` rolls this host back three minor versions
   without an error, and the comparison in step 2 reports those seven lines every
   time, which is how they stopped being read.
+
+  **Rewritten on 02/11/2026, during the upgrade to v0.68.0:** the seven fallbacks
+  now read `:-v0.68.0`, so step 2's comparison reports only the deliberate
+  `./static` mount. They will lag again at the next release unless the `sed` on
+  `.env` in step 3 is paired with one on the fallbacks — which is now part of
+  that step.
 
 `core` still publishes no port — that one held — and a separate
 `vibops_port_fwd` container forwards `127.0.0.1:8000`.
@@ -143,6 +149,7 @@ only the fallbacks and leaves the host on whatever `.env` still pins.
 ```bash
 sed -i 's/^VIBOPS_VERSION=.*/VIBOPS_VERSION=v<new>/' .env
 grep '^VIBOPS_VERSION' .env       # read it back before pulling
+sed -i 's/${VIBOPS_VERSION:-v<old>}/${VIBOPS_VERSION:-v<new>}/g' docker-compose.yml   # the fallbacks, so step 2 stays readable
 docker compose config -q          # must be silent
 docker compose pull
 docker compose up -d
@@ -169,6 +176,45 @@ list because they are the ones that silently broke: see above.
 
 Every container must read `healthy`. An `unhealthy` one that answers requests is
 still a defect: it is how the `beat` scheduler sat broken across six releases.
+
+**Measured on 02/11/2026, v0.67.0 → v0.68.0.** No migration in the release; the
+compose drift was the seven fallbacks and the `./static` mount; 59 tables, 45
+gateways and 4 users before and after; `/health` answered `0.68.0` with core
+connected as `vibops_app`; the three public paths answered 200; every container
+`healthy` within 30 s. The disk is the thing to watch: 93% used, 11 GB free,
+with 379 `vibops-*` images on the host, 115 GB of them reclaimable. Nothing was
+pruned — the previous version's images are the rollback.
+
+### 5. The two gateways that run on this host outside Compose
+
+`vibops_connect_demo` (gateway `k3s-live`, organisation VibOps Demo, cluster
+`dc-live`) and `vibops_connect_k3s` (gateway `k3s-hetzner`, the other
+organisation) are plain `docker run` containers with no Compose label — never
+`docker compose up --remove-orphans` on this host. Their kubeconfig points at
+`https://host.docker.internal:6443`, so each must be re-created with
+`--add-host host.docker.internal:host-gateway`; without it the gateway still
+pings core and every kubectl action fails. Both were refreshed to v0.68.0 on
+02/11/2026 with this sequence, identity kept (same gateway id, ping 200):
+
+```bash
+docker pull ghcr.io/davidmacamara-boop/vibops-connect:v<new>
+for c in vibops_connect_demo vibops_connect_k3s; do
+  envf=/root/before-v<new>/$c.env; umask 077
+  docker inspect $c --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^(VIBOPS_|KUBECONFIG=)' > $envf
+  bind=$(docker inspect $c --format '{{index .HostConfig.Binds 0}}')      # /kc-demo:/kubeconfig or /kc:/kubeconfig
+  docker stop $c && docker rename $c ${c}_old
+  docker run -d --name $c --restart unless-stopped --network vibops_vibops_net \
+    --add-host host.docker.internal:host-gateway -v "$bind" --env-file $envf \
+    ghcr.io/davidmacamara-boop/vibops-connect:v<new>
+done
+# verify, then: docker rm vibops_connect_demo_old vibops_connect_k3s_old
+docker exec vibops_connect_demo getent hosts host.docker.internal        # must resolve
+docker exec vibops_connect_demo kubectl --request-timeout=10s get nodes  # must list the k3s node
+docker logs --since 60s vibops_connect_demo | grep -c '/ping "HTTP/1.1 200'
+```
+
+The env file holds the gateway token; it stays under `/root/before-<version>/`
+with mode 600 and is never printed.
 
 ## What this host still carries
 

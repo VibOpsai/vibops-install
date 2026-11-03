@@ -1448,7 +1448,7 @@ Both flags can be active simultaneously: the agent presents the dry-run and wait
 
 **The table**
 
-The Tool policy table lists all 258 actions across every registered connector. Each row shows:
+The Tool policy table lists all <!-- fig:actions -->441<!-- /fig --> actions across every registered connector. Each row shows:
 
 | Column | Description |
 |--------|-------------|
@@ -4058,11 +4058,11 @@ python -c "import secrets; print(secrets.token_hex(32))"
 |----------|----------|---------|
 | **Organization** | Teams, Users, Licence | Org structure, roles, licence management |
 | **Infrastructure** | Clusters, Gateways, Git, CI, Integrations | Connect clusters, configure Git/CI, external integrations (Datadog, SIEM) |
-| **Governance** | Tool Policy, Org Policy, Approvals, Agent Tools | Access control, policy-as-code, approval gates, tool catalog (205 actions) |
+| **Governance** | Tool Policy, Org Policy, Approvals, Agent Tools | Access control, policy-as-code, approval gates, tool catalog (<!-- fig:actions -->441<!-- /fig --> actions) |
 | **Operations** | Notifications, Secrets, Memories | Alert channels, encrypted secrets, agent memory |
 | **Compliance** | Audit, Eval, Data | Immutable audit log, LLM-as-judge evaluation, training dataset |
 | **Security** | SSO/LDAP, API Tokens | Enterprise SSO (OIDC), LDAP/AD integration, API token management |
 
 ### Chat Panel
 
-The chat panel (right sidebar) is available from any tab. It provides natural language access to all 318 tools via the VibOps agent. Click the chat icon in the header to open/close.
+The chat panel (right sidebar) is available from any tab. It provides natural language access to all <!-- fig:agent_tools -->318<!-- /fig --> tools via the VibOps agent. Those are the agent's own tool definitions; at start-up it fetches the catalogue from core and merges in every action it does not already carry, so the <!-- fig:actions -->441<!-- /fig --> catalogued actions of the Tool Policy table are all reachable from the chat. The two figures measure different things and both are recomputed from the code. Click the chat icon in the header to open/close.

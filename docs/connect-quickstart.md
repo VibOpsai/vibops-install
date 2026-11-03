@@ -68,8 +68,9 @@ Four steps, the same for every site.
 
 ### Step 1 — Create the gateway in the console
 
-**Fleet → Gateways → Add gateway.** Give it a name that says where it is
-(`paris-dc1`, `riyadh-edge`), not what it does.
+**Fleet → + Connect Infrastructure → Kubernetes.** Give it a name that says
+where it is (`paris-dc1`, `riyadh-edge`), not what it does. The onboarding
+wizard's step 3 registers a gateway the same way.
 
 The API equivalent:
 
@@ -135,6 +136,20 @@ helm upgrade --install vibops-connect \
   --set vibops.existingSecret="vibops-connect-token"
 ```
 
+**The gateway is read-only until you say otherwise.** The chart's ClusterRole
+grants `get`, `list` and `watch`, and nothing else: `rbac.allowWrite` defaults
+to `false`. A gateway installed as above comes online, reports its nodes, pods
+and GPUs, and every action the agent then attempts — deploy, scale, restart,
+delete, drain — is refused by the Kubernetes API server, not by VibOps. The
+agent reports the refusal, but from the fleet view the site looks perfectly
+connected. Add `--set rbac.allowWrite=true` for a site the agent is expected to
+act on; it adds the write verbs on the resources the agent manipulates, never on
+Secrets or RBAC objects. For one capability rather than all of them,
+`rbac.write.workloads`, `rbac.write.exec`, `rbac.write.networking`,
+`rbac.write.namespaces` and `rbac.write.schedulerQueues` grant them one family
+at a time — see the chart's `values.yaml`. The command the console prints sets
+none of these.
+
 **`gateway.clusterName` is not cosmetic.** A cluster name is the address a job
 is routed to, so the platform refuses a name another gateway in the same
 organisation already declares. Left empty, an in-cluster install declares
@@ -157,7 +172,7 @@ docker run -d --name vibops-connect --restart unless-stopped \
   -e VIBOPS_CORE_URL="https://vibops.example.com" \
   -e VIBOPS_GATEWAY_ID="3f2a…-…-…" \
   -e VIBOPS_TOKEN="kR7…" \
-  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.0
+  ghcr.io/davidmacamara-boop/vibops-connect:v0.68.1
 ```
 
 Those three variables gate start-up. Connect exits immediately without any one
@@ -178,6 +193,13 @@ small subnet, minutes on a large one.
 
 Measured on a kind cluster on 18/09: gateway online in the same second as
 start-up, scan complete 32 seconds later on a /24.
+
+**"Online" is a recent heartbeat, and "recent" depends on the mode.** Core marks
+a gateway online when its last ping is less than 120 seconds old in production,
+and less than 24 hours old in development mode — which is what a Compose install
+runs in unless `APP_ENV=production` is set. In that mode a gateway that stopped
+yesterday is still shown online today; the gateway's own logs, one
+`POST …/ping → 200` per heartbeat, are the evidence to read.
 
 ```bash
 curl -s https://vibops.example.com/api/v1/gateways \

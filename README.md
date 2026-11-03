@@ -36,7 +36,7 @@ cd vibops-install
 make quickstart
 ```
 
-Open **http://localhost:8003** — your VibOps console is ready.
+Open **http://localhost** — your VibOps console is ready, served on port 80 by the bundled reverse proxy.
 
 > Full guide: [QUICKSTART.md → Option A](QUICKSTART.md#option-a--install-on-your-pc)
 
@@ -53,7 +53,7 @@ cd vibops-install
 make quickstart
 ```
 
-Access the console at **http://INTERNAL_SERVER_IP:8003** — accessible to anyone on the internal network. No internet exposure required.
+Access the console at **http://INTERNAL_SERVER_IP** — accessible to anyone on the internal network. No internet exposure required.
 
 GPU clusters connect via outbound polling — no inbound ports needed on the cluster side.
 
@@ -72,7 +72,7 @@ cd vibops-install
 make quickstart
 ```
 
-Share **http://YOUR_PUBLIC_IP:8003** with your team — accessible from anywhere.
+Share **http://YOUR_PUBLIC_IP** with your team — accessible from anywhere.
 
 > Full guide: [QUICKSTART.md → Option C](QUICKSTART.md#option-c--install-on-a-cloud-server)
 
@@ -107,7 +107,6 @@ make quickstart   # First-time setup — creates .env, generates secrets, starts
 make check        # Health check — validates all components
 make up           # Start the stack
 make down         # Stop the stack
-make hash PASSWORD=yourpassword  # Generate bcrypt hash for password setup
 make pilot-create-client ORG="Acme" EMAIL=admin@acme.com PASSWORD=secret  # Provision a client org
 ```
 

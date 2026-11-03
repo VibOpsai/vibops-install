@@ -1,6 +1,6 @@
 # VibOps — Technical Roadmap
 
-_Last updated: 2026-08-31 · v0.38.0_
+_Last updated: 2026-11-02 · v0.68.0_
 
 ## Principles
 
@@ -108,7 +108,7 @@ _Last updated: 2026-08-31 · v0.38.0_
 - [x] Helm chart `helm/vibops` — HPA, PDB, ServiceMonitor, TLS
 - [x] `scripts/package-delivery.sh` — air-gapped delivery package
 - [x] `scripts/onboard-client.sh` — CSP / Enterprise segment-aware (Helm/K8s)
-- [x] `scripts/update-docs.sh` — post-sprint doc bump (version, date, counts, Known limitations)
+- [x] ~~`scripts/update-docs.sh` — post-sprint doc bump (version, date, counts, Known limitations)~~ removed 02/11/2026: it read a `-sprintN` tag that no longer exists and had not run since the sprint era; the figures it bumped are now `scripts/update-figures.py`, and a « Last updated » date moves with the content, not with a script
 - [x] **Sprint 15** — `make pilot-create-client` — provisioning Docker Compose pilot en une commande
 - [x] **Sprint 15** — `docs/runbooks/pilot-runbook.md` — checklist go-live complète
 
@@ -327,6 +327,47 @@ _Last updated: 2026-08-31 · v0.38.0_
 
 **v0.20.0 — 4 issues closed, 12 new tests, 1 new public endpoint, 2 new model columns**
 
+### Hardening, catalogue and agent runtime — ADR 0045 to 0073 (22 Sept → 1 Nov 2026)
+
+Work this file did not record while it was being done. One line per decision; the ADR
+carries the evidence, the CHANGELOG the release.
+
+**Tenancy and data**
+- [x] Tenancy as a database constraint, and isolation the database enforces — 46 of 47 tables under policy, `audit_logs` closed by decision (ADR 0045, 0047) ✓ 22/09/2026
+- [x] Erasure, and what survives it (ADR 0046) ✓ 22/09/2026
+- [x] Backups and retention documented, with the restore nobody has run named as the gap (ADR 0048) ✓ 23/09/2026
+- [x] Work moved out of the routes — the rules apply from now on, the migration is opportunistic (ADR 0049) ✓ 03/10/2026
+- [x] The audit chain forked under concurrency — fixed (ADR 0050) ✓ 04/10/2026
+- [x] The refusal ratchet: every unnamed refusal in the suites named, 123 → 0 in three waves, five real defects found on the way; the authorization family held at zero (ADR 0052) ✓ v0.56.0
+- [ ] Integrating with an Azure-only customer (ADR 0051) — proposed 11/10/2026, not decided
+
+**Hypervisors and migration**
+- [x] A migration layer: assess from the job that gathered the inventory, a campaign (waves, cap, window), the executor and the gesture that lets it move, rollback to ESXi with the proof that stops a split brain, five routes, six agent tools and three deliberately missing ✓ v0.56.0
+
+**Gateway confinement and pass-through**
+- [x] What confines the gateway, measured — three gaps closed the same day: confinement from the kernel, one capability granted, the metadata address closed, no inherited credentials in subprocesses (ADR 0054) ✓ v0.57.2–0.57.3
+- [x] kubectl pass-through runs reads only, bounded where it runs (ADR 0056) ✓ v0.57.12; a write runs on the organisation's word, open by default with the switch to close it (ADR 0058) ✓ v0.59.0
+- [x] Node maintenance, metadata, manifests and config catalogued, each with its proof; gateway chart grants the RBAC by name (ADR 0059) ✓ v0.59.0
+- [ ] An R&D window before a group goes into production, on a fleet that already has its own CLI (ADR 0055) — proposed 21/10/2026, nothing decided
+
+**Schedulers and accelerators**
+- [x] NVIDIA Run:ai (KAI): scheduler queues read and priced, a queue capped, training jobs read and run with admission proven; two defects only a real install could show ✓ v0.56.3–0.57.0
+- [x] NVLink domains read and never implied; a GB200 no longer reported as a B200 ✓ v0.57.0; an NVL72 under Kubernetes — ComputeDomains, and a drain that knows NVLink (ADR 0063) ✓ v0.63.0
+- [x] Ray operated through kubectl and the API server's service proxy; a node's maintenance end to end with one proof, shown on the demonstration cluster (ADR 0061) ✓ v0.61.0–0.62.0
+- [x] DSX Flex: VibOps as Infrastructure Management Agent (ADR 0064), a breach as a push-driven trigger with a permanent subscription (ADR 0065), a `power_cap` with an executing hand in DPS (ADR 0066); both probes repeatable against a real bus ✓ v0.63.0–0.65.0
+- [x] Network ops, stage 1: HPE Aruba Central and Juniper Mist connectors; `aruba_halt` and `aruba_set_wlan` ship with their proofs (ADR 0073, proposed) ✓ v0.68.0
+
+**Agent runtime**
+- [x] The catalogue an organisation receives is the one its sites configure (ADR 0053, 0060) — the closed backlog entry below has the detail ✓ v0.60.0–0.60.1
+- [x] The agent meters its own model calls into core's inference logs, cache split kept (ADR 0057) ✓ v0.57.12–0.60.0
+- [x] The confirmation reaches the connector for every destructive action, not 37 of 90, and does not depend on the model remembering it ✓ v0.57.7–0.57.9; confirmation in chat follows the catalogue, and the model's word never counts (ADR 0062) ✓ v0.62.0
+- [x] The dataset had recorded nothing for thirteen days — fixed; which tools a turn reached for and whether they worked is recorded; the PROVEN rate is readable without SQL ✓ v0.57.0–0.57.6
+- [x] The operation graph: blast radius before an action, from live reads, resolved by the agent at the confirmation gate (ADR 0067) ✓ v0.65.2–0.66.0; operation graph and topology graph are two reads, not one (ADR 0071) ✓ 01/11/2026
+- [x] Operational memory: an action's prior proven outcomes recalled at the confirmation gate (ADR 0068) ✓ v0.67.0
+- [x] A behavioral eval harness for the agent, stage 1 (ADR 0069) ✓ v0.65.2
+- [x] The agent's turn is a declared state machine, enforced at one chokepoint and verified against the live paths (ADR 0070) ✓ v0.66.0
+- [ ] Tool exposure at scale: deterministic hierarchical selection, not agent-driven navigation (ADR 0072) — direction accepted 01/11/2026, not built
+
 ---
 
 ## P1 — Backlog (prioritized)
@@ -345,7 +386,7 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   each fixed in its own commit. Remaining: extracting the loop itself — optional, the
   file is no longer a liability. (14 Sept 2026)
 
-- [ ] **Extend post-action verification to the actions that still lack a proof** —
+- [x] **Extend post-action verification to the actions that still lack a proof** —
   *(24/09: the mechanism itself shipped with ADR 0038 and runs by default; this entry
   described it as absent, which it no longer is. What remains is coverage.)* The agent
   otherwise reports success on a tool's return code: a 200 proves the API accepted the
@@ -427,12 +468,22 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   Pod and not the Deployment, and the readable summary was being discarded in favour
   of the job envelope.
 
-  **What remains is declarations, not mechanism.** 70 of 82 destructive actions are
-  in `VERIFICATION_PENDING`; the ratchet makes the count visible. Blocked rather than
-  pending: `delete_deployment` needs `list_deployments` exposed to the agent,
-  `helm_rollback` a `revision_matches` predicate, `create_ingress` a read tool for
-  Ingress objects, and `configure_gpu_timeslicing` a predicate that should not be
-  written before seeing the real output of `get_gpu_timeslicing` on a GPU node.
+  **Coverage landed in sixteen lots between 15 and 24 Sept 2026, and the ratchet has
+  held since.** Measured 02/11/2026 from `connectors/tests/test_verification_spec.py`:
+  122 destructive actions, 110 proven, 12 in `VERIFICATION_PENDING`, `MAX_PENDING = 12`.
+  Every destructive action added since arrived with its proof — node maintenance
+  (ADR 0059), Aruba Central and Mist (ADR 0073). The twelve left are blocked by their
+  shape, not waiting for a read, and each reason is written beside its entry in the
+  test: five restores (`proxmox_restore_snapshot`, `vsphere_restore_snapshot`,
+  `xo_restore_snapshot`, `xo_restore_backup`, `vme_backup_restore`) whose effect is
+  disk content that no catalogue read sees; `accelerator_install_operator` and
+  `accelerator_partition_device`, one entry carrying several opposite effects chosen
+  by a parameter, which a fixed declaration cannot express; `run_kubectl`, an
+  arbitrary command; `ci_trigger`, whose proof is keyed on a run id the action
+  returns rather than receives; `cerebras_deploy_inference`, with no endpoint listing
+  on the connector; `helm_upgrade`, which the agent has no path to; and
+  `configure_gpu_timeslicing`, whose predicate waits for a GPU node to confirm that
+  `replicas` is populated.
 
 - [x] **Twenty agent tools the PolicyEngine refuses** — closed 18/09/2026, verified
   again 25/09/2026. `connectors/tests/test_agent_tools_are_known.py` now holds
@@ -455,16 +506,22 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   Still true and not covered here: the MIG predicates are written against the exact
   shape `_query_mig_state` returns, and no A100 has confirmed the node labels behave
   as the connector assumes.
-- [ ] **Filter the tool catalogue per task** — `tools=self._effective_tools` sends all
-  318 definitions on every turn, at three call sites in `agent_service.py`. A cost and
-  accuracy problem, not a correctness one: tokens spent every turn, and selection
-  degrades as the catalogue grows.
-
-  **Watch the vendor-agnosticism tension**: the natural mechanism — `defer_loading` and
-  a tool-search tool — is Anthropic-specific and would tie the agent to one provider,
-  exactly what the architecture avoids elsewhere. The right layer is `llm_client`,
-  which already abstracts providers: filter the catalogue before the call, whichever
-  model sits behind. ~3–5 days.
+- [x] **Filter the tool catalogue — per organisation, not per task** — shipped under a
+  different principle than the one this entry asked for. A per-task filter infers the
+  user's intent, and ADR 0053 (16/10/2026) refuses it: the filter drops a tool the
+  moment the classifier is wrong, and the failure is invisible — the agent simply
+  cannot do something it could do yesterday, and says so convincingly. What shipped
+  filters on what is *derivable*. v0.45.0 withheld the six single-platform families
+  when the platform is absent; ADR 0060 (26/10/2026, v0.60.0) generalised it: each
+  gateway reports which of its connectors are configured on its site, core does the
+  same for its environment, and `agent/app/services/tool_filter.py` withholds a tool
+  only on that positive evidence, failing open on any doubt, and says in the system
+  prompt what was withheld and why. Measured 26/10/2026 before the cut: 494 tool
+  definitions, about 65,000 tokens per call. ADR 0072 (01/11/2026) records the next
+  layer — deterministic hierarchical staging for a tenant whose own catalogue outgrows
+  one flat menu — as a direction, not yet built, and rules out agent-navigated tool
+  search. The placement this entry asked for holds: the filter runs before the call,
+  in front of `llm_client`, whichever model sits behind.
 
 - [ ] *(not planned)* **Mid-loop resume after a crash** — listed on the execution-loop
   diagram, deliberately left out. The diagram contradicts itself here: it asks for
@@ -531,10 +588,24 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   (Redis is a Celery broker, data lives in PostgreSQL), material the day anomalies and
   budget alerts transit through it. Decide alongside the event bus, not after. ~15 min.
 
-- [ ] **Extend `--check` to product figures** — `bump-version.sh --check` guards the 18
+- [x] **Extend `--check` to product figures** — `bump-version.sh --check` guards the 18
   version locations and works. The same drift hit the documented counts: 26, 31 and 36
   connectors were claimed for 33 real, 59 to 130 tools for 117. Corrected by hand on
   13/09; nothing prevents the next drift. A counting script plus a CI step. ~1 day.
+
+  Closed, though not through `bump-version.sh`. `tests/test_public_figures.py`
+  (24/09/2026, a CI step) recomputes every public figure from the code and compares
+  it with what is written: the README, the MCP server's README, and the vibops.ai
+  home page under `VIBOPS_CHECK_PUBLIC_SITE=1` since that page lives in another
+  repository. `scripts/figures-for-collateral.py` does the same for the commercial two-pagers, as
+  a manual check before a document is sent — see the `docs/commercial/` entry below for
+  why that one is not in CI.
+
+  **02/11/2026 — the maintained docs too.** The user guide said 258 actions for 441. A
+  current figure in `docs/` is now written inside a `<!-- fig:NAME -->` marker;
+  `scripts/update-figures.py` rewrites every marker from the code, `--check` refuses a
+  stale one, and the public-figures suite does the same in CI. Dated figures — history tables, the 24/09 narrative — carry no marker and are
+  left alone; the marker, not the sentence, is what separates a claim from a record.
 
 - [ ] **Delete `deploy.yml`** — restricted to tags on 13/09 but wholly redundant. Its
   Helm job stops for want of a `KUBECONFIG` secret (no remote deploy has ever run); its
@@ -564,14 +635,28 @@ difficulty. Full rationale and evidence: the review document and the commits cit
   that refuses an entry which no longer contradicts anything, so the list cannot
   quietly become a carpet.
 
+  **Reversed on 21/10/2026.** The CI guard over `docs/commercial/` was removed: an
+  unmaintained file retyped on every release measures the release cadence, not the
+  product. What replaces it is `scripts/figures-for-collateral.py`, run by hand before
+  a document goes out, while `tests/test_public_figures.py` keeps guarding the figures
+  that are actually public (README, MCP README, the site). The archive stays as it
+  was, for the reason above.
+
 - [ ] **Choose between `STATUS.md` and `CHANGELOG.md`** — two parallel histories in
   different formats. `CHANGELOG.md` was brought up to date on 13/09 (177 commits);
   `STATUS.md` still stops at 09/09. Whichever is authoritative, the other will drift
   unnoticed — exactly how the counts above went wrong.
 
-- [ ] **`beat` and `gateway` image tags** — `release-images.yml` publishes 8 tags from
+  Settled by practice rather than by decision, as of 02/11/2026: `CHANGELOG.md` is
+  complete to v0.68.0 (backfilled 01/11), `STATUS.md` still announces v0.41.0 of
+  06/09 and has received one count edit since. What is left to decide is whether
+  `STATUS.md` is deleted or rewritten as a pointer.
+
+- [x] **`beat` and `gateway` image tags** — `release-images.yml` publishes 8 tags from
   6 Dockerfiles; no compose references those two, and `worker`/`beat` duplicate the
-  `core` image. Two builds paid per release for nothing.
+  `core` image. Two builds paid per release for nothing. ✓ Removed from the matrix on
+  09/10/2026; six images remain, and the comment in `release-images.yml` carries the
+  measurement — about 19 minutes of runner time per release, beat 15 and gateway 4.
 
 
 ### FinOps maturity
@@ -594,9 +679,9 @@ difficulty. Full rationale and evidence: the review document and the commits cit
 - ~~[ ] `accelerator_detect_waste` — time-series mode: sustained underutilisation over N hours (not just snapshot)~~ ✓ Sprint 15
 - ~~[ ] Chargeback generation — automated monthly Celery Beat task (currently admin-triggered)~~ ✓ Sprint 15
 - [x] **GPU passthrough correlation (MOAT)** — detect PCIe passthrough in VM config, match VM hostname ↔ K8s node, unified FinOps (VM + GPU cost on same asset). Fleet VM table: GPU column + drill-down drawer (hypervisor → K8s → workload → combined cost). ✓ v0.26.0
-- [ ] **VM chargeback** — cost per tenant based on VM resources (vCPU/h + RAM/h + disk). Rate configurable per hypervisor. Aggregated monthly report per tenant. Same model as GPU chargeback but for CPU/RAM/disk. ~2 days.
-- [ ] **Chargeback export (pre-invoice)** — CSV/PDF export per tenant with consumption detail (GPU/h, VM/h, cost, period), ready to import into ERP (Sage, SAP, etc.). Signed HMAC for integrity. Covers both GPU and VM chargeback. ~1 day.
-- [ ] **Scheduled triggers (cron)** — user-defined cron expressions in triggers (e.g. "run VM waste scan every Monday at 8am"). Add schedule type to TriggerRule model + UI toggle in Automations tab. Essential for MCO recurring tasks. ~2 days.
+- [x] **VM chargeback** — cost per tenant based on VM resources (vCPU/h + RAM/h + disk). Rate configurable per hypervisor. Aggregated monthly report per tenant. Same model as GPU chargeback but for CPU/RAM/disk. ✓ v0.37.0 (30/08/2026) — three routes under `/finops/vm-chargeback`, reseller markup, GPU passthrough cost included; UI in v0.38.0. The entry was never ticked.
+- [ ] **Chargeback export (pre-invoice)** — CSV/PDF export per tenant with consumption detail (GPU/h, VM/h, cost, period), ready to import into ERP (Sage, SAP, etc.). Signed HMAC for integrity. Covers both GPU and VM chargeback. ~1 day. *Partly there (checked 02/11/2026): `GET /finops/billing/export` returns the GPU chargeback report as HMAC-SHA256-signed JSON — the integrity half. CSV/PDF for ERP import and the VM chargeback are not in it.*
+- [x] **Scheduled triggers (cron)** — user-defined cron expressions in triggers (e.g. "run VM waste scan every Monday at 8am"). Add schedule type to TriggerRule model + UI toggle in Automations tab. Essential for MCO recurring tasks. ✓ v0.38.0 (31/08/2026) — `schedule_cron` on `TriggerRule`, evaluated every 60 s via croniter; the entry was never ticked.
 - [ ] Cloud pricing API integration — live AWS/GCP/Azure GPU rates (currently manual ClusterRate)
 - [x] VM cost history — VmCostSnapshot table, 12-month spend trend parity with GPU ✓ v0.29.0
 - [x] Currency conversion — EUR/USD dynamic symbol from budget.currency ✓ v0.29.0
@@ -684,14 +769,19 @@ An audit trail that only its operator can check is a claim, not evidence.
 - [ ] **Ed25519 beside the HMAC, public key published** — HMAC is symmetric, so verifying
   requires the key that can forge. Asymmetric signatures let a customer or an auditor check an
   export without being handed the means to write one.
-- [ ] **Anchor the chain head where the operator cannot rewrite it** — hourly, into the
+- [x] **Anchor the chain head where the operator cannot rewrite it** — hourly, into the
   customer's SIEM first: it already receives the exports, it adds no outbound destination and
   it works air-gapped. A WORM bucket or an RFC 3161 timestamp authority for those who want a
   neutral third party.
+  ✓ 28/09/2026 — `AuditAnchor`, the hourly `anchor_audit_chains` beat task into the
+  customer's SIEM, and `/audit/verify` reporting whether the chain is anchored and when.
+  WORM and RFC 3161 remain options, not built.
 - [ ] **Sign inside a KMS/HSM** so the private key cannot be taken elsewhere, and log every
   signing operation.
 - [ ] **`vibops audit verify` in the SDK** — checks the chain and the anchors offline. A
-  verification you must ask the audited party to run is not a verification.
+  verification you must ask the audited party to run is not a verification. The SDK's
+  `verify_chain()` today calls the server's `/audit/verify`, which is the audited party
+  running it; the offline check is not written (02/11/2026).
 
 The boundary is published with it: this makes retroactive rewriting infeasible, and it does
 not make the record true. An operator who never writes an event, or writes a false one as they
@@ -706,9 +796,11 @@ Decided and costed, not scheduled. Full rationale, data-model mapping and risks:
 Everything after the first step is arithmetic on its number, and the count of persisted power
 measurements today is zero — so the order matters more than usual.
 
-- [x] **Prompt caching, then intent-based tool filtering** — outside the GreenOps scope and to
+- [x] **Prompt caching, then capability-derived tool filtering** — outside the GreenOps scope and to
   be done first: 310 tools, roughly 43,800 tokens on every call. A cost and latency matter
-  before an environmental one. ✓ v0.45.0
+  before an environmental one. ✓ v0.45.0 — the filter withheld 98 of 310 tools when their
+  platform is absent; intent-based filtering was never built, and ADR 0053 says why.
+  Generalised per organisation by ADR 0060 (v0.60.0).
 - [x] **Per-cluster measurement-sources page** — the first deliverable, before any collector.
   DCGM needs the GPU Operator; without it the collection returns nothing and "nothing" renders
   as zero. A footprint dashboard that silently under-reports is worse than none.
@@ -847,7 +939,7 @@ of the datacentre, the workstations, the network, the storage or the software li
 **Phase 4 — Governance & intelligence:**
 - [ ] Data Guardian — RGPD enforcement (consent verification, retention policies, anonymization triggers, right-to-erasure automation)
 - [ ] Chaos Agent — controlled fault injection to test resilience (GPU failure simulation, network partition, OOM scenarios)
-- [ ] Knowledge Agent — learns from past incidents and recommendations, enriches future diagnostics with historical patterns
+- [ ] Knowledge Agent — learns from past incidents and recommendations, enriches future diagnostics with historical patterns. The per-action half shipped as ADR 0068 (v0.67.0): an action's prior proven outcomes are recalled at the confirmation gate.
 - [ ] Onboarding Assistant — conversational wizard for new clients (replaces HTML wizard with AI-guided setup)
 
 **Infrastructure:**

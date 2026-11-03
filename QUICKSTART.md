@@ -15,11 +15,11 @@ No technical background required.
 
 ---
 
-> **Architecture: linux/amd64 only.** The published images carry no arm64
-> variant — it was withdrawn on 13/09/2026 because nothing pulled it. On an ARM
-> host (AWS Graviton, Ampere, Apple Silicon) the pull fails with
-> `no match for platform in manifest`, which names the symptom and not the cause.
-> Verified on 20/09/2026 against a real cluster.
+> **Architecture.** The published images are built for linux/amd64 and
+> linux/arm64, so an Apple Silicon Mac or an ARM server (AWS Graviton, Ampere)
+> pulls and runs them natively. A warning stood here saying amd64 only: that was
+> true from 13 September to 8 October 2026, when the arm64 build came back.
+> Verified on an Apple Silicon Mac on 3 November 2026, from this very guide.
 
 ## What you need before starting
 
@@ -89,7 +89,7 @@ git clone https://github.com/VibOpsai/vibops-install.git
 ```
 
 ```
-cd vibops
+cd vibops-install
 ```
 
 You should now be inside the VibOps folder.
@@ -168,11 +168,14 @@ LLM_MODEL=nvidia/llama-3.1-nemotron-ultra-253b-v1
 NEMOTRON_BASE_URL=http://nim:8000/v1
 ```
 
-Save the file, then restart the AI service:
+Save the file, then apply it to the AI service:
 
 ```
-docker compose restart agent
+docker compose up -d agent
 ```
+
+> `up -d`, not `restart`: a restart reuses the container's old environment and
+> does not re-read `.env`. Your key would be saved and ignored.
 
 ---
 
@@ -180,42 +183,18 @@ docker compose restart agent
 
 Open your browser and go to:
 
-**http://localhost:8003**
+**http://localhost**
 
-You should see the VibOps console. If you see a blank page or an error, wait 10 seconds and refresh.
+The console is served on port 80 through the bundled reverse proxy; nothing
+listens on 8003. You should see the VibOps console. If you see a blank page or
+an error, wait 10 seconds and refresh.
 
 ---
 
 ### Step 5 — Create your account
 
 VibOps starts without a password (open access — fine for a local POC).
-To create a protected account with login:
-
-**5a — Generate a password hash:**
-
-```
-make hash PASSWORD=choose-a-password-here
-```
-
-This prints a long string starting with `$2b$12$...` — copy it.
-
-**5b — Add it to your configuration:**
-
-Open `.env` again, find this line:
-
-```
-AUTH_PASSWORD_HASH=
-```
-
-Paste your copied string after the `=`. Example:
-
-```
-AUTH_PASSWORD_HASH=$2b$12$abc123...
-```
-
-Save the file.
-
-**5c — Create your organisation and user:**
+To create a protected organisation with its admin account, one command:
 
 ```
 make pilot-create-client ORG="My Company" EMAIL=you@yourcompany.com PASSWORD=choose-a-password-here
@@ -223,7 +202,14 @@ make pilot-create-client ORG="My Company" EMAIL=you@yourcompany.com PASSWORD=cho
 
 Replace the values with your own. Press Enter.
 
-You will see a confirmation message. You can now log in at **http://localhost:8003** with your email and password.
+The command prints the organisation, the admin username it derived from the
+organisation name, and a first token. You can now log in at **http://localhost**
+with your email — or that username — and your password.
+
+> Until 3 November 2026 this step asked you to run `make hash` and paste the
+> result into `AUTH_PASSWORD_HASH` in `.env`. The product does not read that
+> variable: the account is created and verified in the database by the command
+> above, and the hash step did nothing.
 
 ---
 
@@ -243,40 +229,96 @@ The agent will respond and show the tool it used. If you see a response (even an
 
 ## Connect a GPU cluster
 
-VibOps manages GPU clusters through a small connector called a **Gateway**.
+VibOps manages GPU clusters through a small connector called a **Gateway**. It
+runs next to the cluster, calls VibOps outbound only, and nothing needs to reach
+it. The full guide is [`docs/connect-quickstart.md`](docs/connect-quickstart.md)
+in this folder — Kubernetes, hypervisors, Slurm, bare metal. This section is
+the Kubernetes case in five steps.
 
-1. In the console, go to the **Fleet** tab and click **"Add a gateway"** (or **⚙ Admin → Gateways → New Gateway**)
-2. Enter a name (e.g. `my-gpu-cluster`) and click **Register**
-3. Copy the token — **shown only once** — and the pre-filled Helm command
-4. On the machine that has `kubectl` access to your GPU cluster, run:
+1. In the console, open the **Fleet** tab and click **+ Connect Infrastructure**
+   (the onboarding wizard's step 3 does the same thing)
+2. Pick **Kubernetes**, type a gateway name that says where the cluster is
+   (`lab-gpu-1`, not `test`), and click **Connect**
+3. The console prints the command to run, with the gateway id and the token
+   already in it. The token is **shown only once**
+4. Run that command where you have `kubectl` access to the GPU cluster. It
+   creates a namespace, stores the token in a Kubernetes Secret, and installs
+   the chart from its public registry:
 
 ```
-# The chart ships inside this delivery, under charts/vibops-connect.
-# There is no public Helm repository — install from the local path.
+kubectl create namespace vibops-connect
+kubectl create secret generic vibops-connect-token \
+  --namespace vibops-connect --from-literal=token=PASTE_YOUR_TOKEN_HERE
 
-# Deploy the gateway.
-# GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
-# dans la console : connect ne s'enregistre pas, il s'authentifie comme une
-# passerelle deja creee et sort sans son id.
-helm upgrade --install vibops-connect ./charts/vibops-connect \
-  --namespace vibops-connect --create-namespace \
-  --set gateway.id="$GATEWAY_ID" \
-  --set vibops.coreUrl="http://YOUR_MACHINE_IP:8000" \
-  --set vibops.token="PASTE_YOUR_TOKEN_HERE"
+helm install vibops-connect oci://ghcr.io/davidmacamara-boop/charts/vibops-connect \
+  --namespace vibops-connect \
+  --set vibops.coreUrl=http://ADDRESS_OF_THIS_MACHINE \
+  --set vibops.existingSecret=vibops-connect-token \
+  --set gateway.id=YOUR_GATEWAY_ID \
+  --set gateway.clusterName="lab-gpu-1" \
+  --set rbac.allowWrite=true
 ```
 
-5. The wizard shows **"Waiting for worker to connect…"** and advances automatically when the first heartbeat arrives
+   The same chart ships in this folder under `charts/vibops-connect`, for a
+   machine that cannot reach the registry: replace the `oci://…` reference
+   with `./charts/vibops-connect`.
 
-The worker auto-discovers all kubeconfig contexts on the node where it runs — no manual cluster registration needed.
+5. Back in the console, the modal waits for the first heartbeat, and the
+   gateway turns **Online** within a few seconds with the clusters it sees
 
-**To connect a second or third cluster**, repeat from step 1 with a different gateway name.
+**Three values decide whether it works:**
 
-**If the gateway does not go Online**, check the pod logs:
+- **`vibops.coreUrl`** is the address the gateway will call, from where it
+  runs — not the one in your browser. On this machine VibOps answers on port
+  **80** (`http://ADDRESS_OF_THIS_MACHINE`), through the bundled reverse proxy;
+  nothing else is reachable from another machine. The command the console
+  prints puts `http://core:8000` there when you opened the console from
+  `localhost`: that address only works for a gateway inside this
+  installation's Docker network (see below). For a cluster elsewhere, replace
+  it with this machine's address, and make sure the cluster can reach port 80
+  on it.
+- **`gateway.clusterName`** is the name the cluster is known by in VibOps. The
+  console pre-fills it with the gateway name; two gateways of the same
+  organisation cannot declare the same name.
+- **`rbac.allowWrite=true`** lets the gateway deploy, scale, restart and
+  delete. **Without it the gateway is read-only** — the chart's default — and
+  every action the agent attempts is refused by the Kubernetes API server, not
+  by VibOps, which reads as "the agent does nothing" on a cluster that looks
+  perfectly connected. The command the console prints does not set it; add it
+  for a trial. Finer grants exist (`rbac.write.workloads`, `rbac.write.exec`,
+  …), see the chart's `values.yaml`.
+
+**No Kubernetes cluster at hand?** This installation can run a gateway itself,
+reading the clusters in your `~/.kube/config`: put the id and the token the
+console gave you in `.env` as `CONNECT_GATEWAY_ID` and `CONNECT_TOKEN`, then
+
+```
+docker compose --profile connect up -d
+```
+
+It reaches VibOps at `http://core:8000` inside the Docker network, which is why
+that is the address the console printed. Contexts that point at `127.0.0.1`
+(kind, k3d, Docker Desktop) are not reachable from inside the container.
+
+**To connect a second or third cluster**, repeat from step 1 with a different
+gateway name.
+
+**If the gateway does not turn Online**, read its logs where it runs:
+
 ```
 kubectl logs -n vibops-connect deployment/vibops-connect
+docker compose logs connect      # for the built-in one
 ```
 
-**If a token is compromised**, go to **Settings → Gateways**, delete the gateway and register a new one — the old token is immediately invalidated.
+Every heartbeat is a `POST …/ping` answered `200`; a `401` means the token or
+the id is wrong, a connection error means a `coreUrl` the gateway cannot reach.
+Note that this installation runs in development mode, in which a gateway still
+shows **Online** for 24 hours after its last heartbeat (2 minutes in
+production): a gateway that stopped yesterday looks fine today. The logs tell
+the truth.
+
+**If a token is compromised**, delete the gateway in **Fleet** and create a new
+one — there is no token rotation, and the old token is invalidated immediately.
 
 > **No GPU cluster yet?** You can still explore VibOps — the agent can answer questions, run diagnostics, and plan deployments. Connect a cluster when you are ready.
 
@@ -338,10 +380,10 @@ Open `.env` and change these two lines:
 LLM_PROVIDER=ollama
 ```
 
-**4. Restart the agent:**
+**4. Apply the change to the agent:**
 
 ```
-docker compose restart agent
+docker compose up -d agent
 ```
 
 > **Note:** Ollama works well for simple tasks. For complex multi-step operations (deploy, rollback, incident triage), Claude gives significantly better results.
@@ -350,8 +392,13 @@ docker compose restart agent
 
 ## Common problems
 
-**"Port 8003 is already in use"**
-Another application is using that port. Stop it, or change the port in `docker-compose.yml`.
+**"port is already allocated" or "address already in use" when starting**
+Another program holds a port the stack publishes on this machine: 80 and 443
+(reverse proxy and console), 5432 (PostgreSQL), 8000, 8001 and 8004 (API, agent,
+LLM proxy), 3000 and 9090 (Grafana, Prometheus); all but 80 and 443 are bound to
+the loopback only. On a developer machine the usual culprit is a local
+PostgreSQL on 5432 — measured on 3 November 2026. Stop it for the duration, or
+change the host side of that mapping in `docker-compose.yml`.
 
 **"Cannot connect to Docker daemon"**
 Docker Desktop is not running. Open it and wait for it to say "running".
@@ -463,69 +510,44 @@ For Ollama running on this same server:
 LLM_PROVIDER=ollama
 ```
 
-Save (`Ctrl+O`, `Ctrl+X`), then:
+Save (`Ctrl+O`, `Ctrl+X`), then apply it to the agent (`up -d`, not `restart`,
+which would not re-read `.env`):
 ```
-docker compose restart agent
+docker compose up -d agent
 ```
 
 ### Step 5 — Access the console
 
 Open your browser and go to:
 
-**http://INTERNAL_SERVER_IP:8003**
+**http://INTERNAL_SERVER_IP**
 
 This URL is accessible to anyone on the internal network — no internet exposure.
 
 ### Step 6 — Create your account
 
 ```
-make hash PASSWORD=choose-a-password
-```
-
-Paste the result in `AUTH_PASSWORD_HASH` in `.env`, then:
-
-```
 make pilot-create-client ORG="My Company" EMAIL=admin@mycompany.com PASSWORD=choose-a-password
-docker compose restart core
 ```
+
+The command creates the organisation and its admin user and prints the
+credentials. No restart is needed: the account lives in the database, not in
+`.env`.
 
 ### Step 7 — Connect GPU cluster gateways
 
 **Prerequisites on the GPU cluster side:** `kubectl` configured + `helm` installed.
 
-For each GPU cluster:
+The procedure is the one of [Connect a GPU cluster](#connect-a-gpu-cluster) in
+Option A, with one difference: `vibops.coreUrl` is this server's address as the
+GPU cluster reaches it, `http://INTERNAL_SERVER_IP` — port 80 through the reverse proxy; the
+API on 8000 listens on the loopback only and is not what a gateway calls. The
+gateway calls outbound only, so nothing needs to be opened on the cluster side.
+Remember `--set rbac.allowWrite=true` if the agent is to act on that cluster,
+and that in development mode a gateway stays Online for 24 hours after its last
+heartbeat.
 
-1. In the console, go to the **Fleet** tab → click **"Add a gateway"** (or **⚙ Admin → Gateways → New Gateway**)
-2. Enter a name and click **Register** — copy the token (**shown once only**) and the pre-filled Helm command
-3. From a machine with `kubectl` access to that cluster, run:
-
-```
-# The chart ships inside this delivery, under charts/vibops-connect.
-# There is no public Helm repository — install from the local path.
-
-# Deploy the gateway.
-# GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
-# dans la console : connect ne s'enregistre pas, il s'authentifie comme une
-# passerelle deja creee et sort sans son id.
-helm upgrade --install vibops-connect ./charts/vibops-connect \
-  --namespace vibops-connect --create-namespace \
-  --set gateway.id="$GATEWAY_ID" \
-  --set vibops.coreUrl="http://INTERNAL_SERVER_IP:8000" \
-  --set vibops.token="PASTE_YOUR_TOKEN_HERE"
-```
-
-4. The wizard auto-detects the connection and shows **Online** within 30 seconds
-
-The gateway uses **outbound polling only** — no inbound ports needed on the cluster side. The worker auto-discovers all kubeconfig contexts on the node where it runs.
-
-**To add more clusters**, repeat from step 1 with a different gateway name (e.g. `gpu-cluster-2`).
-
-**If the gateway does not go Online**, check the pod logs:
-```
-kubectl logs -n vibops-connect deployment/vibops-connect
-```
-
-**If a token is compromised**, delete the gateway in the console and register a new one — the old token is immediately invalidated.
+**To add more clusters**, repeat with a different gateway name.
 
 ---
 
@@ -626,27 +648,30 @@ LLM_API_KEY=your-key
 LLM_BASE_URL=https://api.openai.com/v1
 ```
 
-Save (`Ctrl+O`, `Ctrl+X`), then:
+Save (`Ctrl+O`, `Ctrl+X`), then apply it to the agent (`up -d`, not `restart`,
+which would not re-read `.env`):
 ```
-docker compose restart agent
+docker compose up -d agent
 ```
 
 ### Step 5 — Open the firewall
 
 ```
 sudo ufw allow 22     # SSH
-sudo ufw allow 80     # HTTP
+sudo ufw allow 80     # HTTP — console, and the API path gateways use
 sudo ufw allow 443    # HTTPS
-sudo ufw allow 8000   # VibOps API (for gateways)
-sudo ufw allow 8003   # VibOps console
 sudo ufw enable
 ```
+
+> Nothing else to open: the console and the gateway API path are both served by
+> the reverse proxy on 80/443. The API, agent and LLM proxy listen on the
+> loopback only, so opening 8000 or 8003 would expose nothing.
 
 > If using a cloud provider (AWS, Hetzner, OVH…), also open these ports in the cloud console firewall / security group.
 
 ### Step 6 — Access the console
 
-**http://YOUR_PUBLIC_IP:8003**
+**http://YOUR_PUBLIC_IP**
 
 Share this URL with your client — they open it in a browser, no installation needed.
 
@@ -655,59 +680,27 @@ Share this URL with your client — they open it in a browser, no installation n
 ### Step 7 — Create your account
 
 ```
-make hash PASSWORD=choose-a-password
-```
-
-Paste the result in `AUTH_PASSWORD_HASH` in `.env`, then:
-
-```
 make pilot-create-client ORG="My Company" EMAIL=admin@mycompany.com PASSWORD=choose-a-password
-docker compose restart core
 ```
+
+The command creates the organisation and its admin user and prints the
+credentials. No restart is needed: the account lives in the database, not in
+`.env`.
 
 ### Step 8 — Connect GPU cluster gateways
 
 **Prerequisites on the GPU cluster side:** `kubectl` configured + `helm` installed.
 
-For each GPU cluster:
+The procedure is the one of [Connect a GPU cluster](#connect-a-gpu-cluster) in
+Option A, with one difference: `vibops.coreUrl` is this server's address as the
+GPU cluster reaches it, `http://YOUR_PUBLIC_IP` or `https://your-domain` — port 80 through the reverse proxy, opened in step 5; the
+API on 8000 listens on the loopback only and is not what a gateway calls. The
+gateway calls outbound only, so nothing needs to be opened on the cluster side.
+Remember `--set rbac.allowWrite=true` if the agent is to act on that cluster,
+and that in development mode a gateway stays Online for 24 hours after its last
+heartbeat.
 
-1. In the console, go to the **Fleet** tab → click **"Add a gateway"** (or **⚙ Admin → Gateways → New Gateway**)
-2. Enter a name and click **Register** — copy the token (**shown once only**) and the pre-filled Helm command
-3. From a machine with `kubectl` access to that cluster, run:
-
-```
-# The chart ships inside this delivery, under charts/vibops-connect.
-# There is no public Helm repository — install from the local path.
-
-# Deploy the gateway.
-# GATEWAY_ID et le token viennent tous deux de la creation de la passerelle
-# dans la console : connect ne s'enregistre pas, il s'authentifie comme une
-# passerelle deja creee et sort sans son id.
-helm upgrade --install vibops-connect ./charts/vibops-connect \
-  --namespace vibops-connect --create-namespace \
-  --set gateway.id="$GATEWAY_ID" \
-  --set vibops.coreUrl="https://your-domain.com" \
-  --set vibops.token="PASTE_YOUR_TOKEN_HERE"
-```
-
-4. The wizard auto-detects the connection and shows **Online** within 30 seconds
-
-The gateway uses **outbound HTTPS only** — the only firewall rule needed on the GPU cluster side:
-
-```
-Allow outbound HTTPS (port 443) → your-domain.com or YOUR_PUBLIC_IP
-```
-
-The worker auto-discovers all kubeconfig contexts on the node where it runs — no manual cluster registration needed.
-
-**To add more clusters**, repeat from step 1 with a different gateway name (e.g. `gpu-cluster-2`).
-
-**If the gateway does not go Online**, check the pod logs:
-```
-kubectl logs -n vibops-connect deployment/vibops-connect
-```
-
-**If a token is compromised**, delete the gateway in the console and register a new one — the old token is immediately invalidated.
+**To add more clusters**, repeat with a different gateway name.
 
 ---
 
@@ -757,11 +750,9 @@ Variables marked **auto-generated** are set by `make quickstart` and do not need
 
 | Variable | Default | Description |
 |---|---|---|
-| `VIBOPS_LICENCE_KEY` | _(empty)_ | RS256 JWT licence key — omit for 14-day trial (10 GPUs · 5 users · 2 clusters) |
+| `VIBOPS_LICENCE_KEY` | _(empty)_ | RS256 JWT licence key — omit for 14-day trial (10 GPUs · 5 users · 5 clusters) |
 | `LLM_BASE_URL` | _(empty)_ | Base URL for OpenAI-compatible endpoints (vLLM, Mistral, on-prem) |
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint — change to `http://localhost:11434` for local dev |
-| `AUTH_USERNAME` | `admin` | Login username for the console |
-| `AUTH_PASSWORD_HASH` | _(empty)_ | Bcrypt hash — generate with `make hash PASSWORD=yourpassword` |
 | `JWT_EXPIRE_HOURS` | `24` | Token validity in hours |
 | `VAULT_KEY` | _(empty)_ | Fernet key for secret encryption in DB — generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `GRAFANA_PASSWORD` | ✓ | Grafana admin password (observability profile only) |
