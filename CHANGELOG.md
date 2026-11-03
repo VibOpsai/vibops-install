@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.70.2] — 2026-11-03
+
+Found by installing v0.70.1 blank from the public clone and following the first-user path.
+
+### Fixed
+- **The agent decodes a Bearer token before the dev-mode switch.** `get_current_user` began with "if `AUTH_PASSWORD_HASH` is empty, the caller is anonymous" — true of every quickstart install, since nothing generates that variable and core does not read it. The token the console always sends was thrown away: every caller became anonymous, scoped to the reserved organisation `00000000-…`, and the agent read that organisation's gateways, clusters, memories and secrets. The AI provider saved in the wizard's first step was never found, and `GET /api/v1/agent/config` said `source: env` on an install whose `.env` carried no key. The order is now core's: a token present is decoded whatever the switch says; no token and an empty hash is the anonymous context; no token otherwise is a 401. A forged token is refused instead of being demoted to anonymous.
+- The rejected-key message names the wizard's first step beside `LLM_API_KEY`.
+
 ## [0.70.1] — 2026-11-03
 
 Found by installing v0.70.0 blank from the public clone and following the first-user path.
