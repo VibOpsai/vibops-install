@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.70.1] — 2026-11-03
+
+Found by installing v0.70.0 blank from the public clone and following the first-user path.
+
+### Fixed
+- **`make quickstart` generates `VAULT_KEY`.** It generated every secret but that one, so the vault could neither encrypt nor decrypt: the onboarding wizard's first step, which stores the AI provider as secrets, answered 500, and every hypervisor credential would have followed. The key is 32 random bytes in URL-safe base64; `install.sh`'s openssl fallback carried `+` or `/` one time in three, which Fernet refuses — made URL-safe too.
+- **An unconfigured vault answers 503 in words** — which setting is empty and where it is generated — instead of a 500 whose message lived only in core's log.
+- **With no key anywhere, the agent's chat routes no longer die after the error event** reading the usage of a client that was never built; the console showed "peer closed connection without sending complete message body" on top of the error it had just received.
+
+### Changed
+- The install smoke test writes a secret through the API after creating the account: an unconfigured vault turns the release red before the install repository is published.
+
 ## [0.70.0] — 2026-11-03
 
 ### Added
