@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.70.3] — 2026-11-04
+
+Two corrections found while preparing the HPE pre-sales trial, after v0.70.2 was published.
+
+### Fixed
+- **The console's proxy to the agent carries the caller's identity like every other proxy.** `_proxy_to_agent` read the `vibops_access` cookie alone: a client calling the console with a Bearer token reached the agent anonymous, and the agent, in dev mode, answered for the reserved organisation — `source: env`, no key — while the browser, which carries the cookie, saw the organisation's own wizard settings. Measured on the v0.70.2 blank install: the same `GET /api/v1/agent/config` gave two answers. The proxy now goes through `_fwd_auth`: the Authorization header first, the cookie otherwise. The browser path is unchanged.
+- **The installation manual and the Compose file no longer send the reader to port 8003.** Caddy serves the console on 80 and 443; port 8003 is what the console listens on inside its container and nothing publishes it. The Compose section had been corrected on 01/10/2026, but the login line after `make pilot-create-client` and the comment at the head of `install/docker-compose.yml` had not.
+
 ## [0.70.2] — 2026-11-03
 
 Found by installing v0.70.1 blank from the public clone and following the first-user path.
