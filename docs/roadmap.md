@@ -1079,6 +1079,24 @@ Prospect-driven items say so; none of them is promised to anyone.
   notification sent with the documented body — and answered 404 by core v0.68.0, which has no
   door yet. `docs/runbooks/demo-argocd-night-watch.md`. *What is left for a night to run end
   to end (brick 7): release and deploy, create the rule, decide the mandate.*
+- [x] **The night, end to end** ✓ 11/11/2026 — the seventh brick. v0.71.0 tagged and deployed on
+  the demo host (migration applied, both gateways refreshed), the rule `night-watch-dc-live`
+  created, and two nights run for real (`docs/runbooks/demo-argocd-night-watch.md`). Night 1,
+  propose tier: degraded health detected 11:50:37, run started 10 s later, ten tools, the right
+  rollback proposed and held, receipt `proposed` with twelve rows verified, then `resolved` by
+  the morning's Git revert 193 s after detection. Night 2, act tier: failed sync detected
+  12:44:26, run 21 s later, a diagnosis naming the day's three commits — and the rollback held
+  anyway. Three defects measured and fixed the same day: the run's identity had no scope so
+  the agent's guardrail refused every Kubernetes read (v0.71.1); the task crashed after
+  writing its row, an attribute read on a committed session (v0.71.1); and **the agent read
+  the tool policy before scoping its client to the organisation, so the organisation's
+  decision not to be asked had never reached the gate — in the console either, since
+  16/10/2026** (v0.71.2). Also found: the suite wrote 48 test lines into the real licence
+  registry, and Dependabot's graph for core failed on every push since v0.70.3 (both v0.71.1).
+  *Not yet seen: a night that rolls back and reads it back — v0.71.2 on the host, then the
+  third night. ArgoCD takes five minutes to declare a rejected patch failed; the detection
+  time is ArgoCD's, not ours. Worker tracebacks unrelated to the watch:
+  `detect_agent_anomalies` fails on a UUID it cannot serialise.*
 - [ ] **sbatch generation quality** — on the demo the agent produced
   `--ntasks-per-node=8 --gpus-per-task=1` with `srun … torchrun --nproc_per_node=8`,
   i.e. 64 processes per node for 8 GPUs; an HPC audience reads it in seconds. Validate
@@ -1086,10 +1104,9 @@ Prospect-driven items say so; none of them is promised to anyone.
 - [ ] **The 3 a.m. sync, autonomous** *(prospect-driven — Bull, 10/11/2026)* — today the
   scenario runs as a conversation the morning after: `argocd_get_app`, `argocd_diff`, events
   and logs, `argocd_rollback` under confirmation with its declared proof, audit. The night
-  version now exists in the code end to end (the ArgoCD event intake, the trigger that
-  launches the diagnosis and the receipt shipped 11/11/2026, above); what it lacks is a live
-  run — brick 6, the demo environment with ArgoCD. This is the backlog's Incident Responder,
-  scoped to one scenario, and the natural proof-of-value project with Bull. *The user guide's "Prometheus alerts" paragraph claimed an agent-side alert intake
+  version ran for real on 11/11/2026 on the demo host — twice, with the defects it found
+  fixed the same day (brick 7, above). This is the backlog's Incident Responder, scoped to
+  one scenario, and the natural proof-of-value project with Bull. *The user guide's "Prometheus alerts" paragraph claimed an agent-side alert intake
   no route provided; rewritten on 11/11/2026 to what exists.*
 - [ ] **GitOps: a code guardrail against direct writes on Argo-managed resources** — the
   ArgoCD notification webhook shipped 11/11/2026 (above); this is what remains.

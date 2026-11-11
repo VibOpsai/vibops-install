@@ -110,6 +110,13 @@ point is how you get a container that will not start.
 
 ## Procedure
 
+> **If you run these steps as one script over ssh (`ssh host bash -s <<'EOF'`),
+> every `docker exec` and `docker compose exec` must read from `</dev/null`.**
+> They inherit the script's stdin and swallow the rest of it: measured twice on
+> 11/11/2026 while upgrading to v0.71.0 — step 1's `cp -a` after the `pg_dump`
+> never ran, and step 5 stopped after the `psql` that checks the pings, with
+> no error either time. Typed by hand, line by line, nothing of this applies.
+
 ### 1. Back up, and verify the backup's contents
 
 A dump that exists is not a dump that holds anything.
@@ -176,6 +183,18 @@ list because they are the ones that silently broke: see above.
 
 Every container must read `healthy`. An `unhealthy` one that answers requests is
 still a defect: it is how the `beat` scheduler sat broken across six releases.
+
+**Measured on 11/11/2026, v0.68.0 → v0.71.0.** One migration (`b7e2a9c4d1f3`,
+applied by core at start — `alembic_version` read it back); the compose drift
+was the seven fallbacks and the `./static` mount; 59 tables, 45 gateways and 4
+users before and after; `/health` answered `0.71.0` with core connected as
+`vibops_app`; the three public paths answered 200; every container `healthy`.
+The disk had been pruned the same morning (99 % → 18 %, see
+`demo-argocd-night-watch.md`). Both gateways refreshed to v0.71.0 with the
+step 5 sequence; `vibops_connect_demo` keeps its env file at
+`/opt/vibops/connect-demo.env`, which carries the ArgoCD connector's variables
+beside the gateway's identity — recreate it from that file, not from
+`docker inspect`.
 
 **Measured on 02/11/2026, v0.67.0 → v0.68.0.** No migration in the release; the
 compose drift was the seven fallbacks and the `./static` mount; 59 tables, 45

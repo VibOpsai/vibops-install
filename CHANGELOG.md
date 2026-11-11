@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.71.2] — 2026-11-11
+
+What the second real night taught, on the demonstration host at v0.71.1: the organisation had turned confirmation off for `argocd_rollback` at 12:04, and the unattended run of 12:45 was still held with "your organisation's tool policy requires it".
+
+### Fixed
+- **The organisation's tool-policy decisions reach the agent's confirmation gate.** `chat()` and `chat_stream()` read the catalogue *before* scoping their core client to the caller's organisation, so they read it with the service token that names no tenant — the base catalogue, where every destructive action asks and `tool_overrides_for("")` is empty by design. The screen that lets an organisation decide not to be asked (wired to the agent on 16/10/2026) had been reading the wrong tenant's screen all along — in the console as well as in the night watch. The policy is now read after the client is scoped; a witness drives the loop with two clients and requires the organisation's one to be asked.
+
+### Changed
+- `docs/runbooks/demo-argocd-night-watch.md` records the two nights run on 11/11/2026 and what each one measured; the `bad-manifest` scenario breaks a field the cluster overlay does not override.
+
 ## [0.71.1] — 2026-11-11
 
 What the first real night taught, an hour after v0.71.0 ran it on the demonstration host: ArgoCD reported the degraded health at 11:50:37, the run started 10 s later, proposed the right rollback, and the receipt read correctly — with two defects behind it.
