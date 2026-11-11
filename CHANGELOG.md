@@ -9,6 +9,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.71.0] — 2026-11-11
+
+The 3 a.m. sync, autonomous — the scenario worked out with Bull on 10/11/2026, built brick by brick on 10 and 11/11 (ADR 0074, 0075). A sync that fails at night on a customer's cluster now reaches VibOps, starts the agent without anyone present, and leaves a receipt the morning reads.
+
+### Added
+- **The ArgoCD door** — `POST /api/v1/webhooks/argocd`, authenticated with an organisation API token rather than a platform secret, so a notification from a customer's ArgoCD lands in that customer's signed audit chain as a row `argocd_event` (`success=false` with ArgoCD's message for a failed sync, a degraded health, an unknown sync status). One template in `argocd-notifications-cm` serves every trigger: the event is derived from the three status fields when the template leaves it out. One row per (organisation, application, event, revision) per five minutes. The configuration ArgoCD needs is in the API reference.
+- **Trigger source `argocd`** — push-driven like `dsx`: the door matches the organisation's enabled rules by application selector (`*`, a name, `prefix*`) and by event, honours the cooldown, and fires. A catalogued action becomes a tenant job carrying the event, gated by `evaluate_system` (destructive only with `confirmed: true` in the rule). Migration `b7e2a9c4d1f3`.
+- **`agent_diagnosis` — an unattended agent run** — the rule's action starts the agent on the event through a Celery task, under the identity `trigger:<rule>` / `watch:<name>` in the organisation, with `confirm: false` always. The mandate is the organisation's tool policy, nothing new: confirmation turned off for `argocd_rollback` lets the night run roll back and read the result back; left on, the run stops at the gate with a proposal and its blast radius. One chain row `agent_diagnosis` per run — rule, event, tools, aggregated read-back verdict, held proposal, diagnosis — or the agent's unreachability as a failure, never silently.
+- **The intervention receipt** — `GET /api/v1/receipts/{id}` (JSON, or `?format=markdown` for a person) and `GET /api/v1/receipts`: read from the chain, never stored. The ask, the mandate (who decided, when), what ran with each read-back verdict, the diagnosis, the timeline (detected, reacted, recorded, resolved, with the durations an SLA review reads), the event ArgoCD sent when the application was back, the Git and ArgoCD references, and the proof — every cited row re-verified against its signature, a tampered one named in the receipt. Two agent tools, `list_intervention_receipts` and `get_intervention_receipt`.
+- **Slurm: `slurm_get_node`, `slurm_requeue_job`, `slurm_drain_node`, `slurm_resume_node`**, each write with its proof (`job_requeued`, `slurm_node_drained`, `slurm_node_resumed`); the job read exposes the restart count. slurmrestd has no requeue endpoint, so REST sites go through SSH and say so. Demo mode covers all four. *Not yet measured against a real Slurm.*
+- **A gateway's job outcome lands in the signed chain** (`source="gateway"`): until now only the local worker's outcomes were signed, and every remotely executed action had its outcome in the unsigned `jobs` table only.
+- Runbook `docs/runbooks/demo-argocd-night-watch.md`: the demonstration's ArgoCD and the night watch on it.
+
+### Changed
+- `install/Caddyfile.demo` routes `/api/v1/webhooks/argocd` to core; the demo host's copy also gains the `events` path of ADR 0065 it was missing.
+- The agent's `create_trigger` tool offers the source `argocd`; `list_audit_logs` names the `argocd_event` rows.
+- The user guide's "Prometheus alerts" paragraph claimed an agent-side alert intake no route provided; rewritten to what exists.
+
+### Not yet
+- None of this has run against a live agent and a live ArgoCD; the demo host carries the stage (v0.71.0 is what it is being updated to). The console's automations screen does not offer the `argocd` source (nor `dsx`); the API and the agent do.
+
 ## [0.70.3] — 2026-11-04
 
 Two corrections found while preparing the HPE pre-sales trial, after v0.70.2 was published.

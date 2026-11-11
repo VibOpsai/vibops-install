@@ -904,9 +904,39 @@ Prometheus metrics + deployment status. I want the full timeline.
 
 The agent queries all four sources in parallel (`asyncio.gather`) and produces a correlated timeline with identified causal relationships.
 
-### Prometheus alerts
+### Alerts that reach VibOps
 
-When a Prometheus alert arrives via webhook, the agent receives it automatically, launches the diagnosis pipeline, and posts an analysis in the active chat (or opens a new conversation) without any action on your part.
+A Grafana or Alertmanager alert arriving on the Grafana webhook maps to one catalogued action
+(the mapping is in the API reference). It does not start the agent. What starts the agent without
+anyone present is a trigger rule of source `argocd` with the action `agent_diagnosis` — see the
+next section.
+
+### ArgoCD events
+
+On a site run with GitOps, ArgoCD can notify VibOps of what it did and what it could not do: a sync that failed, an application whose health degraded, a sync that succeeded. Each notification lands as a row in your organisation's signed audit log, under the action `argocd_event`, with ArgoCD's own message — so the morning after, the question is a filter, not an investigation:
+
+```
+What did ArgoCD report last night? Show me the failed syncs with their messages.
+```
+
+The agent reads them with `list_audit_logs` filtered on `argocd_event`, then follows up with `argocd_get_app`, `argocd_diff` and `argocd_get_history` on the application named in the event. Setting it up is one webhook service and one template in `argocd-notifications-cm`, authenticated with an API token of your organisation (Admin → API tokens) — the exact configuration is in the API reference under `POST /api/v1/webhooks/argocd`.
+
+**Night watch — the diagnosis runs without you.** A trigger rule of source `argocd` with the action `agent_diagnosis` starts the agent on each failed sync (or degraded health) that matches its application selector: the agent reads the application, its diff and its history, states the cause, and either rolls back or holds the rollback as a proposal. Which of the two happens is your organisation's **tool policy**: if confirmation is turned off for `argocd_rollback` in Admin → Tool policy, the night run rolls back and reads the result back (proven, disproven or unknown); if it is on — the default — the run stops at the gate and the morning operator finds the diagnosis, the proposal and its blast radius in the audit log and on the notification channels. Nothing else runs unattended: the mandate is exactly the set of actions you decided not to be asked about.
+
+```
+Watch ArgoCD on cluster bsq-01: on every failed sync, diagnose it and propose the rollback.
+```
+
+The agent creates the rule with `create_trigger` (source `argocd`, action `agent_diagnosis`). The run leaves one row with action `agent_diagnosis` in the audit log — the rule, the event it answered, the tools it called, the verdict and the held proposal — so "what happened last night?" is `list_audit_logs` on two action names.
+
+**The receipt.** Every unattended run has an intervention receipt, read from the signed audit log when you ask for it: the ask (what ArgoCD reported, when), the mandate (your tool policy decision for the action, by whom, when), what ran with each read-back verdict, the diagnosis, the timeline with the time to react and the time to resolve, the event ArgoCD sent when the application was back, and the proof — every cited row re-verified against its signature. It is the document an SLA review or a customer reads, and the one a partner bills against.
+
+```
+Show me last night's receipts.
+Give me the receipt of the bsq-ai-inference incident as a document.
+```
+
+The agent answers with `list_intervention_receipts` and `get_intervention_receipt`; the API serves the same at `GET /api/v1/receipts/{id}?format=markdown`.
 
 ### Automations: Triggers and Agents
 
@@ -1448,7 +1478,7 @@ Both flags can be active simultaneously: the agent presents the dry-run and wait
 
 **The table**
 
-The Tool policy table lists all <!-- fig:actions -->441<!-- /fig --> actions across every registered connector. Each row shows:
+The Tool policy table lists all <!-- fig:actions -->445<!-- /fig --> actions across every registered connector. Each row shows:
 
 | Column | Description |
 |--------|-------------|
@@ -4058,11 +4088,11 @@ python -c "import secrets; print(secrets.token_hex(32))"
 |----------|----------|---------|
 | **Organization** | Teams, Users, Licence | Org structure, roles, licence management |
 | **Infrastructure** | Clusters, Gateways, Git, CI, Integrations | Connect clusters, configure Git/CI, external integrations (Datadog, SIEM) |
-| **Governance** | Tool Policy, Org Policy, Approvals, Agent Tools | Access control, policy-as-code, approval gates, tool catalog (<!-- fig:actions -->441<!-- /fig --> actions) |
+| **Governance** | Tool Policy, Org Policy, Approvals, Agent Tools | Access control, policy-as-code, approval gates, tool catalog (<!-- fig:actions -->445<!-- /fig --> actions) |
 | **Operations** | Notifications, Secrets, Memories | Alert channels, encrypted secrets, agent memory |
 | **Compliance** | Audit, Eval, Data | Immutable audit log, LLM-as-judge evaluation, training dataset |
 | **Security** | SSO/LDAP, API Tokens | Enterprise SSO (OIDC), LDAP/AD integration, API token management |
 
 ### Chat Panel
 
-The chat panel (right sidebar) is available from any tab. It provides natural language access to all <!-- fig:agent_tools -->318<!-- /fig --> tools via the VibOps agent. Those are the agent's own tool definitions; at start-up it fetches the catalogue from core and merges in every action it does not already carry, so the <!-- fig:actions -->441<!-- /fig --> catalogued actions of the Tool Policy table are all reachable from the chat. The two figures measure different things and both are recomputed from the code. Click the chat icon in the header to open/close.
+The chat panel (right sidebar) is available from any tab. It provides natural language access to all <!-- fig:agent_tools -->324<!-- /fig --> tools via the VibOps agent. Those are the agent's own tool definitions; at start-up it fetches the catalogue from core and merges in every action it does not already carry, so the <!-- fig:actions -->445<!-- /fig --> catalogued actions of the Tool Policy table are all reachable from the chat. The two figures measure different things and both are recomputed from the code. Click the chat icon in the header to open/close.

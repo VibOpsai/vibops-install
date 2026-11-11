@@ -957,10 +957,158 @@ of the datacentre, the workstations, the network, the storage or the software li
 - [x] Split `index.html` (9285 lines) into Jinja2 partials — 18 partials, skeleton 406 lines ✓ v0.32.0
 - [x] Split `vibops.js` (5305 lines) into 13 JS modules — Object.assign assembler (38 lines) ✓ v0.32.0
 
+### Surfaced by the positioning work and the Bull engagement (7–9 Nov 2026)
+
+**Decided 10/11/2026 (David):** build the autonomous 3 a.m. sync scenario plus the missing
+Slurm actions, in this order — (1) gateway job outcomes into the signed journal, (2) Slurm
+requeue / drain / resume, (3) ArgoCD event intake, (4) a trigger that launches an agent
+diagnosis with its proof, (5) the receipt, (6) the demo environment with ArgoCD, (7) end-to-end
+test and hardening; the rollback blast radius is optional. Order of magnitude 17 days plus 3
+for Slurm, demo-operational; 5–10 more on Bull's own cluster. Rationale: a customer need
+(Bull's answer 5 — night-time sync failures "to be defined by SLO/SLA"), and an asset
+whatever happens: a human on-call doing it by hand would price any SLA out of reach.
+
+Two independent sources, measured against the code at v0.70.3. The first four items
+come from the resale model (MSP/CSP service lines on top of VibOps) and apply to any
+partner, Bull or not. The rest come from the first Bull meetings: connectors for Bull's
+suites, and compatibility with a GitOps practice — which is a property of a site, not of
+a sales channel, and applies to any customer running GitOps, in direct sale or in resale.
+Prospect-driven items say so; none of them is promised to anyone.
+
+- [ ] **Operator attribution in the audit journal** — no field distinguishes the
+  owner's human, the house AI, a partner or a third-party agent. The agent calls core
+  under the `agent-service` subject with the human's name (`agent/app/services/core_client.py`)
+  while its own `/audit/ingest` writes the human's id; `triggered_by` is fixed to
+  `vibops-agent`; an API token resolves to its owner; agent identities authenticate only
+  at the LLM proxy. Without it there is no billing per operator, no partner commission,
+  no operator reputation. Adding actor and gateway to the row means a signature
+  version 3 — the chain already signs the identity fields.
+- [x] **Gateway job outcomes into the signed journal** ✓ 10/11/2026 — `POST /gateways/{id}/jobs/{job_id}/result`
+  writes status, result and logs to `jobs` and stops; the only writer of outcomes to the
+  audit chain is the local Celery worker (`log_job_outcome_sync`). Every remotely
+  executed action therefore has its decision and creation signed, and its outcome in an
+  unsigned table. Prerequisite for billing per intervention and for the receipt.
+  *Done: the route now calls `log_job_outcome(source="gateway")` after its commit; two
+  witnesses in `tests/test_a_gateway_result_lands_in_the_audit_chain.py`, counter-proved
+  against the previous route.*
+- [ ] **The mandate as an object** — *the receipt shipped 11/11/2026 (ADR 0075, below):
+  ask, policy decision, execution, proof, result, signed, citing the mandate and the Argo
+  revision — for trigger-started runs.* The mandate: a standing delegation — which actor may
+  do what, where, within which bounds, who approves beyond. Today it is cited in the receipt
+  as the organisation's tool-policy override per action (who, when); it is not yet something a
+  customer can be handed as one document.
+- [ ] **Per-actor tool policy** — `tool_policy_overrides` is unique on (action, org):
+  a partner cannot be given narrower bounds than an employee, nor a third-party agent
+  narrower than the house AI. Needed before any outsider operates through a gateway.
+- [ ] **Energy connector for Bull's Smart Energy Management Suite** *(prospect-driven,
+  proposed, not measured)* — BEO exposes a CLI and a REST API with an OpenAPI
+  specification behind OpenID Connect, and can set power limits "on any part of the
+  infrastructure"; ARGOS is its name on XH3500. Reads: power, energy, temperature per
+  node, rack, partition. Writes: set and lift a cap, destructive, proven by reading the
+  cap back. Same shape as the DPS connector (ADR 0066); the DSX Flex `power_cap` hint gets
+  a second hand.
+- [ ] **JARVICE XE connector** *(prospect-driven, proposed)* — REST `/jarvice/submit`,
+  `/batch`, `/status`, `/tail`, `/terminate`, API key per tenant; proof from job status;
+  usage back to FinOps per tenant.
+- [x] **Slurm: requeue, node drain and resume** ✓ 11/11/2026 — the connector had six
+  actions (cluster info, list jobs, submit, cancel, status, output); the Bull brief had
+  claimed requeue and drain as shipped and was corrected on 09/11/2026. Now ten:
+  `slurm_get_node` (the read behind the proofs), `slurm_requeue_job` (`scontrol requeue` /
+  `requeuehold`; slurmrestd has no requeue endpoint, so REST sites go through SSH and say
+  so), `slurm_drain_node` (`State=DRAIN` with a sanitised, required reason — nothing is
+  evicted, running jobs finish, the message says it) and `slurm_resume_node`. Each write
+  declares its proof: `job_requeued` (restart count read from `scontrol show job` /
+  `restart_cnt`, or PENDING again; RUNNING without a restart read stays UNKNOWN),
+  `slurm_node_drained`, `slurm_node_resumed` (a node still `down` after RESUME is
+  DISPROVEN). Demo mode covers all four within one process. *Not measured against a real
+  Slurm: every SSH and HTTP call is mocked in `tests/test_slurm_node_and_requeue_actions.py`;
+  the first real cluster is Bull's lab.* The preview does not yet name the jobs on the
+  node — the agent reads `slurm_list_jobs` and `slurm_get_node` first, as the catalogue
+  tells it to.
+- [x] **ArgoCD event intake** ✓ 11/11/2026 — `POST /webhooks/argocd`, the third brick.
+  Unlike the GitHub and Grafana doors (one platform secret, everything under the reserved
+  organisation), it is authenticated with an organisation API token, so a notification
+  from ArgoCD on a customer's cluster lands in that customer's signed chain, as one row
+  with action `argocd_event` — `success=false` and ArgoCD's message as `reason` for
+  `on-sync-failed`, `on-health-degraded` and `on-sync-status-unknown`. No table of its
+  own: the chain is what the receipt, the SLA evidence and `list_audit_logs` already read.
+  The body is our contract, rendered by one template in `argocd-notifications-cm`
+  (`docs/api-reference.md`): `event` is derived from the three status fields when the
+  template leaves it out, `<no value>` is treated as absent, unknown fields — `org_id`
+  included — are dropped (ADR 0003). One row per (organisation, application, event,
+  revision) per five minutes, fail-open without Redis. Written through
+  `audit.record_event`, which raises rather than logging: an inbound event the chain does
+  not hold is one that did not happen, and ArgoCD retries on a 5xx. *Not yet received from
+  a real ArgoCD: the template is written from the notifications catalogue, and the demo
+  environment with ArgoCD (brick 6) is where it gets measured.* The next brick hooks into
+  `receive_argocd_event`.
+- [x] **A trigger that launches an agent diagnosis with its proof** ✓ 11/11/2026 — ADR 0074,
+  the fourth brick. Trigger source `argocd`, push-driven like `dsx` (ADR 0065): the webhook
+  door matches the organisation's enabled rules by application selector and event, honours
+  the cooldown, and fires. A catalogued action becomes a tenant job carrying the event,
+  gated by `evaluate_system` (destructive only with `confirmed: true` in the rule). The
+  action `agent_diagnosis` starts an **unattended agent run** instead — a Celery task mints
+  a JWT for `trigger:<rule>` / `watch:<name>` in the organisation and calls the agent's chat
+  with `confirm: false`, always. The mandate is the organisation's tool policy, nothing new:
+  confirmation turned off for `argocd_rollback` lets the night run roll back and read the
+  result back; left on, the run stops at the gate with a proposal and its blast radius. The
+  run leaves one chain row, action `agent_diagnosis`, source `trigger`: the rule, the
+  event's row, the tools, the aggregated verdict, the held proposal, the diagnosis — or the
+  agent's unreachability as a failure. *Not yet run against a live agent and a live ArgoCD:
+  brick 6. The console's automations screen does not offer the source yet (nor `dsx`); the
+  API and the agent's `create_trigger` tool do.* Migration `b7e2a9c4d1f3`.
+- [x] **The receipt** ✓ 11/11/2026 — ADR 0075, the fifth brick. `GET /receipts/{id}` reads the
+  chain outwards from an `agent_diagnosis` row: the event row it names (the ask), the run's own
+  rows under `watch:<rule>` with their read-back verdicts (the execution), the first later
+  `argocd_event` saying synced (the result ArgoCD confirmed), the organisation's tool-policy
+  override for each action that ran or was held (the mandate — who decided, when), the timeline
+  (detected, reacted, recorded, resolved, durations), the Git and ArgoCD references, and the
+  proof: every cited row re-verified against its signature, the external anchor if one covers
+  it. A tampered row is named in the receipt, not hidden by a refusal. Nothing stored: a
+  receipt beside the chain would be a second record that could disagree with the first. JSON
+  and markdown; `GET /receipts` lists them; two agent tools. *Open: the mandate as an object; a
+  receipt for a conversation-driven intervention; the console page; the receipt attached to
+  the night-watch notification.*
+- [x] **The demo environment with ArgoCD** ✓ 11/11/2026 — the sixth brick, on the demo host's
+  own k3s: ArgoCD v3.6.1 (API in plain HTTP on NodePort 30444, dex and applicationset off,
+  reconciliation 60 s), a private GitOps repository laid out Bull's way (Kustomize package,
+  cluster overlay, two prepared failure branches), the Application `inference` with automated
+  sync, the notifications webhook to `POST /webhooks/argocd` under a demo-organisation API
+  token, the gateway `k3s-live` recreated with the ArgoCD connector configured (its ping says
+  so), and the Caddy route for the door. Measured: synced and Healthy in 15 s, the first
+  notification sent with the documented body — and answered 404 by core v0.68.0, which has no
+  door yet. `docs/runbooks/demo-argocd-night-watch.md`. *What is left for a night to run end
+  to end (brick 7): release and deploy, create the rule, decide the mandate.*
+- [ ] **sbatch generation quality** — on the demo the agent produced
+  `--ntasks-per-node=8 --gpus-per-task=1` with `srun … torchrun --nproc_per_node=8`,
+  i.e. 64 processes per node for 8 GPUs; an HPC audience reads it in seconds. Validate
+  the srun/torchrun combination in the submit preview, or offer templates.
+- [ ] **The 3 a.m. sync, autonomous** *(prospect-driven — Bull, 10/11/2026)* — today the
+  scenario runs as a conversation the morning after: `argocd_get_app`, `argocd_diff`, events
+  and logs, `argocd_rollback` under confirmation with its declared proof, audit. The night
+  version now exists in the code end to end (the ArgoCD event intake, the trigger that
+  launches the diagnosis and the receipt shipped 11/11/2026, above); what it lacks is a live
+  run — brick 6, the demo environment with ArgoCD. This is the backlog's Incident Responder,
+  scoped to one scenario, and the natural proof-of-value project with Bull. *The user guide's "Prometheus alerts" paragraph claimed an agent-side alert intake
+  no route provided; rewritten on 11/11/2026 to what exists.*
+- [ ] **GitOps: a code guardrail against direct writes on Argo-managed resources** — the
+  ArgoCD notification webhook shipped 11/11/2026 (above); this is what remains.
+  The guardrail reads the Argo tracking label before a Kubernetes write and refuses,
+  naming the Git path (overlaps the Drift Detector agent above). The organisation's tool
+  policy already closes direct writes org-wide; this makes it hard-wired. Build only if a
+  customer asks — Bull raised the question on 09/11/2026.
+- [ ] **Demo hygiene** — three test gateways in VibOps Demo (`xxxx`, `jfjfjjf`,
+  `tototot`, never connected) show as unreachable in the fleet; the waste summary keeps the
+  last successful scan per gateway, so `scw-par` still reports two idle L4 from 05/10 after
+  the GPU pool was deleted (a fresh scan clears it); the Slurm demo mode is dated
+  10/05/2026 and names every job `vibops-demo-job`; the DPS demo mode's canned state does
+  not persist across jobs, so a confirmed `dps_apply_power_policy` is DISPROVEN by its own
+  read-back — stop at the preview on stage.
+
 ---
 
 ## Out of scope for now
 
-- **Managed service** — operating client infrastructure on their behalf. Requires dedicated ops team. Revisit at scale.
+- **Managed service** — operating client infrastructure on their behalf. Requires dedicated ops team. Revisit at scale. *Reaffirmed 08/11/2026: VibOps is the software that MSPs and CSPs deliver their managed services with — service lines run by agents under the partner's responsibility, white-labelled, priced per machine. VibOps supplies the engine, the bounds and the receipt; the partner keeps the customer and the liability.*
 - **VibOps SaaS Cloud** — hosted VibOps as SaaS. Target markets (sovereignty-constrained CSPs and enterprises) require on-premise. Revisit for smaller clients without own infra.
 - **Native charts** (without Grafana dependency) — revisit when monitoring tab proves insufficient.

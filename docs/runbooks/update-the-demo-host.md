@@ -1,6 +1,6 @@
 # Updating the demonstration host
 
-_Last updated: 2026-11-02 · v0.68.0_
+_Last updated: 2026-11-11 · v0.68.0 on the host; the Caddyfile gained the ArgoCD door (`@argocd`) on 11/11/2026, see `demo-argocd-night-watch.md`_
 
 > **When to use this runbook:** a release has been tagged and the public demo
 > should run it.
