@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.71.1] — 2026-11-11
+
+What the first real night taught, an hour after v0.71.0 ran it on the demonstration host: ArgoCD reported the degraded health at 11:50:37, the run started 10 s later, proposed the right rollback, and the receipt read correctly — with two defects behind it.
+
+### Fixed
+- **The unattended run now has a scope.** Its identity carried no team, and the agent's guardrail reads a non-admin's scope from its teams: every Kubernetes read was refused ("you do not have access to namespace 'gitops-demo'", "cluster 'dc-live'"), so the run diagnosed from ArgoCD alone and could not name the failing image. The identity now carries one synthetic team scoped to the rule's cluster, every namespace of it — the mandate's *where* (ADR 0074 §3 amended). The prompt asks for the exact cause as the pod's container status reports it.
+- **The run no longer crashes after recording its chain row.** It read the rule's name and the row's id after the commit, which a production session expires; the reload is synchronous inside the async task and raised, so the row was written, the channels were never notified and Celery recorded a failure. Everything the row needs is read before the commit, and a witness runs on a session that expires on commit — the suite's own session did not, which is why nothing caught it.
+- **The test suite no longer writes to the real licence registry.** Every pass of `tests/test_licence_issuance.py` — the pre-commit hook included — appended a "Oreus, pro, 30 days" line to `~/.vibops/licences.csv`, the one list of licences actually issued: 48 such lines beside the single real one on 11/11/2026. The issuances now go to a registry beside the ephemeral key, and the test asserts the real one is untouched.
+- **Dependabot's dependency graph covers core again.** `core/requirements.txt` declared the sibling connector library as `file://../connectors`, which Dependabot cannot evaluate: the graph job for core failed on every push since at least v0.70.3, so GitHub's own alerts never covered core. The line is gone; the Dockerfile and the CI already install the library separately.
+
 ## [0.71.0] — 2026-11-11
 
 The 3 a.m. sync, autonomous — the scenario worked out with Bull on 10/11/2026, built brick by brick on 10 and 11/11 (ADR 0074, 0075). A sync that fails at night on a customer's cluster now reaches VibOps, starts the agent without anyone present, and leaves a receipt the morning reads.
