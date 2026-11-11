@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.72.0] — 2026-11-11
+
+The dependency release. Everything below was merged on 11/11/2026 after the 3 a.m. scenario shipped (v0.71.x); this is the version the demonstration host runs first, because two of the moves — the worker's broker under redis 8 with kombu 5.7, and the agent's first real call through the Anthropic SDK 2.6 — are measured there and nowhere else.
+
+### Changed
+- **Dependencies, core and console (Dependabot #67 and #49, taken deliberately on 11/11/2026).** FastAPI 0.136 → 0.162, Starlette 1.3 → 1.10, pydantic 2.10 → 2.14, SQLAlchemy 2.0 → 2.1, redis 5 → 8 with kombu 5.7 (the pin of 03/11 lifted as it said), Celery 5.4 → 5.7, anthropic 1.5 → 2.6 (core's eval task only), pytest 9.2. What the bump broke was not the application but its own guards: since FastAPI 0.140 an included router is one nested entry in `app.routes`, and eight tests that walked that list saw two routes out of three hundred — they now read the effective route contexts FastAPI itself matches (`tests/_routes.py`). `docs/openapi.json` regenerated under the new versions. The full core suite passes under the new pins locally and in CI; the first release carrying them is where the worker's broker and the Celery transport get measured on the demonstration host.
+- **Dependencies, the rest (Dependabot #62, #63, #64, #46, #66, merged the same day).** The agent moves to the Anthropic SDK 2.6 — checked in a throwaway venv that it still exposes everything `llm_client.py` calls, and the agent suite passes under the pins (1113); the first real call against the API is measured on the demonstration host at the next release. Connectors, gateway, LLM proxy and the GitHub Actions groups: green in CI, taken as proposed.
+
 ## [0.71.3] — 2026-11-11
 
 The third and fourth real nights of the watch, on the demonstration host. The fourth is the one the scenario was built for: a failed sync detected at 13:42:00, the run 14 s later, the rollback executed at 13:43:00 and read back proven, the receipt `resolved` 1 min 16 s after detection with eight signed rows verified.

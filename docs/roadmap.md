@@ -991,6 +991,14 @@ Prospect-driven items say so; none of them is promised to anyone.
   *Done: the route now calls `log_job_outcome(source="gateway")` after its commit; two
   witnesses in `tests/test_a_gateway_result_lands_in_the_audit_chain.py`, counter-proved
   against the previous route.*
+- [ ] **What the agent remembers, and for how long** *(proposed 11/11/2026 — ADR 0076, not
+  built)* — `memories` is a bag of undated facts with a free type, injected whole into the
+  prompt on every turn (23 rows on the demo, two morning briefs among them, facts from
+  September). Three kinds with three lifetimes — `rule` (never ages, a person's word),
+  `observation` (dated, expires), `episode` (a pointer to the chain, never a copy) — as
+  columns the database checks; the prompt shows age; the episodic recall of ADR 0068 reads
+  the receipts beside its own corpus. Measure first: how many of the demo's rows are
+  which, and the prompt size before and after.
 - [ ] **The mandate as an object** — *the receipt shipped 11/11/2026 (ADR 0075, below):
   ask, policy decision, execution, proof, result, signed, citing the mandate and the Argo
   revision — for trigger-started runs.* The mandate: a standing delegation — which actor may
