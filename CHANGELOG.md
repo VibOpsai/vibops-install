@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.72.1] — 2026-11-11
+
+The sixth real night, run for the recording of the Bull demonstration, found that the rollback had never happened. Three receipts said "proven"; ArgoCD had refused every one.
+
+### Fixed
+- **A rollback of an auto-synced ArgoCD application is refused — and was read back as proven.** ArgoCD answers `400 rollback cannot be initiated when auto-sync is enabled`, and with self-heal it would re-apply Git's HEAD anyway. Three things agreed with each other and with nothing real: the agent handed the model the job as the core accepted it (`pending`) and read the proof at once; the proof (`app_healthy`) read only the health, which a *failed* sync leaves intact because the previous pods keep running; the receipt walked the run's rows only, not the gateway's row that carried the refusal eleven seconds later. Seen only by the scenario that actually touches the pods (`bad-image`, Degraded): the proof loop then ran its full 600 s and the worker's own 600 s timeout fired first. Now: `argocd_rollback` reads the application, **pauses auto-sync when it is automated** — the procedure ArgoCD's own CLI documents — rolls back, and says in its result that auto-sync is paused until Git is fixed (`argocd_enable_auto_sync` re-enables it); `argocd_get_app` carries the deployment history and the operation phase; the proof is `app_rolled_back` — the revision that runs equals the one the history id names, then the health; the agent **waits for a dispatched job to settle before proving it**, and a job the gateway refuses reaches the model as an error with no verdict; the receipt reads the job each action dispatched (`execution: {job_id, status, error}`), a refusal makes the night `failed` unless ArgoCD later confirmed a fix, and a "proven" verdict beside a refused job no longer resolves anything. The worker's timeout to the agent is 900 s, above the longest proof. Tests: the connector's pause and its two other paths, the predicate's eight cases, the agent's four settle cases, the receipt of a refused rollback.
+
+
 ## [0.72.0] — 2026-11-11
 
 The dependency release. Everything below was merged on 11/11/2026 after the 3 a.m. scenario shipped (v0.71.x); this is the version the demonstration host runs first, because two of the moves — the worker's broker under redis 8 with kombu 5.7, and the agent's first real call through the Anthropic SDK 2.6 — are measured there and nowhere else.

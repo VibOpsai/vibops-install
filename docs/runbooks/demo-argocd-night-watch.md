@@ -133,27 +133,61 @@ rolled-back resources and OutOfSync against `main`, which still carries the
 bad commit — the morning's Git revert (pushed 13:43:48) is what closes it,
 as the third rule says. Receipt `3431f01e-d967-485d-938f-e494214d1c5d`.
 
-What the four nights measured, in one line each: detection is ArgoCD's (60 s
+**11/11/2026, 17:39 UTC — the same scenario under v0.72.0, the dependency
+release.** The measurement that release owed: `on-sync-failed` at 17:45,
+the Celery task received 14 s later over redis 8 with kombu 5.7, the agent's
+run through the Anthropic SDK 2.6 (five reads, the rollback at 17:46:22,
+**read back: proven**), the diagnosis at 17:46:36, the task done in 83 s.
+Nothing in the stack had changed its behaviour. Receipt
+`599b0905-5d22-420b-bacd-51f54e221960`.
+
+**11/11/2026, 17:58 UTC — `scenario/bad-image` again, act tier, v0.72.0, the
+rehearsal for the recording — and the night that found the rollback had never
+happened.** The push at 17:58:50; synced at 17:59:08; `on-health-degraded` at
+18:00:18 (the pod in `ErrImagePull`, the deadline of 60 s); the run at
+18:00:16; the rollback dispatched at 18:00:34 and **refused by ArgoCD at
+18:00:45**: `400 rollback cannot be initiated when auto-sync is enabled`. The
+jobs table says the same of the fourth and fifth nights (`aa3f99cd` at
+17:46:22, and 13:43:00): their "read back: proven" above was the proof
+`app_healthy` reading an application that a *failed* sync had left running on
+its previous pods — healthy whether the rollback ran or not. This night the
+pods were really broken, so the proof loop ran its full 600 s against
+`Degraded`, the worker's own 600 s timeout fired first and the diagnosis row
+says `agent call failed: ReadTimeout`. Three defects in one line of the chain,
+fixed in v0.72.1: the connector pauses auto-sync before the rollback (ArgoCD's
+own CLI procedure) and says so; the proof reads the revision that runs against
+the one the history id names (`app_rolled_back`); the agent waits for the
+dispatched job to settle before proving it, and the receipt reads the job's
+outcome beside the run's row. Receipt of this night: `failed`, as it should.
+
+What the six nights measured, in one line each: detection is ArgoCD's (60 s
 for a degraded health, five minutes for a rejected patch); the run starts
-10–21 s after the event; a diagnosis takes 50–90 s; the rollback, read back,
-takes under a minute; the receipt is the chain, verified.
+10–21 s after the event; a diagnosis takes 50–90 s; the receipt is the chain,
+verified. **Whether the rollback happens is measured by the seventh night**,
+under v0.72.1 — read the jobs table, not the verdict, until it has.
 
 ## Running a night
 
 ```bash
 # on your machine, in a clone of vibops-demo-gitops
 git checkout main && git pull
-git merge --no-ff scenario/bad-image -m "night: bad image tag" && git push
+sed -i '' 's/newTag: 1.27-alpine$/newTag: 1.27-alpine-does-not-exist/' clusters/dc-live/inference/kustomization.yaml
+git commit -am "night: bad image tag" && git push
 # ArgoCD syncs within 60 s; the Deployment never becomes available; health is
 # Degraded after progressDeadlineSeconds (60 s) → on-health-degraded → VibOps.
 ```
 
+One line in the overlay, committed, as Bull's own change would be. (The
+`scenario/bad-image` branch exists, but `git merge` of it is a no-op once it
+has been merged and reverted once — the first night did both — so the edit is
+what repeats.)
+
 `scenario/bad-manifest` is the other night: `progressDeadlineSeconds: soon`
-makes the sync itself fail → `on-sync-failed`, within 60 s of the push. (Its
-first version put a word in `replicas`, which the cluster overlay overrides
-with `count: 1` — kustomize built a valid manifest and ArgoCD synced it
-happily on 11/11/2026 at 12:21. A failure scenario has to break a field the
-overlay leaves alone.)
+in `apps/inference/base/deployment.yaml` makes the sync itself fail →
+`on-sync-failed`, within five minutes of the push. (Its first version put a
+word in `replicas`, which the cluster overlay overrides with `count: 1` —
+kustomize built a valid manifest and ArgoCD synced it happily on 11/11/2026
+at 12:21. A failure scenario has to break a field the overlay leaves alone.)
 
 What to read afterwards, in the console: *"What did ArgoCD report tonight?"*
 (`list_audit_logs` on `argocd_event`), *"Show me last night's receipts"*
@@ -168,10 +202,20 @@ k3s kubectl -n argocd get app inference                      # Synced / Healthy 
 ```
 
 If the night run rolled back (act tier), ArgoCD's history now holds that
-rollback; the revert in Git is still what the morning review merges — the
-rollback changed the cluster, not the repository, and self-heal would re-apply
-`main` otherwise. That is the third rule of the brief: *when the robot fails,
-VibOps looks at why and proposes the fix; Git stays the source of truth.*
+rollback **and auto-sync is paused on the application** — the rollback pauses
+it, because ArgoCD refuses a rollback under automated sync and self-heal would
+re-apply `main` a minute later. The revert in Git is still what the morning
+review merges; then auto-sync comes back, in the console (*"Re-enable auto-sync
+on inference, Git is fixed"* → `argocd_enable_auto_sync`) or by hand:
+
+```bash
+k3s kubectl -n argocd patch app inference --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
+k3s kubectl -n argocd get app inference -o jsonpath='{.spec.syncPolicy}'   # automated is back
+```
+
+That is the third rule of the brief: *when the robot fails, VibOps looks at
+why and proposes the fix; Git stays the source of truth.*
 
 ## Repairing
 

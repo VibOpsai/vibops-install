@@ -709,6 +709,9 @@ curl -s "https://<host>/api/v1/receipts?since=2026-11-10T00:00:00Z" \
 ### `GET /api/v1/receipts/{receipt_id}`
 
 The receipt as JSON, or as markdown for a person with `?format=markdown`.
+Each action the run dispatched to a gateway carries `execution: {job_id, status, error}` — what the
+gateway did with it, read from the job — beside the run's own `success` and read-back `verification`;
+a remediation the gateway refused makes the receipt `failed` unless ArgoCD later confirmed a fix.
 
 ```bash
 curl -s "https://<host>/api/v1/receipts/3fa8e1b2-...?format=markdown" \

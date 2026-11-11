@@ -184,6 +184,12 @@ list because they are the ones that silently broke: see above.
 Every container must read `healthy`. An `unhealthy` one that answers requests is
 still a defect: it is how the `beat` scheduler sat broken across six releases.
 
+**Measured on 11/11/2026, v0.71.3 → v0.72.0 — the dependency release.** No
+migration; the worker logged `Connected to redis://…` and `celery@… ready`
+under redis 8 and kombu 5.7, `celery inspect ping` answered; the night watch
+ran end to end 10 minutes after the update (receipt `599b0905-…`), the
+agent on the Anthropic SDK 2.6 included. Backup in `/root/before-v0.72.0`.
+
 **Measured on 11/11/2026, v0.68.0 → v0.71.0.** One migration (`b7e2a9c4d1f3`,
 applied by core at start — `alembic_version` read it back); the compose drift
 was the seven fallbacks and the `./static` mount; 59 tables, 45 gateways and 4
