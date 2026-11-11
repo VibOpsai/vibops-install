@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.72.3] — 2026-11-11
+
+### Fixed
+- **The agent did not know what day it was.** Asked for "last night's intervention receipts" during the recording of the Bull demonstration, it put last night in July and answered that there were none — the receipts were an hour old. Nothing in the prompt said the date. The live block of the system prompt now opens with the current date and time in UTC and the rule that "today", "tonight", "last night" and "yesterday" are relative to it; the cached block is untouched, so the prompt cache survives the day change. A test pins the clock and checks both blocks.
+
+
 ## [0.72.2] — 2026-11-11
 
 The seventh real night, under v0.72.1: the rollback happened — auto-sync paused, the previous image running, the application healthy — and the proof said *disproven* for its full 600 s, because it compared the wrong revision.

@@ -173,12 +173,29 @@ honest about it — "accepted by ArgoCD, auto-sync paused, the effect was not
 confirmed", with the three morning steps. Fixed in v0.72.2: the proof reads
 what the last operation deployed.
 
-What the seven nights measured, in one line each: detection is ArgoCD's
+**11/11/2026, 19:28 UTC — `scenario/bad-image`, act tier, v0.72.2 — the
+night the scenario was built for, end to end.** Pushed at 19:28:42; synced
+at 19:30:14; `on-health-degraded` at 19:31:16; the run at 19:31:36 (20 s);
+the rollback dispatched at 19:32:01, done at 19:32:08 (auto-sync paused,
+history id 6 = `92324c1`); **read back: proven** at 19:32:23 — "the
+application runs 92324c15507a (history id 6) and is healthy"; the diagnosis
+at 19:32:46 names the commit, the tag, the kubelet's `ErrImagePull`, and the
+three morning steps. Receipt `8593eda2-a91a-40f7-b973-08c901c8b586`:
+`resolved` 53 s after detection, nine signed rows verified, the mandate
+cited (both switches off). The morning gesture in the console — *"Re-enable
+auto-sync on inference, Git is fixed"* — ran `argocd_enable_auto_sync` and
+read the application back Synced/Healthy on the reverted commit. One nit to
+know before a careful viewer asks: the confirming event is `on-deployed` and
+its `revision` is `status.sync.revision`, Git's HEAD (the faulty commit), not
+the revision the rollback deployed — the notification template sends that
+field; the receipt's rollback line carries the right one.
+
+What the eight nights measured, in one line each: detection is ArgoCD's
 (60 s for a degraded health, five minutes for a rejected patch); the run
-starts 10–21 s after the event; a diagnosis takes 50–90 s; a rollback under
-auto-sync is a pause plus a rollback, done in 4 s; the receipt is the chain,
-verified. **Whether the proof says so is measured by the eighth night**,
-under v0.72.2.
+starts 10–21 s after the event; a rollback under auto-sync is a pause plus a
+rollback, done in 4–7 s and read back proven 15 s later; a diagnosis takes
+50–90 s; the receipt is the chain, verified — and says `resolved` under a
+minute after detection.
 
 ## Running a night
 
