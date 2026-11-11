@@ -160,11 +160,25 @@ the one the history id names (`app_rolled_back`); the agent waits for the
 dispatched job to settle before proving it, and the receipt reads the job's
 outcome beside the run's row. Receipt of this night: `failed`, as it should.
 
-What the six nights measured, in one line each: detection is ArgoCD's (60 s
-for a degraded health, five minutes for a rejected patch); the run starts
-10–21 s after the event; a diagnosis takes 50–90 s; the receipt is the chain,
-verified. **Whether the rollback happens is measured by the seventh night**,
-under v0.72.1 — read the jobs table, not the verdict, until it has.
+**11/11/2026, 18:46 UTC — `scenario/bad-image`, act tier, v0.72.1 — the
+rollback happens.** Pushed at 18:46:44; `on-health-degraded` at 18:48:30; the
+rollback dispatched at 18:49:37 and **done at 18:49:41**: the connector read
+the application, removed `automated` from its sync policy, and ArgoCD
+accepted the rollback to history id 2 — `syncResult.revision 92324c1`,
+operation `Succeeded`, the pods on `1.27-alpine`, health `Healthy`, measured
+at 18:55. And the proof said *disproven* for 600 s: it compared
+`status.sync.revision`, which is Git's HEAD (`7e35675`, the faulty commit)
+and which a rollback leaves untouched by design. The agent's report was
+honest about it — "accepted by ArgoCD, auto-sync paused, the effect was not
+confirmed", with the three morning steps. Fixed in v0.72.2: the proof reads
+what the last operation deployed.
+
+What the seven nights measured, in one line each: detection is ArgoCD's
+(60 s for a degraded health, five minutes for a rejected patch); the run
+starts 10–21 s after the event; a diagnosis takes 50–90 s; a rollback under
+auto-sync is a pause plus a rollback, done in 4 s; the receipt is the chain,
+verified. **Whether the proof says so is measured by the eighth night**,
+under v0.72.2.
 
 ## Running a night
 

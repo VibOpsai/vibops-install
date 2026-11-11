@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.72.2] — 2026-11-11
+
+The seventh real night, under v0.72.1: the rollback happened — auto-sync paused, the previous image running, the application healthy — and the proof said *disproven* for its full 600 s, because it compared the wrong revision.
+
+### Fixed
+- **The rollback proof read Git's HEAD, not what runs.** ArgoCD's `status.sync.revision` is the revision the cluster is compared *against* — the target branch's HEAD, the faulty commit — and a rollback leaves it untouched by design; what the rollback deployed is `status.operationState.syncResult.revision` (measured at 18:55 UTC: `7e35675` against `92324c1`, the pods on the rolled-back image, Healthy). `argocd_get_app` now carries `deployed_revision` beside `revision`, `app_rolled_back` compares that one with the history entry and requires the operation to have `Succeeded`. The agent's own report of the seventh night was right about the facts it had — "accepted by ArgoCD, auto-sync paused, the effect was not confirmed" — which is what the disproven path is for.
+
+
 ## [0.72.1] — 2026-11-11
 
 The sixth real night, run for the recording of the Bull demonstration, found that the rollback had never happened. Three receipts said "proven"; ArgoCD had refused every one.
