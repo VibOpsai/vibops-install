@@ -55,10 +55,14 @@ v0.68.0, answered 404 — the door exists from v0.71.0.
    (ask) — the *propose* tier, the night run stops at the gate and the
    morning finds the proposal; `false` is the *act* tier — the run rolls back
    and reads it back. Set to `false` on 11/11/2026 at 12:04 UTC by `demo-admin`
-   through `PATCH /api/v1/catalog/argocd_rollback`, for the second night.
-   **The receipt cites the decision as it stands when the receipt is read,
-   not as it stood during the night** — so leave the row where it was when a
-   night ran, or the receipt of that night changes under it.
+   through `PATCH /api/v1/catalog/argocd_rollback`, for the second night;
+   `requires_external_approval` set to `false` at 13:33 for the fourth. **The
+   mandate is both switches**: confirmation off alone sends the job to the
+   approval gate (the third night). **The receipt cites the decision as it
+   stands when the receipt is read, not as it stood during the night** — so
+   leave the row where it was when a night ran, or the receipt of that night
+   changes under it. The `decided_by` it cites is what the tool-policy route
+   stores, the admin's user id, not a name.
 4. `AGENT_API_URL` is set in the host's `.env` and the worker reaches the agent
    on the Compose network — measured, the run needs nothing more.
 
@@ -107,6 +111,32 @@ the console either. The receipt of this night
 (`fc381bc3-d830-4156-a7f1-008a2ac4a649`) shows the contradiction an auditor
 would see: a mandate that says "the run may act" above an action "held for
 confirmation".
+
+**11/11/2026, 13:25 UTC — `scenario/bad-manifest` again, v0.71.2, confirmation
+off, external approval still on.** `on-sync-failed` at 13:31:24, run 16 s
+later; the gate let `argocd_rollback` through this time — and the job parked
+at the organisation's **approval gate** (`awaiting_approval`, job
+`93180b99-…`): the demo organisation's row for this action also carried
+`requires_external_approval: true`, set weeks earlier. The mandate has two
+switches, and the receipt of this night cited only one — fixed in v0.71.3,
+which names both and reads a job parked for approval as a proposal. Receipt
+`324e9b94-b361-4043-8c17-1f9f4884107e`.
+
+**11/11/2026, 13:35 UTC — the same scenario, both switches off (set at 13:33
+through `PATCH /api/v1/catalog/argocd_rollback`).** `on-sync-failed` at
+13:42:00; run 14 s later; `argocd_rollback` executed at 13:43:00 and **read
+back: proven** ("the application is healthy"); diagnosis recorded at
+13:43:16, verdict `proven` on one action. The receipt reads `resolved`, 1 min
+16 s after detection, eight signed rows re-verified. ArgoCD accepted the
+rollback with automated sync still on; the application is Healthy on the
+rolled-back resources and OutOfSync against `main`, which still carries the
+bad commit — the morning's Git revert (pushed 13:43:48) is what closes it,
+as the third rule says. Receipt `3431f01e-d967-485d-938f-e494214d1c5d`.
+
+What the four nights measured, in one line each: detection is ArgoCD's (60 s
+for a degraded health, five minutes for a rejected patch); the run starts
+10–21 s after the event; a diagnosis takes 50–90 s; the rollback, read back,
+takes under a minute; the receipt is the chain, verified.
 
 ## Running a night
 

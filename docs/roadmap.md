@@ -1093,10 +1093,15 @@ Prospect-driven items say so; none of them is promised to anyone.
   decision not to be asked had never reached the gate — in the console either, since
   16/10/2026** (v0.71.2). Also found: the suite wrote 48 test lines into the real licence
   registry, and Dependabot's graph for core failed on every push since v0.70.3 (both v0.71.1).
-  *Not yet seen: a night that rolls back and reads it back — v0.71.2 on the host, then the
-  third night. ArgoCD takes five minutes to declare a rejected patch failed; the detection
-  time is ArgoCD's, not ours. Worker tracebacks unrelated to the watch:
-  `detect_agent_anomalies` fails on a UUID it cannot serialise.*
+  Night 3 (v0.71.2, confirmation off): the rollback left the gate and parked at the approval
+  gate — the organisation's row also carried `requires_external_approval`; the mandate is two
+  switches, and the receipt now cites both and reads a parked job as a proposal (v0.71.3).
+  **Night 4 (both switches off): failed sync detected 13:42:00, run 14 s later, rollback
+  executed at 13:43:00 and read back `proven`, receipt `resolved` 1 min 16 s after detection,
+  eight signed rows verified.** ArgoCD takes five minutes to declare a rejected patch failed;
+  the detection time is ArgoCD's, not ours. *Worker tracebacks unrelated to the watch:
+  `detect_agent_anomalies` fails on a UUID it cannot serialise. Open: the receipt's
+  `decided_by` is the admin's user id, as the tool-policy route stores it.*
 - [ ] **sbatch generation quality** — on the demo the agent produced
   `--ntasks-per-node=8 --gpus-per-task=1` with `srun … torchrun --nproc_per_node=8`,
   i.e. 64 processes per node for 8 GPUs; an HPC audience reads it in seconds. Validate

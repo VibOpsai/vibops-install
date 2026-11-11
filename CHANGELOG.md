@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Nothing yet._
 
+## [0.71.3] — 2026-11-11
+
+The third and fourth real nights of the watch, on the demonstration host. The fourth is the one the scenario was built for: a failed sync detected at 13:42:00, the run 14 s later, the rollback executed at 13:43:00 and read back proven, the receipt `resolved` 1 min 16 s after detection with eight signed rows verified.
+
+### Fixed
+- **The receipt reads a job parked at the approval gate as a proposal, and cites both switches of the mandate.** The third night ran with confirmation turned off and `requires_external_approval` still on: the rollback left the gate and parked as a job awaiting approval, and the receipt — which cited `requires_confirmation` alone — said the run "may act" above an action that had not. The mandate line now names confirmation and external approval, with their decision, and the receipt carries `approvals` and the outcome `proposed` for a parked job (ADR 0075 amended).
+
+### Changed
+- `docs/runbooks/demo-argocd-night-watch.md` records all four nights and what each measured.
+
 ## [0.71.2] — 2026-11-11
 
 What the second real night taught, on the demonstration host at v0.71.1: the organisation had turned confirmation off for `argocd_rollback` at 12:04, and the unattended run of 12:45 was still held with "your organisation's tool policy requires it".
