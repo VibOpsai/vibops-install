@@ -1,0 +1,98 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vibops.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  replicas: {{ .Values.agent.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      annotations:
+        # Change quand l'operateur change une valeur du Secret, pour que la
+        # mise a jour recree le pod — voir `vibops.secretChecksum`.
+        checksum/secret: {{ include "vibops.secretChecksum" (dict "ctx" $ "component" "agent") }}
+      labels:
+        {{- include "vibops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent
+    spec:
+      {{- include "vibops.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "vibops.fullname" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: agent
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "agent") | quote }}
+          imagePullPolicy: {{ .Values.images.agent.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8001
+          envFrom:
+            - secretRef:
+                name: {{ include "vibops.fullname" . }}-agent
+          env:
+            - name: TRAINING_DATA_DIR
+              value: /app/data/training
+            # The agent validates tokens core signs. It reads core's Secret
+            # rather than carrying its own copy: two independent defaults once
+            # agreed by accident, and the first deliberate value broke the pair.
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops.fullname" . }}-core
+                  key: JWT_SECRET_KEY
+            # The agent hands its own model usage to core's internal ingestion
+            # endpoint (ADR 0057), which checks this shared key. Same source
+            # as the JWT secret, for the same reason: one value, one owner.
+            # Measured on 25/10/2026: the Compose install passes it through
+            # `.env`; this chart did not pass it at all, so every hand-off would
+            # have been refused with a 401 and the cost never measured.
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops.fullname" . }}-core
+                  key: INTERNAL_API_KEY
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.agent.persistence.enabled }}
+            - name: training-data
+              mountPath: /app/data/training
+            {{- end }}
+          # The agent serves no /health: main.py exposes `/` and `/metrics`, and
+          # the compose deployment has always probed `/`. The chart probed
+          # /health, got 404, and the pod ran forever without becoming ready —
+          # so the Service had no endpoints and the console could not reach it.
+          # A pod that runs and is never ready looks like a slow start.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.agent.persistence.enabled }}
+        - name: training-data
+          persistentVolumeClaim:
+            claimName: {{ include "vibops.fullname" . }}-agent-training
+        {{- end }}
+{{- end }}

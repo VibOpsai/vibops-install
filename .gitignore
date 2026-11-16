@@ -1,0 +1,17 @@
+# Ce que votre installation cree et qui ne doit jamais partir dans un depot.
+#
+# Le depot d'installation n'en portait aucun : `git status` affichait `.env` et
+# `Caddyfile` comme non suivis, et un `git add -A` par reflexe y versionnait les
+# mots de passe de la base, les cles de signature, la cle de l'API LLM et le hash
+# du compte administrateur.
+.env
+.env.bak
+Caddyfile
+
+# Archives de support produites par `make debug` : elles contiennent les
+# journaux de production, meme avec les valeurs du .env masquees.
+vibops-debug-*
+
+# Sauvegardes locales.
+*.sql.gz
+backups/

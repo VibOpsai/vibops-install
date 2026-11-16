@@ -1,0 +1,47 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "vibops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          # Console — route principale
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "vibops.fullname" . }}-console
+                port:
+                  number: {{ .Values.console.service.port }}
+          # API core
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "vibops.fullname" . }}-core
+                port:
+                  number: {{ .Values.core.service.port }}
+          # API agent (chat)
+          - path: /api/v1/chat
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "vibops.fullname" . }}-agent
+                port:
+                  number: {{ .Values.agent.service.port }}
+{{- end }}

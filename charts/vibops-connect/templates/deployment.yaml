@@ -1,0 +1,222 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vibops-connect.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops-connect.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vibops-connect.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vibops-connect.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "vibops-connect.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: connect
+          image: {{ include "vibops-connect.image" . }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: VIBOPS_CORE_URL
+              value: {{ .Values.vibops.coreUrl | required "vibops.coreUrl is required" | quote }}
+            - name: VIBOPS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vibops-connect.secretName" . }}
+                  key: token
+            # L'identifiant de la passerelle, exige au demarrage. Le chart
+            # passait GATEWAY_NAME / GATEWAY_CLUSTER / GATEWAY_ORG_ID, que
+            # l'ancien relais lisait pour s'auto-enregistrer. connect ne
+            # s'enregistre pas : il attend un id deja cree dans la console, et
+            # sort immediatement s'il ne l'a pas.
+            - name: VIBOPS_GATEWAY_ID
+              value: {{ .Values.gateway.id | required "gateway.id is required — create the gateway in the console first" | quote }}
+            {{- if .Values.gateway.clusterName }}
+            # Le nom sous lequel ce cluster se declare, donc l'adresse par
+            # laquelle les jobs le trouvent. Unique par organisation.
+            - name: VIBOPS_CLUSTER_NAME
+              value: {{ .Values.gateway.clusterName | quote }}
+            {{- end }}
+            {{- if .Values.powerCollection.enabled }}
+            # Volontaire : la collecte ajoute une lecture DCGM et un appel par
+            # BMC a chaque cycle, sur le materiel du client.
+            - name: VIBOPS_COLLECT_POWER
+              value: "1"
+            {{- end }}
+            {{- if .Values.networkScan.enabled }}
+            {{- if .Values.networkScan.subnet }}
+            # Sans sous-reseau, connect deduit le sien : dans un pod, le reseau
+            # du cluster, ou il n'y a aucun BMC. Le scan tournerait et ne
+            # trouverait rien, ce qui se lit « pas de bare metal » et veut dire
+            # « je n'ai pas pu regarder ».
+            - name: VIBOPS_NETWORK_SCAN_SUBNET
+              value: {{ .Values.networkScan.subnet | quote }}
+            {{- end }}
+            {{- if .Values.networkScan.timeoutMs }}
+            - name: VIBOPS_NETWORK_SCAN_TIMEOUT
+              value: {{ .Values.networkScan.timeoutMs | quote }}
+            {{- end }}
+            {{- else }}
+            - name: VIBOPS_NETWORK_SCAN
+              value: "false"
+            {{- end }}
+            {{- if .Values.pollInterval }}
+            - name: VIBOPS_POLL_INTERVAL
+              value: {{ .Values.pollInterval | quote }}
+            {{- end }}
+            {{- if .Values.allowConnectors }}
+            - name: VIBOPS_ALLOW_CONNECTORS
+              value: {{ join "," .Values.allowConnectors | quote }}
+            {{- end }}
+            {{- if .Values.gateway.hypervisorName }}
+            - name: VIBOPS_HYPERVISOR_NAME
+              value: {{ .Values.gateway.hypervisorName | quote }}
+            {{- end }}
+            {{- if .Values.hypervisors }}
+            # Plusieurs hyperviseurs sur une passerelle. Chaque entree porte son
+            # nom, qui est la cle visee par les regles d'alerte et la
+            # tarification — deux Proxmox sans noms distincts seraient fondus
+            # en un seul.
+            - name: VIBOPS_HYPERVISORS
+              value: {{ .Values.hypervisors | toJson | quote }}
+            {{- end }}
+            {{- if .Values.vsphere.host }}
+            - name: VSPHERE_HOST
+              value: {{ .Values.vsphere.host | quote }}
+            - name: VSPHERE_USERNAME
+              value: {{ .Values.vsphere.username | quote }}
+            - name: VSPHERE_PASSWORD
+              value: {{ .Values.vsphere.password | quote }}
+            {{- if .Values.vsphere.port }}
+            - name: VSPHERE_PORT
+              value: {{ .Values.vsphere.port | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.proxmox.url }}
+            - name: PROXMOX_URL
+              value: {{ .Values.proxmox.url | quote }}
+            - name: PROXMOX_USER
+              value: {{ .Values.proxmox.user | quote }}
+            - name: PROXMOX_TOKEN_ID
+              value: {{ .Values.proxmox.tokenId | quote }}
+            - name: PROXMOX_TOKEN
+              value: {{ .Values.proxmox.token | quote }}
+            {{- end }}
+            {{- if .Values.xenOrchestra.url }}
+            - name: XO_URL
+              value: {{ .Values.xenOrchestra.url | quote }}
+            - name: XO_TOKEN
+              value: {{ .Values.xenOrchestra.token | quote }}
+            {{- end }}
+            {{- if .Values.dsx.exchangeUrl }}
+            # The DSX Event Bus of the AI factory next to this gateway (ADR
+            # 0064/0065). Set, the gateway keeps a permanent subscriber on the
+            # Flex breach topic and pushes each verified alert to core, which
+            # fires the tenant's dsx trigger rules. The signing key is what lets
+            # this gateway publish an enforcement; keep it in a managed secret
+            # the way you keep the other credentials above.
+            - name: DSX_EXCHANGE_URL
+              value: {{ .Values.dsx.exchangeUrl | quote }}
+            {{- if .Values.dsx.infraAgentId }}
+            - name: DSX_INFRA_AGENT_ID
+              value: {{ .Values.dsx.infraAgentId | quote }}
+            {{- end }}
+            {{- if .Values.dsx.flexJwks }}
+            - name: DSX_FLEX_JWKS
+              value: {{ .Values.dsx.flexJwks | quote }}
+            {{- end }}
+            {{- if .Values.dsx.infraKid }}
+            - name: DSX_INFRA_KID
+              value: {{ .Values.dsx.infraKid | quote }}
+            {{- end }}
+            {{- if .Values.dsx.infraSigningKey }}
+            - name: DSX_INFRA_SIGNING_KEY
+              value: {{ .Values.dsx.infraSigningKey | quote }}
+            {{- end }}
+            {{- if .Values.dsx.token }}
+            - name: DSX_EXCHANGE_TOKEN
+              value: {{ .Values.dsx.token | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.dps.host }}
+            # NVIDIA Dynamic Power Software, the hand a DSX Flex power_cap hint
+            # reaches for (ADR 0066). Set, the gateway can read DPS power state
+            # and put a resource group under a capping policy, through dpsctl
+            # against this server. The token is what dpsctl authenticates with;
+            # keep it in a managed secret, as for the other credentials above.
+            - name: DPSCTL_HOST
+              value: {{ .Values.dps.host | quote }}
+            {{- if .Values.dps.accessToken }}
+            - name: DPS_ACCESS_TOKEN
+              value: {{ .Values.dps.accessToken | quote }}
+            {{- end }}
+            {{- if .Values.dps.simulate }}
+            - name: DPS_SIMULATE
+              value: {{ .Values.dps.simulate | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.kubeconfig.secretName }}
+            - name: KUBECONFIG
+              value: {{ printf "%s/config" .Values.kubeconfig.mountPath | quote }}
+            {{- end }}
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+{{- $lectureSeule := (.Values.containerSecurityContext | default dict).readOnlyRootFilesystem }}
+          {{- if or .Values.kubeconfig.secretName $lectureSeule }}
+          volumeMounts:
+            {{- if .Values.kubeconfig.secretName }}
+            - name: kubeconfig
+              mountPath: {{ .Values.kubeconfig.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if $lectureSeule }}
+            # With a read-only root, these two have to come from somewhere.
+            # Measured inside a running gateway on 21/10/2026: `/` was already
+            # unwritable to uid 1000, while `/tmp`, `/app` and `/home/vibops`
+            # were writable — and both `kubectl` and `helm` write there, the
+            # connectors creating a temporary kubeconfig through
+            # `NamedTemporaryFile` and helm keeping its cache under HOME.
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/vibops
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.kubeconfig.secretName $lectureSeule }}
+      volumes:
+        {{- if .Values.kubeconfig.secretName }}
+        - name: kubeconfig
+          secret:
+            secretName: {{ .Values.kubeconfig.secretName }}
+        {{- end }}
+        {{- if $lectureSeule }}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
+        {{- end }}
+      {{- end }}

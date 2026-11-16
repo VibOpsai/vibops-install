@@ -1,0 +1,19 @@
+{{- if .Values.console.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vibops.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  type: {{ .Values.console.service.type }}
+  selector:
+    {{- include "vibops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+  ports:
+    - port: {{ .Values.console.service.port }}
+      targetPort: {{ .Values.console.service.port }}
+      name: http
+{{- end }}

@@ -1,0 +1,19 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "vibops.fullname" . }}-core
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: core
+spec:
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: core
+  endpoints:
+    - port: http
+      path: {{ .Values.serviceMonitor.path }}
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

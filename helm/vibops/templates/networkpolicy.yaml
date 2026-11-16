@@ -1,0 +1,305 @@
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vibops.fullname" . }}-core
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: core
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: agent
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: console
+    # Les passerelles Connect, ou qu'elles soient dans le cluster.
+    #
+    # Un `podSelector` sans `namespaceSelector` ne vaut que pour le namespace de
+    # la politique. Connect s'installe dans le sien — c'est ce que dit le manuel
+    # — donc aucune des deux regles ci-dessus ne l'admettait, et le pod appelait
+    # core jusqu'au timeout en journalisant « core injoignable ? ». Une
+    # passerelle **dans le cluster qui heberge VibOps** ne pouvait pas joindre
+    # core, ce qui est pourtant la premiere installation que fait un client qui
+    # deploie VibOps sur sa propre flotte GPU.
+    #
+    # Constate le 01/10/2026 sur un cluster Scaleway, en branchant une
+    # passerelle sur l'installation fraiche du meme cluster.
+    #
+    # L'ouverture est etroite : le port de core, et uniquement des pods portant
+    # le nom du chart vibops-connect. Une passerelle distante, elle, passe par
+    # l'Ingress et n'est pas concernee.
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vibops-connect
+      ports:
+        - port: {{ .Values.core.service.port }}
+          protocol: TCP
+{{- if .Values.ingress.enabled }}
+    # The Ingress publishes this service, and an Ingress controller lives in its
+    # own namespace: no podSelector above admits it. Enabling `ingress.enabled`
+    # without this produces an Ingress with an address whose routes time out —
+    # `/` reached the console only because the console policy carries no `from`
+    # clause at all. Found on 21/09/2026 on a three-node cluster; `helm
+    # template` cannot see it, and neither can a single-node install with no
+    # controller.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # `dig`, not a direct read: an upgrade run with --reuse-values
+              # carries the old ingress map, which has no controllerNamespace,
+              # and a direct read renders an empty name — a selector that
+              # matches nothing, which is the same silent failure this rule
+              # exists to remove. Verified on a cluster, 21/09/2026.
+              kubernetes.io/metadata.name: {{ dig "controllerNamespace" "ingress-nginx" .Values.ingress }}
+      ports:
+        - port: {{ .Values.core.service.port }}
+          protocol: TCP
+{{- end }}
+  egress:
+    # Kept short because it was wrong twice. The Bitnami subchart labelled its
+    # pod `component: primary`, not `component: postgresql`; this selector
+    # matched nothing, so core's egress to its own database was denied and the
+    # migration init container died on "Connection timed out" — not "refused",
+    # which is the tell. Every pod waiting on core crashed behind it.
+    #
+    # Found on 20/09/2026 by installing the chart on a cluster whose CNI
+    # enforces NetworkPolicy. `helm template` and `--dry-run=server` both pass:
+    # neither evaluates a selector against a running pod.
+    #
+    # Et la portee de cette regle depend de qui heberge la base.
+    #
+    # Un `podSelector` sans `namespaceSelector` ne vaut que pour le namespace de
+    # la release. Avec la base embarquee c'est exactement ce qu'on veut. Avec une
+    # base managee — `postgresql.enabled=false`, le chemin que le manuel
+    # documente pour les deploiements entreprise — la base vit ailleurs, et cette
+    # regle la rendait injoignable : l'init de migration mourait sur
+    # « connection to server at … », et les quatre pods qui attendent core avec
+    # lui. Mesure le 02/10/2026 sur k3s, avec un PostgreSQL dans un autre
+    # namespace : policy retiree, les cinq pods demarrent aussitot.
+    #
+    # Quand l'operateur fournit sa propre base, il a choisi une dependance hors
+    # de ce namespace et la politique n'a pas a deviner ou elle se trouve — c'est
+    # deja le traitement que recoit Redis, dont la regle n'a jamais porte de `to`.
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: database
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- else }}
+    - ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    # Redis (Celery broker + backend)
+    - ports:
+        - port: 6379
+          protocol: TCP
+    # Les canaux de notification, qui partent de core et pas seulement du worker.
+    #
+    # Core n'avait aucune sortie au-dela de sa base, son broker et le DNS. Or le
+    # panneau Notifications envoie ses essais depuis l'API — Slack, un webhook,
+    # PagerDuty — et la reinitialisation de mot de passe ouvre une connexion SMTP
+    # dans le handler lui-meme. Les deux etaient bloquees par cette politique.
+    #
+    # Mesure le 02/10/2026 sur le Kubernetes manage OVH, dont le CNI applique
+    # les politiques. Controle A/B sur la meme destination au meme instant :
+    #
+    #   core   -> mailpit.mail:1025   BLOQUE TimeoutError (10,1 s)
+    #   worker -> mailpit.mail:1025   OUVERT (0,1 s)
+    #
+    # Le worker passe parce qu'aucune politique ne le selectionne — ce qui
+    # explique que les alertes periodiques partaient et que les essais depuis
+    # l'interface, eux, expiraient sans un mot. Et le SMTP de core est un appel
+    # bloquant de 10 s : chaque tentative gelait la boucle d'evenements.
+    #
+    # 443 sans `to` restreint, comme pour l'agent : la destination est le
+    # fournisseur que l'operateur a configure, et une politique ne peut pas la
+    # deviner.
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- with .Values.core.secret.smtpHost }}
+    # Le port SMTP n'est ouvert que si un serveur est configure, et c'est celui
+    # que l'operateur a declare — 587, 465, 25 ou 1025 selon le relais. Un
+    # `smtpHost` rempli sans cette regle donne un manuel qui documente un
+    # reglage que la politique interdit.
+    - to: []
+      ports:
+        - port: {{ $.Values.core.secret.smtpPort | default "587" | int }}
+          protocol: TCP
+    {{- end }}
+    # DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vibops.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: console
+{{- if .Values.ingress.enabled }}
+    # The Ingress publishes this service, and an Ingress controller lives in its
+    # own namespace: no podSelector above admits it. Enabling `ingress.enabled`
+    # without this produces an Ingress with an address whose routes time out —
+    # `/` reached the console only because the console policy carries no `from`
+    # clause at all. Found on 21/09/2026 on a three-node cluster; `helm
+    # template` cannot see it, and neither can a single-node install with no
+    # controller.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              # `dig`, not a direct read: an upgrade run with --reuse-values
+              # carries the old ingress map, which has no controllerNamespace,
+              # and a direct read renders an empty name — a selector that
+              # matches nothing, which is the same silent failure this rule
+              # exists to remove. Verified on a cluster, 21/09/2026.
+              kubernetes.io/metadata.name: {{ dig "controllerNamespace" "ingress-nginx" .Values.ingress }}
+      ports:
+        - port: {{ .Values.agent.service.port }}
+          protocol: TCP
+{{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: core
+      ports:
+        - port: 8000
+          protocol: TCP
+    # LLM provider egress (external HTTPS)
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+    # DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vibops.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from ingress controller (any namespace)
+    - from: []
+      ports:
+        - port: {{ .Values.console.service.port }}
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: core
+      ports:
+        - port: 8000
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: agent
+      ports:
+        - port: 8001
+          protocol: TCP
+    # DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vibops.fullname" . }}-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+spec:
+  # The Bitnami subchart brought its own policy; the chart owns the database
+  # now, so it owns the policy too. Dropping it silently would have left the
+  # database reachable from every pod in the namespace — a regression nothing
+  # would have reported.
+  podSelector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: core
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: worker
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: beat
+        # The backup pod. It talks to the database like the three above, and
+        # a policy that forgets it does not produce an error: a denied packet
+        # is dropped, so `pg_dump` waits out its timeout and the CronJob fails
+        # every night in a job history nobody reads. Added on 03/10/2026 with
+        # the CronJob itself — on a CNI that enforces policies the two are
+        # inseparable, and `helm template` cannot tell them apart.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backup
+      ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}

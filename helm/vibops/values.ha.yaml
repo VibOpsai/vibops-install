@@ -1,0 +1,139 @@
+# VibOps — Values Haute Disponibilité (single-region)
+#
+# Usage :
+#   helm install vibops ./helm/vibops \
+#     -f values.production.yaml \
+#     -f values.ha.yaml \
+#     -f my-secrets.yaml
+#
+# Prérequis :
+#   - Cluster ≥ 3 nœuds (pour l'anti-affinité)
+#   - metrics-server installé (pour HPA)
+#   - DB externe managée (RDS Multi-AZ, CloudSQL HA, PlanetScale)
+#   - Redis externe managée (ElastiCache, MemoryStore)
+
+# ── Replicas ──────────────────────────────────────────────────────────────────
+core:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+
+  # Anti-affinité : spread les pods core sur des nœuds différents
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: core
+          topologyKey: kubernetes.io/hostname
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: core
+            topologyKey: topology.kubernetes.io/zone   # spread sur AZ
+
+  # Stratégie rolling : max 1 pod indisponible à la fois
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+
+agent:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: agent
+            topologyKey: kubernetes.io/hostname
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0    # zero-downtime obligatoire (l'agent est stateful en mémoire)
+      maxSurge: 1
+
+console:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: console
+            topologyKey: kubernetes.io/hostname
+
+# ── HPA (Horizontal Pod Autoscaler) ──────────────────────────────────────────
+autoscaling:
+  enabled: true
+
+  core:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  agent:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60   # scale avant saturation (LLM calls = CPU-intensive)
+
+# ── PodDisruptionBudget ───────────────────────────────────────────────────────
+podDisruptionBudget:
+  enabled: true
+
+  core:
+    minAvailable: 2      # toujours ≥ 2 pods core disponibles
+
+  agent:
+    minAvailable: 1
+
+  console:
+    minAvailable: 1
+
+# ── PostgreSQL — désactivé, utiliser une DB externe HA ───────────────────────
+postgresql:
+  enabled: false
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # Session affinity pour l'agent (conversations en mémoire)
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "vibops-agent-session"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "3600"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"

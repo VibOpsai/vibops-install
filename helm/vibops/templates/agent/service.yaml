@@ -1,0 +1,19 @@
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vibops.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  type: {{ .Values.agent.service.type }}
+  selector:
+    {{- include "vibops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+  ports:
+    - port: {{ .Values.agent.service.port }}
+      targetPort: 8001
+      name: http
+{{- end }}

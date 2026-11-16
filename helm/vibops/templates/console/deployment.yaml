@@ -1,0 +1,93 @@
+{{- if .Values.console.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vibops.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  replicas: {{ .Values.console.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console
+  template:
+    metadata:
+      labels:
+        {{- include "vibops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: console
+    spec:
+      {{- include "vibops.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: console
+          image: {{ include "vibops.image" (dict "ctx" $ "component" "console") | quote }}
+          imagePullPolicy: {{ .Values.images.console.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.console.service.port }}
+          # CORE_API_URL et AGENT_API_URL, pas CORE_URL et AGENT_URL.
+          #
+          # La console lit `core_api_url` et `agent_api_url` : les noms attendus
+          # sont donc CORE_API_URL et AGENT_API_URL, et `extra="ignore"` faisait
+          # disparaitre les deux autres sans un mot. La console retombait sur son
+          # defaut `http://localhost:8000`, ou rien n'ecoute dans son conteneur.
+          #
+          # Consequence : sur toute installation Helm, la console ne joignait
+          # jamais core. Chaque appel relaye rendait 502 « Proxy error: All
+          # connection attempts failed » — y compris /api/v1/auth/login et
+          # /api/v1/auth/setup, donc ni connexion ni formulaire de premier
+          # demarrage. L'interface entiere etait morte, pendant que les sept pods
+          # etaient Running et que `helm install --wait` sortait en 0.
+          #
+          # Invisible aux trois validations Helm precedentes : elles interrogeaient
+          # core par port-forward, jamais la console. Mesure le 01/10/2026 sur une
+          # Kapsule Scaleway, en ouvrant la console dans un navigateur. Le compose
+          # d'installation, lui, a toujours pose les bons noms.
+          env:
+            - name: AGENT_API_URL
+              value: {{ printf "http://%s-agent:%d" (include "vibops.fullname" .) (.Values.agent.service.port | int) | quote }}
+            - name: CORE_API_URL
+              value: {{ printf "http://%s-core:%d" (include "vibops.fullname" .) (.Values.core.service.port | int) | quote }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # The console stores conversation history in SQLite at
+            # CONVERSATIONS_DB_PATH, /data by default. The chart mounted only
+            # /tmp, so with readOnlyRootFilesystem the pod died on
+            # `sqlite3.OperationalError: unable to open database file`. The
+            # compose file has always mounted a named volume here; the chart had
+            # nothing. An emptyDir makes it run and loses the history on every
+            # restart — see values.yaml console.persistence.
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.console.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.console.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.console.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+        {{- if dig "persistence" "enabled" false .Values.console }}
+          persistentVolumeClaim:
+            claimName: {{ include "vibops.fullname" . }}-console
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+{{- end }}

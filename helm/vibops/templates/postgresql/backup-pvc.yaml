@@ -1,0 +1,40 @@
+{{- if and .Values.postgresql.enabled (dig "backup" "enabled" true .Values.postgresql) }}
+{{/*
+  A volume of its own, and that is the point: a backup on the database's disk
+  does not survive the loss of that disk. It covers human error and logical
+  corruption, not the failure of the volume — ADR 0048.
+
+  Guarded with `dig` like every other value added to this chart after the fact:
+  `helm upgrade --reuse-values` rebuilds values from the previous release and
+  does not pick up new chart defaults, so reaching into `.Values.postgresql.backup`
+  directly turns the first upgrade into "nil pointer evaluating interface {}".
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vibops.fullname" . }}-backups
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # `helm uninstall` deletes the PVCs a chart's templates created. The
+    # database's own volume survives because it comes from a StatefulSet's
+    # volumeClaimTemplate, which Kubernetes does not delete with its owner —
+    # measured on 02/10/2026, three claims before the uninstall and one after.
+    # This volume is a plain PVC, so it would have gone, and it holds exactly
+    # what an operator needs if the uninstall was the mistake.
+    #
+    # `kubectl delete namespace` still removes it. That is the documented way
+    # to release the storage, and section 15 of the installation guide says so.
+    "helm.sh/resource-policy": keep
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ dig "backup" "size" "20Gi" .Values.postgresql | quote }}
+  {{- with include "vibops.storageClassName" (dict "explicit" (dig "backup" "storageClass" (dig "persistence" "storageClass" "" .Values.postgresql) .Values.postgresql)) }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

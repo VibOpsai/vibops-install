@@ -1,0 +1,739 @@
+# VibOps — Production Docker Compose (100% published images)
+# Usage: docker compose up -d
+# Console: http://<your-server> — Caddy serves it on 80 and 443; port 8003 is not published
+
+services:
+
+  # ─── Infrastructure ───────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: vibops_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vibops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: vibops_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vibops -d vibops_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - vibops_net
+
+# REDIS_PASSWORD has no default on purpose. It used to fall back to
+# `vibops-dev`, a password published in this very file at vibops.ai — anyone
+# starting the stack without a .env got a Redis protected by a string the whole
+# internet could read, and nothing said so. `:?` makes Compose refuse to start
+# and name the missing variable, which is the difference between a weak secret
+# and a stopped deployment. `install.sh` generates one with `openssl rand`.
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    container_name: vibops_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - vibops_net
+
+  # ─── Core API ─────────────────────────────────────────────────────────────
+
+  core:
+    image: ghcr.io/davidmacamara-boop/vibops-core@sha256:b0f5aacb891e06a68ca8133f7b7c6c0944e65068120f78a707ceb48b01d59867
+    container_name: vibops_core
+    restart: unless-stopped
+    command: ["api"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
+      # Le role que l'APPLICATION connecte, quand un mot de passe lui est donne.
+      # `DATABASE_URL` ci-dessus reste la connexion proprietaire : les migrations
+      # la gardent, car le DDL demande des privileges que `vibops_app` n'a pas.
+      #
+      # Sans ce role, core se connecte en superutilisateur et les 47 politiques
+      # de l'ADR 0047 n'appliquent RIEN — meme la portee que l'application pose
+      # sur chaque transaction est sans effet. Mesure : la meme requete rend six
+      # lignes sur deux locataires la ou le role contraint en rend zero.
+      #
+      # APP_ROLE_PASSWORD vide = repli sur le proprietaire, et l'entrypoint le dit
+      # dans ses journaux. C'est l'equivalent du `appRole.enabled: false` du chart.
+      APP_ROLE_PASSWORD: ${APP_ROLE_PASSWORD:-}
+      VIBOPS_APP_ROLE_URL: postgresql+asyncpg://vibops_app:${APP_ROLE_PASSWORD:-}@postgres:5432/vibops_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Boucle locale seulement, comme `agent` juste en dessous.
+    #
+    # core n'etait publie sur aucun port, et tout passe par Caddy — qui route
+    # vers la console ; la console, elle, ne relaie pas /api/v1/health. Donc
+    # l'etape 4 du manuel (`curl http://localhost:8000/api/v1/health`) et
+    # `make check` echouaient sur une installation parfaitement saine, et
+    # `make quickstart` sortait en erreur apres avoir tout demarre. L'hote de
+    # demo portait meme un conteneur `socat` dedie pour contourner ca.
+    #
+    # 127.0.0.1 et non 0.0.0.0 : rien de nouveau n'est expose au reseau, c'est
+    # le meme traitement que postgres, agent, prometheus et grafana dans ce
+    # fichier. Constate le 01/10/2026 en deroulant Option B sur un hote amd64.
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - vibops_net
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.2@sha256:083bd0ed8783e366d745f332f0e4489816dd35d984bef8f16e6d89484a22c082
+    container_name: vibops_docker_proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+      BUILD: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      # Le proxy repond a /_ping, autorise par defaut. Sans lui, `worker`
+      # demarrait parfois avant que haproxy accepte les connexions et son
+      # premier docker_build echouait sur un refus de connexion.
+      test: ["CMD-SHELL", "wget -q -O/dev/null http://127.0.0.1:2375/_ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - vibops_net
+
+  # ─── Worker + Beat ────────────────────────────────────────────────────────
+
+  worker:
+    image: ghcr.io/davidmacamara-boop/vibops-worker@sha256:2461f9a60ae1f8eec72d1d660985b7738a41c5912631b6a7b80c7aac89032e78
+    container_name: vibops_worker
+    restart: unless-stopped
+    command: ["worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
+      # Le role que l'APPLICATION connecte, quand un mot de passe lui est donne.
+      # `DATABASE_URL` ci-dessus reste la connexion proprietaire : les migrations
+      # la gardent, car le DDL demande des privileges que `vibops_app` n'a pas.
+      #
+      # Sans ce role, core se connecte en superutilisateur et les 47 politiques
+      # de l'ADR 0047 n'appliquent RIEN — meme la portee que l'application pose
+      # sur chaque transaction est sans effet. Mesure : la meme requete rend six
+      # lignes sur deux locataires la ou le role contraint en rend zero.
+      #
+      # APP_ROLE_PASSWORD vide = repli sur le proprietaire, et l'entrypoint le dit
+      # dans ses journaux. C'est l'equivalent du `appRole.enabled: false` du chart.
+      APP_ROLE_PASSWORD: ${APP_ROLE_PASSWORD:-}
+      VIBOPS_APP_ROLE_URL: postgresql+asyncpg://vibops_app:${APP_ROLE_PASSWORD:-}@postgres:5432/vibops_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
+      DOCKER_HOST: tcp://docker-proxy:2375
+      # Le worker s'enregistre lui-meme comme passerelle. Sans ces deux lignes
+      # il le fait sous son hostname — l'identifiant du conteneur — et garde son
+      # identite dans un fichier qu'aucun volume ne conserve : chaque
+      # `--force-recreate` laisse une passerelle orpheline de plus dans la
+      # console, nommee d'apres un conteneur mort. Sept sur la demo au 27/09/2026.
+      GATEWAY_NAME: ${GATEWAY_NAME:-vibops-worker}
+      VIBOPS_DATA_DIR: /var/lib/vibops
+    volumes:
+      - worker_data:/var/lib/vibops
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # « Pret » pour un worker Celery, c'est repondre au broker — pas avoir un
+      # processus. `inspect ping` fait l'aller-retour complet par Redis, donc il
+      # echoue aussi quand le broker est injoignable, ce qui est exactement
+      # l'etat ou le worker ne sert a rien.
+      #
+      # Le module est `app.workers.celery_app`. `app.celery_app` n'existe pas —
+      # c'est le chemin que portait tests/e2e/test_00_install.py, ou il faisait
+      # sauter le test a chaque execution.
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout 5 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+    networks:
+      - vibops_net
+
+  beat:
+    image: ghcr.io/davidmacamara-boop/vibops-core@sha256:b0f5aacb891e06a68ca8133f7b7c6c0944e65068120f78a707ceb48b01d59867
+    container_name: vibops_beat
+    restart: unless-stopped
+    command: ["beat"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vibops:${POSTGRES_PASSWORD}@postgres:5432/vibops_db
+      # Le role que l'APPLICATION connecte, quand un mot de passe lui est donne.
+      # `DATABASE_URL` ci-dessus reste la connexion proprietaire : les migrations
+      # la gardent, car le DDL demande des privileges que `vibops_app` n'a pas.
+      #
+      # Sans ce role, core se connecte en superutilisateur et les 47 politiques
+      # de l'ADR 0047 n'appliquent RIEN — meme la portee que l'application pose
+      # sur chaque transaction est sans effet. Mesure : la meme requete rend six
+      # lignes sur deux locataires la ou le role contraint en rend zero.
+      #
+      # APP_ROLE_PASSWORD vide = repli sur le proprietaire, et l'entrypoint le dit
+      # dans ses journaux. C'est l'equivalent du `appRole.enabled: false` du chart.
+      APP_ROLE_PASSWORD: ${APP_ROLE_PASSWORD:-}
+      VIBOPS_APP_ROLE_URL: postgresql+asyncpg://vibops_app:${APP_ROLE_PASSWORD:-}@postgres:5432/vibops_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required — generate one with `openssl rand -hex 24`}@redis:6379/0
+    depends_on:
+      - redis
+      - worker
+    healthcheck:
+      # beat n'a ni port ni `inspect`. Ce qui se verifie est qu'il *bat* :
+      # le planificateur persistant reecrit son fichier toutes les trois
+      # minutes environ (mesure : 13:29:02 puis 13:32). Dix minutes laissent la
+      # marge, et distinguent un beat fige d'un beat vivant — ce qu'un simple
+      # « le processus existe » ne fait pas.
+      #
+      # `| grep -q .` parce que `find` rend 0 meme sans resultat : sans lui la
+      # sonde reussirait sur un fichier vieux d'un mois.
+      # Le chemin que l'entrypoint ecrit vraiment, et la meme variable que lui.
+      #
+      # La sonde regardait /app/celerybeat-schedule, l'ancien defaut de
+      # PersistentScheduler. L'entrypoint ecrit dans /tmp depuis qu'il a fallu
+      # survivre a un systeme de fichiers racine en lecture seule — ce que le
+      # chart impose, a raison. `find` ne trouvait donc jamais rien et **beat
+      # etait unhealthy sur toute installation**, pendant que les douze autres
+      # services etaient sains et que tout fonctionnait. Trouve le 02/10/2026
+      # par le job qui installe le produit, a sa premiere execution.
+      #
+      # `$$` pour que le shell du conteneur developpe la variable, et non compose.
+      test: ["CMD-SHELL", "find $${CELERYBEAT_SCHEDULE:-/tmp/celerybeat-schedule} -mmin -10 | grep -q . || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - vibops_net
+
+  # ─── Backup ───────────────────────────────────────────────────────────────
+
+  backup:
+    # `postgres:16`, Debian — et non `16-alpine` comme le serveur ci-dessus.
+    #
+    # C'est la seule image qui porte `pg_dump` ET `openssl`, et il les faut
+    # dans le meme processus : avec deux conteneurs, l'archive en clair devrait
+    # etre ecrite sur le volume puis deliee, et un fichier delie n'est pas un
+    # fichier efface — ses blocs restent lisibles sur le peripherique jusqu'a
+    # reecriture. Le disque vole est precisement la menace que le chiffrement
+    # adresse. Mesure le 03/10/2026 : `postgres:16-alpine` n'a ni openssl, ni
+    # gpg, ni age ; `alpine` non plus ; et notre image core a openssl mais pas
+    # `pg_dump`.
+    #
+    # Le SERVEUR reste sur alpine. Debian est en glibc, Alpine en musl, et
+    # changer de libc sous un repertoire de donnees existant peut changer
+    # l'ordre de collation et fausser les index. Ce conteneur-ci ne touche pas
+    # au repertoire de donnees, il ne parle que le protocole reseau.
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    container_name: vibops_backup
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      # PGHOST et PGUSER ne servent pas a la boucle ci-dessous, qui passe ses
+      # `-h` et `-U` explicitement. Ils servent a la RESTAURATION : avec eux,
+      # `psql -d postgres` fonctionne dans ce conteneur, donc la procedure du
+      # runbook est le meme texte ici et sur Helm.
+      #
+      # Sans eux, les commandes du runbook echouaient sur « connection to
+      # server on socket /var/run/postgresql/.s.PGSQL.5432 failed: No such
+      # file or directory » — il n'y a pas de serveur local dans ce conteneur.
+      # Trouve le 03/10/2026 en deroulant la procedure a la lettre.
+      PGHOST: postgres
+      PGUSER: vibops
+      # Vide = archives en clair. Renseignee = archives chiffrees en
+      # AES-256-CBC, suffixe `.enc`. `make quickstart` et `install.sh` en
+      # generent une pour toute installation neuve ; une installation
+      # existante qui met a jour n'en a pas, donc rien ne change pour elle
+      # jusqu'a ce qu'elle en pose une.
+      #
+      # ⚠ CETTE CLEF EST LA SEULE. Perdue, les trente jours d'archives — et
+      # toutes les copies hors machine — ne s'ouvrent plus. Elle est dans .env :
+      # sauvegardez .env ailleurs que sur cette machine.
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      BACKUP_ITER: ${BACKUP_ITER:-600000}
+    volumes:
+      - backups:/backups
+      # En memoire, jamais sur un disque : le code de retour de pg_dump que le
+      # tube efface, et les globals en clair — quelques kilooctets de roles,
+      # quelle que soit la taille de la base.
+      - type: tmpfs
+        target: /work
+        tmpfs:
+          size: 16m
+    # L'attente du schema avant le premier dump n'est pas une precaution : sans
+    # elle, la premiere sauvegarde de toute installation neuve est vide.
+    #
+    # `depends_on: postgres: service_healthy` est satisfait des que PostgreSQL
+    # accepte des connexions — soit avant que core n'ait applique ses
+    # migrations. La boucle dumpait donc immediatement, puis dormait 24 h. Le
+    # fichier porte la date du jour : il restait vide jusqu'a ce que la
+    # retention le supprime, trente jours plus tard. Mesure le 01/10/2026 sur
+    # une installation option A : 371 octets compresses, 643 decompresses,
+    # l'en-tete de pg_dump sans une seule table — a cote d'un dump manuel de
+    # 176 Ko pris quelques minutes apres.
+    #
+    # Et il se presentait comme une sauvegarde : `make backup-list` l'affichait,
+    # et le healthcheck ci-dessous le validait. Le premier jour d'un pilote est
+    # celui ou l'on casse le plus de choses, et c'etait le jour sans filet.
+    #
+    # Deux defauts de la meme famille, corriges le 03/10/2026 en portant la
+    # sauvegarde au chart Helm.
+    #
+    # `pg_dump | gzip` rend le code de gzip, qui reussit sur n'importe quoi. Un
+    # pg_dump mort a mi-course laissait donc une archive bien formee et un code
+    # de retour nul, et `set -o pipefail` n'existe pas dans le sh de cette
+    # image.
+    #
+    # Il y a desormais un tube — vers `openssl`, qui reussit tout autant — donc
+    # le code de `pg_dump` est ecrit dans un fichier et relu juste apres. Avec
+    # `set +e` dans le groupe, sans quoi l'errexit herite tue le groupe avant
+    # la ligne qui ecrit le code, et avec le fichier efface d'abord, sans quoi
+    # un code laisse par la commande precedente se ferait passer pour celui de
+    # celle-ci. Les deux pieges ont ete rencontres le 03/10/2026 en portant la
+    # meme logique au chart Helm.
+    #
+    # Les globals, eux, passent par `-f` : pas de tube, donc le code est
+    # directement le leur.
+    #
+    # Et la retention tournait quoi qu'il arrive. Un dump qui echoue chaque nuit
+    # avec une retention qui fonctionne, c'est un volume qui se vide : au
+    # trente-et-unieme jour il ne reste rien, et chaque etape a fait exactement
+    # ce qu'on lui avait demande. La retention ne s'execute donc plus qu'apres
+    # une archive verifiee, et l'archive du jour est supprimee si elle ne l'est
+    # pas — pour que le healthcheck le voie.
+    entrypoint: >
+      sh -c '
+        until [ "$$(psql -h postgres -U vibops -d vibops_db -tAc "select count(*) from alembic_version" 2>/dev/null)" = "1" ]; do
+          echo "backup: en attente du schema (migrations en cours)...";
+          sleep 10;
+        done;
+        echo "backup: schema present, premiere sauvegarde";
+        if [ -n "$$BACKUP_PASSPHRASE" ]; then SUF=.enc; else SUF=; fi;
+        seal() { if [ -n "$$SUF" ]; then openssl enc -aes-256-cbc -pbkdf2 -iter "$$BACKUP_ITER" -salt -pass env:BACKUP_PASSPHRASE -out "$$1"; else cat > "$$1"; fi; };
+        read_back() { if [ -n "$$SUF" ]; then openssl enc -d -aes-256-cbc -pbkdf2 -iter "$$BACKUP_ITER" -pass env:BACKUP_PASSPHRASE -in "$$1"; else cat "$$1"; fi | gzip -dc; };
+        while true; do
+          STAMP=$$(date -u +%Y-%m-%d);
+          DUMP=/backups/vibops_$${STAMP}.sql.gz$${SUF};
+          GLOB=/backups/globals_$${STAMP}.sql.gz$${SUF};
+          rm -f /work/pg;
+          { set +e; pg_dump -h postgres -U vibops -d vibops_db -Z 6; echo $$? > /work/pg; } | seal "$$DUMP";
+          if [ "$$(cat /work/pg 2>/dev/null)" = 0 ] &&
+             pg_dumpall -h postgres -U vibops --globals-only --no-role-passwords -f /work/globals.sql &&
+             gzip -f /work/globals.sql &&
+             seal "$$GLOB" < /work/globals.sql.gz &&
+             read_back "$$DUMP" | grep -qm1 "CREATE TABLE"; then
+            find /backups -name "vibops_*.sql.gz*" -mtime +30 -delete;
+            find /backups -name "globals_*.sql.gz*" -mtime +30 -delete;
+            echo "backup: $$(ls -l $$DUMP)";
+          else
+            echo "backup: dump echoue — retention suspendue, rien supprime" >&2;
+            rm -f "$$DUMP" "$$GLOB";
+          fi;
+          rm -f /work/globals.sql.gz;
+          sleep 86400;
+        done
+      '
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # « Pret » pour une boucle de sauvegarde, c'est avoir produit une
+      # sauvegarde. Le conteneur dort 24 h entre deux dumps : deux jours de
+      # tolerance couvrent un redemarrage sans masquer une boucle cassee — un
+      # mot de passe errone laisse le processus vivant et /backups vide, etat
+      # que « Up » ne distingue pas d'un fonctionnement normal.
+      #
+      # Les deux fichiers sont exiges, pas seulement le dump de la base. Sans
+      # les globals, une restauration sur un cluster neuf echoue 57 fois sur
+      # `role "vibops_app" does not exist` — et psql sort quand meme en 0
+      # (exercice du 25/09/2026, ADR 0048). Une sauvegarde a moitie utilisable
+      # doit se voir avant l'incident, pas pendant.
+      #
+      # La presence du fichier ne suffit pas : ce test passait sur un dump de
+      # 643 octets ne contenant aucune table. Il exige donc maintenant que le
+      # dump recent porte un CREATE TABLE — c'est la difference entre « un
+      # fichier existe » et « une sauvegarde existe ».
+      #
+      # Et il dechiffre pour regarder dedans. Un controle qui s'arreterait a la
+      # presence du fichier serait exactement celui que le dump de 643 octets
+      # passait ; un controle qui verifierait le chiffre sans l'ouvrir dirait
+      # « il y a un fichier chiffre » et non « il y a une sauvegarde ». La clef
+      # est dans l'environnement de ce conteneur, qui est aussi celui qui a
+      # ecrit l'archive : la relire ici ne l'expose pas davantage.
+      # Toutes les lignes a la MEME indentation, et l'appel a openssl sur une
+      # seule. Un scalaire replie YAML ne replie que les lignes de meme
+      # indentation : une ligne plus indentee garde son retour a la ligne. La
+      # continuation `-pass env:…` devenait donc une commande a part, openssl
+      # reclamait la clef au clavier, et le healthcheck echouait sur
+      # « sh: -pass: not found ». Vu seulement en l'executant — `docker compose
+      # config` rendait un YAML parfaitement valide. 03/10/2026.
+      test:
+        - CMD-SHELL
+        - >
+          D=$$(find /backups -name 'vibops_*.sql.gz*' -mtime -2 | sort | tail -1);
+          [ -n "$$D" ] || exit 1;
+          if [ "$${D%.enc}" != "$$D" ]; then
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter "$${BACKUP_ITER:-600000}" -pass env:BACKUP_PASSPHRASE -in "$$D";
+          else cat "$$D"; fi | gzip -dc | grep -qm1 'CREATE TABLE' || exit 1;
+          find /backups -name 'globals_*.sql.gz*' -mtime -2 | grep -q .
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - vibops_net
+
+  # La copie hors machine, que l'ADR 0048 nomme son plus gros trou.
+  #
+  # Le service `backup` ci-dessus ecrit dans un volume de cette machine. Une
+  # perte d'hote — le disque, la VM, la region — emporte la base et toutes ses
+  # sauvegardes ensemble. Ce service est ce qui ferme cela.
+  #
+  # Il ne demarre pas avec le reste : `profiles` le laisse de cote jusqu'a
+  #
+  #     docker compose --profile offsite up -d
+  #
+  # parce que la destination appartient a l'exploitant et qu'aucun defaut ne
+  # peut l'inventer. Trois variables dans .env suffisent, plus celles que
+  # rclone attend pour le type de destination choisi :
+  #
+  #     BACKUP_REMOTE_PATH=mon-bucket/vibops/prod
+  #     RCLONE_CONFIG_OFFSITE_TYPE=s3
+  #     RCLONE_CONFIG_OFFSITE_PROVIDER=Other
+  #     RCLONE_CONFIG_OFFSITE_ENDPOINT=https://s3.gra.io.cloud.ovh.net
+  #     RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID=…
+  #     RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY=…
+  #
+  # Aucun fournisseur n'est modelise : rclone lit une destination nommee
+  # `offsite` dans ces variables, donc S3 sur n'importe quel nuage, SFTP vers
+  # une autre machine, Azure Blob ou tout ce que rclone sait faire fonctionne
+  # sans toucher a ce fichier. docs/installation.md donne les cles par cible.
+  backup-offsite:
+    image: rclone/rclone:1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5
+    container_name: vibops_backup_offsite
+    restart: unless-stopped
+    profiles: ["offsite"]
+    env_file: .env
+    environment:
+      REMOTE_PATH: ${BACKUP_REMOTE_PATH:-}
+      RETENTION_DAYS: ${BACKUP_REMOTE_RETENTION_DAYS:-30}
+      # rclone ecrit sa configuration et son cache ici.
+      RCLONE_CONFIG: /tmp/rclone.conf
+      HOME: /tmp
+    volumes:
+      # En lecture seule : ce service transporte, il ne produit rien.
+      - backups:/backups:ro
+    # Une heure, pas vingt-quatre.
+    #
+    # Le service `backup` dort 24 h entre deux dumps ; calquer ce rythme ici
+    # ferait qu'une destination indisponible a l'instant du transfert attendrait
+    # le lendemain. `rclone copy --checksum` ne transfere rien quand l'objet est
+    # deja la et identique, donc repasser chaque heure ne coute rien et rattrape
+    # une panne de la destination dans l'heure.
+    entrypoint: >
+      sh -c '
+        if [ -z "$$REMOTE_PATH" ]; then
+          echo "offsite: BACKUP_REMOTE_PATH vide — rien a faire, et ce profil ne devrait pas tourner" >&2;
+          exit 1;
+        fi;
+        while true; do
+          STAMP=$$(date -u +%Y-%m-%d);
+          DUMP=; GLOB=;
+          for n in "vibops_$${STAMP}.sql.gz.enc" "vibops_$${STAMP}.sql.gz"; do
+            [ -s "/backups/$$n" ] && DUMP="$$n" && break;
+          done;
+          for n in "globals_$${STAMP}.sql.gz.enc" "globals_$${STAMP}.sql.gz"; do
+            [ -s "/backups/$$n" ] && GLOB="$$n" && break;
+          done;
+          if [ -n "$$DUMP" ] && [ -n "$$GLOB" ]; then
+            rclone copy --checksum --no-traverse "/backups/$$DUMP" "offsite:$$REMOTE_PATH/" &&
+            rclone copy --checksum --no-traverse "/backups/$$GLOB" "offsite:$$REMOTE_PATH/" &&
+            rclone check --one-way --include "$$DUMP" --include "$$GLOB" /backups "offsite:$$REMOTE_PATH" &&
+            rclone delete --min-age "$${RETENTION_DAYS}d" --include "vibops_*.sql.gz*" --include "globals_*.sql.gz*" "offsite:$$REMOTE_PATH" &&
+            echo "offsite: $$REMOTE_PATH <- $$DUMP $$GLOB" ||
+            echo "offsite: transfert echoue, nouvelle tentative dans une heure" >&2;
+          else
+            echo "offsite: pas encore de sauvegarde du jour dans /backups";
+          fi;
+          sleep 3600;
+        done
+      '
+    # « Pret » pour ce service, c'est que la destination porte une copie
+    # recente — pas que le conteneur tourne.
+    #
+    # Le test interroge la destination, pas un marqueur local : c'est la seule
+    # question qui compte, et c'est celle qu'un transfert casse en silence rend
+    # invisible. Des identifiants revoques, un bucket renomme, une facture
+    # impayee laissent le processus vivant et la boucle journaliser son echec
+    # dans un flux que personne ne lit.
+    #
+    # Deux jours de tolerance, comme le healthcheck du service `backup`.
+    healthcheck:
+      # En forme de bloc : la forme en ligne demandait des guillemets
+      # imbriques sur trois niveaux et cassait l'analyse YAML du fichier
+      # entier — `docker compose config` ne rendait plus rien du tout.
+      test:
+        - CMD-SHELL
+        - >
+          rclone lsjson --max-age 2d --include 'vibops_*.sql.gz*'
+          "offsite:$$REMOTE_PATH" 2>/dev/null | grep -q Name
+      interval: 15m
+      timeout: 60s
+      retries: 3
+      start_period: 5m
+    networks:
+      - vibops_net
+
+  # ─── Agent ────────────────────────────────────────────────────────────────
+
+  agent:
+    image: ghcr.io/davidmacamara-boop/vibops-agent@sha256:20fc914d86e1c7a73ec780e663b0b05f7a9b971bb1d71dc5887f9600b2dee839
+    container_name: vibops_agent
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CORE_API_URL: http://core:8000
+      LLM_PROVIDER: ${LLM_PROVIDER:-claude}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      core:
+        condition: service_healthy
+    healthcheck:
+      # `/` rend 46 octets d'identification du service — deja present, rien a
+      # ajouter cote application. start_period genereux : l'agent charge son
+      # catalogue d'outils dynamique au demarrage.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - vibops_net
+
+  # ─── Console ──────────────────────────────────────────────────────────────
+
+  console:
+    image: ghcr.io/davidmacamara-boop/vibops-console@sha256:ff324291f2e90169cb45b8506a39e58d8563f1d380ba91c7bb3ef36b5f90269b
+    container_name: vibops_console
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CORE_API_URL: http://core:8000
+      AGENT_API_URL: http://agent:8001
+    volumes:
+      - console_data:/data
+    # Sans lui, console est « Up » des que le processus existe, avant
+    # qu'uvicorn serve : `docker compose up -d` rend la main sur une console
+    # qui repond par une reponse vide. `/api/health` existe deja et est
+    # publique ; il manquait seulement que le compose la sonde. urllib plutot
+    # que curl, absent de l'image.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/api/health')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      core:
+        condition: service_healthy
+      agent:
+        condition: service_started
+    networks:
+      - vibops_net
+
+  # ─── LLM Proxy ───────────────────────────────────────────────────────────
+
+  # ─── VibOps Connect (profil « connect ») ──────────────────────────────────
+  #
+  # Une passerelle qui tourne sur cette machine et surveille un cluster joignable
+  # par votre kubeconfig — kind, minikube, ou un contexte distant. C'est la
+  # methode B de la section 6, et `scripts/connect-setup.sh` la pilote.
+  #
+  # Ce service n'existait que dans le compose de developpement, avec un contexte
+  # de build que ce depot ne contient pas : `connect-setup.sh --start` echouait
+  # donc deux fois sur une installation cliente — pas de service `connect`, et
+  # rien a construire. Il part desormais d'une image publiee.
+  #
+  # Sous profil, donc inerte tant qu'on ne demande pas `--profile connect`.
+  connect:
+    image: ghcr.io/davidmacamara-boop/vibops-connect@sha256:8711ea3e9f1c502bc6d939f94ab8dafe6e6f9a226f0c4d402ad08212a7ada33a
+    container_name: vibops_connect
+    restart: unless-stopped
+    profiles: ["connect"]
+    environment:
+      # Par defaut le core de cette pile ; mettez l'URL publique pour un site
+      # distant, qui doit alors traverser Caddy.
+      VIBOPS_CORE_URL: ${VIBOPS_CORE_URL:-http://core:8000}
+      VIBOPS_GATEWAY_ID: ${CONNECT_GATEWAY_ID:-}
+      VIBOPS_TOKEN: ${CONNECT_TOKEN:-}
+      # Le nom sous lequel ce cluster se declare. Laisse vide, la passerelle
+      # prend le contexte du kubeconfig — et deux sites peuvent alors se
+      # disputer le meme nom.
+      VIBOPS_CLUSTER_NAME: ${CONNECT_CLUSTER_NAME:-}
+      KUBECONFIG: /home/vibops/.kube/config
+    volumes:
+      - ${HOME}/.kube:/home/vibops/.kube:ro
+    # Ce qui se verifie est qu'il PARLE au core, pas qu'il tourne.
+    #
+    # Connect n'ecoute aucun port : une sonde ne peut rien interroger. Il touche
+    # donc un fichier apres chaque ping accepte, et c'est ce fichier qu'on
+    # regarde — une passerelle dont le jeton est refuse ne le touche jamais, et
+    # se declare malade au lieu de paraitre « Up ».
+    #
+    # Trois minutes de marge sur un ping toutes les trente secondes.
+    healthcheck:
+      test: ["CMD-SHELL", "find $${VIBOPS_HEARTBEAT_FILE:-/tmp/vibops-connect-heartbeat} -mmin -3 | grep -q . || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    networks:
+      - vibops_net
+
+  llm-proxy:
+    image: ghcr.io/davidmacamara-boop/vibops-llm-proxy@sha256:235f990d556de7a872f6f17d3468c248820d5adc70b3e5c68c29f88dfed7c2e3
+    container_name: vibops_llm_proxy
+    restart: unless-stopped
+    # Boucle locale, et c'est tout ce qu'on peut faire par defaut.
+    #
+    # Le service n'etait publie sur aucun port : les quatre commandes de la
+    # section 12 du manuel — dont `curl http://SERVER_IP:8004/health` — rendaient
+    # 000, et le propos de cette section est justement qu'un agent exterieur
+    # (n8n, LangChain, CrewAI, Dify) pointe dessus. Seul
+    # `http://llm-proxy:8004/health` repondait, depuis le reseau docker. Mesure
+    # le 02/10/2026.
+    #
+    # 127.0.0.1 et non 0.0.0.0 parce que le proxy ne s'authentifie pas : il
+    # relaie vers les serveurs d'inference et attribue les couts au nom d'un
+    # en-tete `X-VibOps-Agent-Id` qu'il croit sur parole. L'exposer au reseau
+    # donnerait a quiconque le droit de depenser le budget d'inference du
+    # client. Le manuel dit comment l'ouvrir deliberement, et ce qu'il faut
+    # mettre devant.
+    ports:
+      - "127.0.0.1:8004:8004"
+    environment:
+      CORE_API_URL: http://core:8000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
+    depends_on:
+      core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')\" 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - vibops_net
+
+  # ─── Reverse Proxy ───────────────────────────────────────────────────────
+
+  caddy:
+    image: caddy:2-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e
+    container_name: vibops_caddy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - console
+      - core
+    healthcheck:
+      # L'API d'admin, sur 127.0.0.1 et non `localhost` : elle n'ecoute qu'en
+      # IPv4, et `localhost` resout d'abord en ::1 dans cette image — wget y
+      # recoit un refus de connexion. Verifie sur caddy:2-alpine.
+      test: ["CMD-SHELL", "wget -q -O/dev/null --timeout=5 http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - vibops_net
+
+  # ─── Prometheus + Grafana ─────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v3.4.0@sha256:78ed1f9050eb9eaf766af6e580230b1c4965728650e332cd1ee918c0c4699775
+    container_name: vibops_prometheus
+    restart: unless-stopped
+    volumes:
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O/dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - vibops_net
+
+  grafana:
+    image: grafana/grafana:11.6.0@sha256:62d2b9d20a19714ebfe48d1bb405086081bc602aa053e28cf6d73c7537640dfb
+    container_name: vibops_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — generate one with `openssl rand -base64 16`}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O/dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - vibops_net
+
+volumes:
+  postgres_data:
+  backups:
+  prometheus_data:
+  grafana_data:
+  caddy_data:
+  caddy_config:
+  console_data:
+  worker_data:
+
+networks:
+  vibops_net:
+    driver: bridge

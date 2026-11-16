@@ -1,0 +1,379 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VibOps Connect — values.yaml
+# Helm chart for the VibOps Connect gateway deployed on client infrastructure.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Convention Helm : le nom du release sert de base aux noms de ressources.
+nameOverride: ""
+fullnameOverride: ""
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+image:
+  repository: ghcr.io/davidmacamara-boop/vibops-connect
+  # Vide = la version du chart (Chart.yaml appVersion), pour que les deux ne
+  # divergent pas silencieusement.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# ── Gateway identity ──────────────────────────────────────────────────────────
+gateway:
+  # UUID of the gateway, created in the VibOps console before installing this
+  # chart. Connect does not register itself: it authenticates as an existing
+  # gateway and exits at once without this.
+  id: ""
+  # Name under which the hypervisor appears, if one is configured below. This
+  # is the key alert rules and pricing target, so it must be stable and chosen
+  # deliberately. Defaults to the hypervisor type.
+  hypervisorName: ""
+  # Name this cluster declares itself under. A cluster name is a routing
+  # address, not a label: it is how a job finds its gateway, so it must be
+  # unique within the organisation — core refuses a name another gateway
+  # already declares, and the cluster then shows up with no name at all.
+  #
+  # Empty means "in-cluster", which is fine for the first Kubernetes site and
+  # collides on every one after it. Set it per site (gra11-prod, par1-prod);
+  # the console fills it with the gateway name in the command it prints.
+  #
+  # Only used for the in-cluster ServiceAccount path. With kubeconfig.secretName
+  # set, the context names in that kubeconfig are what gets declared.
+  clusterName: ""
+
+# ── Connection to VibOps Core API ─────────────────────────────────────────────
+vibops:
+  # URL of the core API (e.g. https://vibops.example.com)
+  coreUrl: ""
+  # Authentication token (generated from the console)
+  token: ""
+  # Existing K8s Secret containing the key "token"
+  existingSecret: ""
+
+# ── Local Kubernetes access ───────────────────────────────────────────────────
+kubeconfig:
+  # Secret containing a kubeconfig (key "config")
+  # If empty, uses the in-cluster ServiceAccount
+  secretName: ""
+  mountPath: "/root/.kube"
+
+# ── Platform type ─────────────────────────────────────────────────────────────
+# "kubernetes" (default), "hypervisor", "slurm", "hybrid"
+# ── Network discovery ─────────────────────────────────────────────────────────
+# ── Mesure de la consommation ────────────────────────────────────────────────
+# Lire DCGM et interroger les BMC coute quelque chose sur le materiel du client,
+# et l'ADR 0043 exige que ce surcout soit publie avant d'activer la collecte par
+# defaut. Elle est donc volontaire.
+#
+# Sans ce drapeau, connect ne persiste aucune puissance et VibOps affiche des
+# valeurs declarees. Jusqu'au 30/09/2026 le chart ne l'exposait pas du tout :
+# la seule facon d'allumer la mesure etait de modifier le deploiement a la main,
+# ce qu'un `helm upgrade` effacait.
+powerCollection:
+  # true -> VIBOPS_COLLECT_POWER=1
+  enabled: false
+
+networkScan:
+  # Scanning a customer's network is opt-out, and turning it off must need no
+  # other configuration.
+  enabled: true
+  # The subnet the BMCs and hypervisors sit on, e.g. "10.20.0.0/24". Leave
+  # empty only if the pod's own network is the one to scan — inside Kubernetes
+  # it usually is not, and the scan would find nothing.
+  #
+  # Reaching that subnet is a separate matter: naming it does not create a
+  # route. Use hostNetwork, or have the pod network routed to the VLAN.
+  subnet: ""
+  # Millisecondes par sonde de port. A monter sur un reseau lent ou un /16 :
+  # un BMC qui repond en 800 ms est invisible avec la valeur par defaut.
+  timeoutMs: 500
+
+# Seconds between two polls for assigned jobs.
+#
+# **Three, not fifteen, and it is a latency decision.** Measured on 22/10/2026:
+# a conversational turn that reaches one tool takes 19 seconds end to end, of
+# which 3-4 are the model and the rest is waiting — this poll and the agent's
+# own. At 15 seconds a fresh install would add up to twelve more per wave, so a
+# question that touches three tools could sit half a minute in queues nobody
+# can see. The demonstration instance has run at 3 for some time; the default
+# had stayed at 15, which means every new site felt five times slower than the
+# one a prospect is shown.
+#
+# The cost of 3 is an HTTP GET to core every three seconds per gateway, which
+# is nothing next to what it buys. A site with hundreds of gateways and no
+# interactive use can raise it.
+pollInterval: 3
+
+# Extra connectors this gateway is allowed to run, on top of the ones
+# `allowlist.py` classifies as site connectors.
+#
+# `allowed_connectors()` has always read VIBOPS_ALLOW_CONNECTORS from the
+# environment, and a test in connect/ guarantees it — but the chart did not
+# expose it, so the only way to widen was a `kubectl set env` that the next
+# `helm upgrade` erased without saying so. Found on 19/10/2026 while opening
+# KAIConnector on the demonstration gateway.
+#
+# allowConnectors:
+#   - KAIConnector
+allowConnectors: []
+
+# ── Plusieurs hyperviseurs sur une passerelle ─────────────────────────────────
+# Laisser vide pour n'en declarer qu'un, avec les blocs proxmox/xenOrchestra/
+# vsphere ci-dessous. Avec une liste, chaque entree doit porter un nom distinct :
+# c'est la cle que visent les regles d'alerte et la tarification.
+#
+# hypervisors:
+#   - type: proxmox
+#     name: pve-paris
+#     url: https://pve.paris.local:8006
+#     user: root@pam
+#     token_id: vibops
+#     token: ""
+#   - type: vsphere
+#     name: vc-lyon
+#     url: vcenter.lyon.local
+#     user: svc@vsphere.local
+#     token: ""
+hypervisors: []
+
+# ── vSphere (un seul) ─────────────────────────────────────────────────────────
+# ── vSphere / vCenter (un seul) ───────────────────────────────────────────────
+# Ce bloc etait declare DEUX FOIS dans ce fichier, avec des cles differentes.
+# En YAML la seconde declaration gagne, et c'est celle qui portait `url` — or
+# templates/deployment.yaml lit `vsphere.host`. Le bloc vSphere du deploiement
+# ne rendait donc jamais : la collecte vCenter etait injoignable depuis le
+# chart, sans que rien ne le signale.
+vsphere:
+  host: ""          # vcenter.example.com, sans https://
+  username: ""
+  password: ""
+  port: 443
+
+# ── Proxmox VE (un seul) ──────────────────────────────────────────────────────
+# Detecte par la presence d'une URL : il n'y a pas de `platformType` a poser.
+proxmox:
+  url: ""          # https://proxmox.example.com:8006
+  user: "root@pam"
+  tokenId: ""
+  token: ""
+
+# ── Xen Orchestra (Vates / XCP-ng, un seul) ───────────────────────────────────
+xenOrchestra:
+  url: ""          # https://xo.example.com
+  token: ""
+
+# Slurm, Prometheus et mTLS ne sont PAS configures ici.
+#
+# Ils l'ont ete — trois blocs complets, documentes, que ce chart rendait dans
+# aucun template et que connect ne lit nulle part. Un operateur pouvait poser
+# `slurm.host` ou `mtls.enabled`, helm l'acceptait, et rien ne se passait.
+#
+# Le noeud Slurm et l'URL Prometheus sont des proprietes de la passerelle, pas
+# du deploiement : ils se saisissent dans la console, sur la passerelle, et
+# core les transmet. C'est aussi ce qui permet de les changer sans redeployer.
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── RBAC ──────────────────────────────────────────────────────────────────────
+rbac:
+  create: true
+  clusterRole: true
+  # Le ClusterRole livre est en lecture seule — `get`, `list`, `watch`. Bon pour
+  # une revue securite, et une impasse des qu'on attend du produit qu'il agisse :
+  # deployer, scaler, redemarrer ou supprimer sont refuses par l'API server, pas
+  # par VibOps. Jusqu'au 01/10/2026 la seule facon d'y remedier etait d'ecrire un
+  # ClusterRole a la main, hors de Helm — qu'un `helm upgrade` ne gere pas et que
+  # personne ne retrouve six mois plus tard.
+  #
+  # A `true`, les verbes d'ecriture sont ajoutes sur les ressources que l'agent
+  # manipule. Volontaire, et nomme : un operateur qui l'active sait ce qu'il
+  # accorde. Les secrets n'y sont pas, et les ressources RBAC non plus : une
+  # passerelle qui pourrait s'accorder des droits n'aurait plus de limite.
+  allowWrite: false
+
+  # Which writes, rather than all of them.
+  #
+  # Measured on 21/10/2026 on a gateway with `allowWrite: true`:
+  # `kubectl auth can-i --list` returned 87 rules, 21 of them carrying a write
+  # verb, granted to the pod as a whole. An operator who wanted one capability
+  # — capping a scheduler queue, say — had to grant all twenty-one, because
+  # `allowWrite` was a single switch. ADR 0054 counted that as one of three
+  # gaps.
+  #
+  # Each family below is granted by `allowWrite: true` (unchanged, so an
+  # existing release keeps exactly what it had) **or** by its own flag. Setting
+  # one family and leaving `allowWrite: false` grants that family alone.
+  #
+  # `allowWrite` still grants none of the three that would turn a gateway into a
+  # pivot: `secrets`, write on `nodes`, and the RBAC API. Since 25/10/2026 the
+  # first two have a named family of their own below — off by default, and
+  # never implied by `allowWrite` — because an operator must be able to drain a
+  # node or set a secret through the product (ADR 0059), and must say so by
+  # name. The RBAC API has no family and will not get one.
+  write:
+    # pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs,
+    # configmaps, services, PVCs, and the two scale subresources. What a
+    # deployment or a `kubectl scale` needs.
+    workloads: false
+    # pods/exec and pods/portforward. Separate because a shell inside a running
+    # pod is a different capability from deploying one, and reviewers read it
+    # differently.
+    exec: false
+    # ingresses and horizontal pod autoscalers.
+    networking: false
+    # creating a namespace.
+    namespaces: false
+    # `patch` on the scheduler's queues — what `kai_set_queue_limit` needs, and
+    # the smallest useful grant on this list. One field of an existing queue:
+    # no create, no delete.
+    schedulerQueues: false
+    # `patch` and `update` on nodes, and `create` on pods/eviction: cordon,
+    # uncordon, drain, label and annotate a node (ADR 0059). Capacity, not a
+    # workload — not implied by `allowWrite`, ever.
+    nodes: false
+    # get/list/watch/create/update/patch on secrets: set_secret_value and
+    # get_secret_keys (ADR 0059). A gateway that can read secrets can exfiltrate
+    # them; the operator who enables this knows it, and the connector never puts
+    # a value in a result or a log. Not implied by `allowWrite`, ever.
+    secrets: false
+    # `patch` on rayclusters, `create`/`delete` on rayjobs, and `create`/`delete`
+    # on services/proxy — what the Ray connector needs to scale a cluster and to
+    # submit, stop or delete a job through the dashboard (ADR 0061). The proxy
+    # verb reaches any service in scope; not implied by `allowWrite`, ever.
+    ray: false
+    # `create`/`delete` on computedomains — what nvlink_create_compute_domain and
+    # nvlink_delete_compute_domain need on a GB200/GB300 NVL72 (ADR 0063). The
+    # reads are in the base role; not implied by `allowWrite`, ever.
+    nvlink: false
+
+# ── Where the gateway runs ────────────────────────────────────────────────────
+#
+# Pin the pod to a pool that carries no GPU workload. Empty means "anywhere",
+# which is right for a cluster whose nodes are interchangeable and wrong for one
+# with GPU nodes.
+#
+# **Why this exists, measured twice.** The gateway shares its node's root
+# filesystem with whatever else lands there. On 05/10/2026, on a Scaleway
+# Kapsule whose root volume is 20 GB whatever the instance type — 16.4 GB
+# allocatable as ephemeral storage — a GPU workload filled it: images 11.1 GB
+# plus the NVIDIA driver 1.3 GB plus a model cache 2.1 GB reached 17.0 of 17.0,
+# seven DiskPressure flips in 3h27, the container killed while `kubectl` still
+# showed `1/1 Running`. The gateway was evicted with it. So it is pinned to a
+# CPU pool, and a model cache belongs on a PVC rather than the root.
+#
+# That pinning had no expression here, so it was patched by hand on the
+# Deployment — and on 16/10/2026 the patch was found naming
+# `pool-par-2-laughing-tereshkova`, a pool deleted since. The pod had been
+# `Pending` for ten days, the gateway silent, the fleet showing the cluster
+# offline, and nothing anywhere said why. A hand patch is lost by a
+# `helm upgrade` or by a pool being replaced, and it is lost quietly.
+#
+#   nodeSelector:
+#     k8s.scaleway.com/pool-name: pool-par-1-distracted-saha
+#
+# Tolerations are deliberately not offered. The need here is to keep the gateway
+# **off** the GPU nodes, and a nodeSelector does that; a toleration would be for
+# putting it on a tainted node, which is the opposite.
+nodeSelector: {}
+
+# ── What the kernel enforces about this pod ──────────────────────────────────
+#
+# Measured on 21/10/2026 and recorded in ADR 0054: neither the pod nor the
+# container set a `securityContext` at all. The process ran as uid 1000 because
+# the **image** says so, not because the cluster required it — so nothing stopped
+# a privilege escalation at the kernel's level, no syscall filter applied, and
+# every Linux capability the runtime grants by default was still held.
+#
+# This is the chart buying confinement from the kernel, which is the position
+# ADR 0054 takes: the primitives are the kernel's, Kubernetes exposes them here,
+# and the work is declaring them rather than writing a runtime.
+podSecurityContext:
+  # Refuses to start a container whose image would run as root, which turns an
+  # image regression into a failure at admission rather than a silent root pod.
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  # The runtime's default syscall filter. Not a profile we wrote — one the
+  # container runtime maintains, which is the point.
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  # **Off by default, and deliberately.** Turning it on mounts `emptyDir` at
+  # `/tmp` and `/home/vibops`, which is what the measured container needs:
+  # connectors write a temporary kubeconfig through `NamedTemporaryFile` and
+  # helm keeps its cache under HOME. What is *not* measured is whether anything
+  # writes elsewhere under `/app` at runtime, and the failure mode of being
+  # wrong here is a gateway that will not start at a customer site.
+  #
+  # Everything above holds without it, costs nothing, and cannot break a
+  # deployment. This one is a site's decision, taken with its own evidence.
+  readOnlyRootFilesystem: false
+
+# ── Egress and ingress ───────────────────────────────────────────────────────
+#
+# Ingress is denied entirely — nothing needs to reach the gateway, it polls
+# outward and this chart ships no Service. Egress stays open minus the
+# link-local range, which is where instance metadata lives on several clouds
+# and where no connector has any business. See the template for why a
+# deny-by-default egress list is not something we can write for someone else's
+# site.
+#
+# Measured on 21/10/2026 from inside a running gateway: arbitrary public hosts
+# on 443 reachable, and the metadata address reachable too, with no
+# NetworkPolicy anywhere on the cluster because this chart shipped none.
+networkPolicy:
+  enabled: true
+  # Cut from the otherwise-open egress. A site that wants a real deny-by-default
+  # posture replaces this with its own list, or disables the policy and ships
+  # its own.
+  egressExcept:
+    - 169.254.0.0/16
+
+# ── Extra environment variables ───────────────────────────────────────────────
+# ── DSX Event Bus (NVIDIA DSX OS AI factory, ADR 0064/0065) ──────────────────
+#
+# Set exchangeUrl to turn on the permanent DSX Flex subscriber: the gateway
+# listens for power-breach alerts on the bus and pushes each verified one to
+# core, which fires this organisation's dsx trigger rules. Off when empty.
+# Keep infraSigningKey and token in a managed secret, as for the hypervisor
+# credentials above.
+dsx:
+  exchangeUrl: ""        # mqtt://host:1883 or mqtts://host:8883
+  infraAgentId: ""       # this site's id in grid/v1/infra/<id>/powerbreach/enforcement (default: vibops)
+  flexJwks: ""           # JSON Web Key Set of the Flex agents' public keys, to verify alerts
+  infraKid: ""           # the kid naming this site's signing key
+  infraSigningKey: ""    # PEM private key that signs the enforcements this site publishes
+  token: ""              # OAuth2 access token for the bus, if the operator assigns one
+
+# ── DPS, NVIDIA Dynamic Power Software (ADR 0066) ────────────────────────────
+#
+# Set host to turn on the DPS tools: the gateway reads power state and applies
+# capping policies through dpsctl against this server — the executing hand for
+# a DSX Flex power_cap hint. Keep accessToken in a managed secret. simulate
+# answers from canned data with no server, for demos. A non-default dpsctl port
+# goes through the generic `env` map below as DPSCTL_PORT.
+dps:
+  host: ""               # the DPS server dpsctl connects to (DPSCTL_HOST)
+  accessToken: ""        # bearer token dpsctl authenticates with (DPS_ACCESS_TOKEN)
+  simulate: ""           # "1" for canned demo answers, no server
+
+env: {}

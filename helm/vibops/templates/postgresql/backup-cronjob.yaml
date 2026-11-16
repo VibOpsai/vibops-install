@@ -1,0 +1,384 @@
+{{/*
+  Le dump de la nuit, chiffre dans le meme flux.
+
+  UN SEUL conteneur, et c'est une correction de ce que ce chart a porte
+  brievement le 03/10/2026 : deux etapes, l'une produisant l'archive en clair
+  sur le volume de sauvegarde, l'autre la chiffrant et effaçant le clair.
+
+  Ce clair-la etait le defaut. Un fichier delie n'est pas un fichier effacé :
+  ses blocs restent lisibles sur le peripherique jusqu'a reecriture. Le disque
+  vole et l'instantane oublie sont precisement la menace que ce chiffrement
+  adresse, et ecrire le clair sur le volume protege la ruinait — pas pour les
+  quelques secondes de la fenetre, mais durablement.
+
+  Le clair ne doit donc exister nulle part. `pg_dump` ecrit dans un tube,
+  `openssl` chiffre a la volee, et seul le chiffre atteint un systeme de
+  fichiers.
+
+  L'image est `postgres:16` — Debian trixie — et non `16-alpine`, parce qu'elle
+  porte `pg_dump` ET `openssl 3.5` : la variante alpine n'a aucun outil de
+  chiffrement, ni `alpine` elle-meme, ni notre image core de `pg_dump`. C'est
+  le seul moyen d'avoir les deux dans un meme processus.
+
+  Le SERVEUR, lui, reste sur `16-alpine`. Debian est en glibc, Alpine en musl ;
+  changer la libc sous un repertoire de donnees existant peut changer l'ordre
+  de collation et fausser les index. Le conteneur de sauvegarde ne court pas ce
+  risque : il ne parle que le protocole reseau. L'archive hors ligne porte donc
+  deux images postgres, ce que le manuel dit.
+
+  Et le code de `pg_dump` est lu malgre le tube. Ce sh n'a pas `pipefail`, donc
+  un tube rendrait le code d'`openssl`, qui reussit sur n'importe quoi — meme
+  defaut que `pg_dump | gzip`, corrige ailleurs le meme jour. Le groupe ecrit
+  son code dans un fichier de deux octets, relu juste apres.
+*/}}
+{{- define "vibops.backupDumpContainer" -}}
+{{- $b := dig "backup" dict .Values.postgresql -}}
+{{- $e := dig "encryption" dict $b -}}
+{{- $encrypt := dig "enabled" true $e -}}
+- name: dump
+  image: "{{ dig "image" "repository" "postgres" $b }}:{{ dig "image" "tag" "16" $b }}"
+  imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" $b }}
+  securityContext:
+    runAsUser: 999
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  env:
+    - name: PGPASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "vibops.fullname" . }}-db
+          key: POSTGRES_PASSWORD
+    - name: PGHOST
+      value: {{ include "vibops.fullname" . }}-db
+    - name: PGUSER
+      value: {{ dig "auth" "username" "vibops" .Values.postgresql | quote }}
+    - name: PGDATABASE
+      value: {{ dig "auth" "database" "vibops" .Values.postgresql | quote }}
+    # The pod would otherwise hang for the kernel's TCP timeout if the database
+    # is gone, and the job would sit Running for hours instead of failing.
+    - name: PGCONNECT_TIMEOUT
+      value: "30"
+    - name: RETENTION_DAYS
+      value: {{ dig "retentionDays" 30 $b | quote }}
+    - name: SUF
+      value: {{ ternary ".enc" "" $encrypt | quote }}
+    {{- if $encrypt }}
+    - name: ITER
+      value: {{ dig "iterations" 600000 $e | quote }}
+    - name: BACKUP_PASSPHRASE
+      valueFrom:
+        secretKeyRef:
+          name: {{ dig "existingSecret" "" $e | default (printf "%s-backup-key" (include "vibops.fullname" .)) }}
+          key: BACKUP_PASSPHRASE
+    {{- end }}
+  command: ["sh", "-c"]
+  args:
+    - |
+      set -eu
+      STAMP=$(date -u +%Y-%m-%d)
+      DUMP="/backups/vibops_${STAMP}.sql.gz${SUF}"
+      GLOB="/backups/globals_${STAMP}.sql.gz${SUF}"
+
+      # This sh has no `set -o pipefail`, so the status of a pipeline is the
+      # LAST command's — and both gzip and openssl succeed on anything, which
+      # is how a pg_dump that never connected used to produce a well-formed
+      # archive and a zero exit. The group writes its own status to a file,
+      # read back on the next line.
+      #
+      # `set +e` inside the group, and the file removed first. Both matter, and
+      # the first version of this had neither: `set -e` is inherited by the
+      # subshell, so a failing pg_dump killed the group BEFORE `echo $?` ran
+      # and the file was never written. That happened to fail correctly on the
+      # first command — `cat` on a missing file — and would have passed the
+      # SECOND one as a success, reading the `0` the first had left behind.
+      # Measured on a cluster, 03/10/2026, by giving the job a wrong password.
+      status_of() { [ "$(cat /work/pg 2>/dev/null)" = 0 ]; }
+
+      read_back() {
+        if [ -n "$SUF" ]; then
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter "$ITER" \
+            -pass env:BACKUP_PASSPHRASE -in "$1"
+        else
+          cat "$1"
+        fi | gzip -dc
+      }
+
+      seal() {
+        if [ -n "$SUF" ]; then
+          openssl enc -aes-256-cbc -pbkdf2 -iter "$ITER" -salt \
+            -pass env:BACKUP_PASSPHRASE -out "$1"
+        else
+          cat > "$1"
+        fi
+      }
+
+      # Nothing in the clear ever reaches a disk: the dump goes straight through
+      # the cipher. A file that was unlinked is not a file that was erased —
+      # its blocks stay readable on the device until something overwrites them,
+      # and a stolen disk is exactly what this encrypts for.
+      rm -f /work/pg
+      { set +e; pg_dump -Z 6; echo $? > /work/pg; } | seal "$DUMP"
+      status_of || { rm -f "$DUMP"; echo "backup: pg_dump failed" >&2; exit 1; }
+
+      # The globals take the other route: `-f` gives a direct exit status with
+      # no pipeline to lose it. They are a few kilobytes of role and grant
+      # statements, and /work is memory, so this cleartext never touches a disk
+      # either.
+      pg_dumpall --globals-only --no-role-passwords -f /work/globals.sql
+      gzip -f /work/globals.sql
+      seal "$GLOB" < /work/globals.sql.gz
+      rm -f /work/globals.sql.gz
+
+      # An archive that exists is not an archive that holds anything, and an
+      # archive that is encrypted is not an archive that can be read back.
+      # One check answers both: decrypt it, decompress it, look inside.
+      if ! read_back "$DUMP" | grep -qm1 'CREATE TABLE'; then
+        echo "backup: the archive does not read back — failing" >&2
+        rm -f "$DUMP" "$GLOB"
+        exit 1
+      fi
+
+      # Pruning runs only after the check above passed, so a night that
+      # produced nothing usable cannot expire the last good copy. Both forms
+      # of the name, because switching encryption on leaves thirty days of
+      # cleartext archives behind — they must age out normally, since at that
+      # moment they are the only backups that exist.
+      find /backups -name 'vibops_*.sql.gz*'  -mtime "+${RETENTION_DAYS}" -delete
+      find /backups -name 'globals_*.sql.gz*' -mtime "+${RETENTION_DAYS}" -delete
+      echo "backup: $(ls -l "$DUMP")"
+  volumeMounts:
+    - name: backups
+      mountPath: /backups
+    - name: work
+      mountPath: /work
+  resources:
+    {{- toYaml (dig "resources" .Values.alembicInit.resources $b) | nindent 4 }}
+{{- end -}}
+
+{{- define "vibops.backupOffsiteContainer" -}}
+{{- $r := dig "backup" "remote" dict .Values.postgresql -}}
+{{- $enc := dig "backup" "encryption" dict .Values.postgresql -}}
+{{/*
+  The off-host copy — ADR 0048's largest gap, and the reason this
+  chart grew a backup at all.
+
+  The dump lands on cloud storage in the database's own region. It
+  covers human error and logical corruption; losing the region
+  loses the database and every backup of it together. This step is
+  what closes that, and it is the operator's destination, not ours
+  — so the whole backend is configured through rclone's own
+  environment variables, read from a Secret. The chart therefore
+  needs to know nothing about S3 versus SFTP versus Azure: any
+  rclone backend works without a chart change.
+
+  It is a separate container because a transfer must not begin
+  before the archive is written and verified, and two containers of
+  one pod start in parallel. As an initContainer the dump finishes
+  first, and the job's success means both halves succeeded.
+*/}}
+- name: offsite
+  image: "{{ dig "image" "repository" "rclone/rclone" $r }}:{{ dig "image" "tag" "1.75.1" $r }}"
+  imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" $r }}
+  securityContext:
+    runAsUser: 999
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  envFrom:
+    # `default`, not `dig`'s own fallback: the key is declared
+    # empty in values.yaml, and `dig` returns a present-but-empty
+    # value happily — which rendered `name:` as null and gave a
+    # CronJob the API server rejects.
+    - secretRef:
+        name: {{ dig "existingSecret" "" $r | default (printf "%s-backup-remote" (include "vibops.fullname" .)) }}
+  env:
+    - name: REMOTE_PATH
+      value: {{ dig "path" "" $r | quote }}
+    # Les archives chiffrees portent `.enc`. Sans ce suffixe la copie
+    # chercherait les noms en clair, ne les trouverait pas, et echouerait chaque
+    # nuit sur « missing or empty » — ce qui au moins se voit, contrairement a
+    # un `rclone copy` sur un glob, qui aurait reussi en ne transferant rien.
+    - name: SUFFIX
+      value: {{ ternary ".enc" "" (dig "enabled" true $enc) | quote }}
+    - name: RETENTION_DAYS
+      # `dig` returns an empty string when the key is present and
+      # empty, which is the documented default — so `default`, not
+      # `dig`, is what falls back to the local retention. Without it
+      # RETENTION_DAYS was "" and `rclone delete --min-age d` failed
+      # the job every night.
+      value: {{ dig "retentionDays" "" $r | default (dig "backup" "retentionDays" 30 .Values.postgresql) | quote }}
+    # rclone writes its cache and config here, and the root
+    # filesystem is read only.
+    - name: RCLONE_CONFIG
+      value: /tmp/rclone.conf
+    - name: HOME
+      value: /tmp
+  command: ["sh", "-c"]
+  args:
+    - |
+      set -eu
+      STAMP=$(date -u +%Y-%m-%d)
+      DUMP="vibops_${STAMP}.sql.gz${SUFFIX}"
+      GLOB="globals_${STAMP}.sql.gz${SUFFIX}"
+      DEST="offsite:${REMOTE_PATH}"
+
+      # Today's two files, named. Copying "whatever is in
+      # /backups" succeeds on an empty directory, which is the
+      # shape of failure this whole mechanism exists to refuse.
+      for f in "$DUMP" "$GLOB"; do
+        [ -s "/backups/$f" ] || {
+          echo "offsite: /backups/$f missing or empty — failing" >&2
+          exit 1
+        }
+      done
+
+      rclone copy --checksum --no-traverse "/backups/$DUMP" "$DEST/"
+      rclone copy --checksum --no-traverse "/backups/$GLOB" "$DEST/"
+
+      # And then read it back. `rclone copy` already verifies the
+      # checksum after a transfer, but against what it just sent;
+      # `check` verifies it against what the destination holds now,
+      # which is the question actually being asked. Measured on
+      # 03/10/2026: a remote object replaced by the same number of
+      # different bytes is caught on `md5 differ`, not just size.
+      rclone check --one-way --include "$DUMP" --include "$GLOB" \
+        /backups "$DEST"
+
+      # Remote retention, restricted to our own names. A `rclone
+      # delete` against a mistyped prefix would erase whatever
+      # lives there; with these two filters the worst case is
+      # deleting nothing.
+      rclone delete --min-age "${RETENTION_DAYS}d" \
+        --include 'vibops_*.sql.gz*' --include 'globals_*.sql.gz*' \
+        "$DEST"
+
+      echo "offsite: ${REMOTE_PATH} <- $DUMP $GLOB"
+  volumeMounts:
+    - name: backups
+      mountPath: /backups
+      readOnly: true
+    - name: tmp
+      mountPath: /tmp
+  resources:
+    {{- toYaml (dig "resources" .Values.alembicInit.resources $r) | nindent 16 }}
+{{- end -}}
+
+{{- if and .Values.postgresql.enabled (dig "backup" "enabled" true .Values.postgresql) }}
+{{/*
+  The bundled database had NO backup at all.
+
+  Not "a backup on the same disk", which is what the compose deployment has and
+  what ADR 0048 calls its largest gap — none. The chart carried no CronJob, no
+  `pg_dump`, and no volume to put one on. `values.production.yaml` sets
+  `postgresql.enabled: false`, so the path the manual calls enterprise delegates
+  to a managed database that backs itself up; but the chart's DEFAULT install —
+  the one the manual's Option C walks through — deploys the bundled StatefulSet,
+  and the manual mentioned backups only under Option B.
+
+  A customer following Option C therefore got a database with no net, and
+  nothing said so. Found on 03/10/2026 while looking for somewhere to copy the
+  backup ADR 0048 asks to be held off-host: you cannot copy elsewhere what does
+  not exist.
+
+  The shape follows the compose service, which has been exercised:
+
+  - both files, the dump and the globals, because restoring onto a fresh cluster
+    fails without the second — the roles do not exist yet;
+  - a check that the archive actually contains tables, because an empty dump
+    passes every check that only asks whether a file is there;
+  - the database's own image, so `pg_dump` always matches the server version: a
+    15 client refuses a 16 database.
+*/}}
+{{- $remote := dig "backup" "remote" dict .Values.postgresql -}}
+{{- $offsite := and $remote (dig "enabled" false $remote) -}}
+{{- $encryption := dig "backup" "encryption" dict .Values.postgresql -}}
+{{- $encrypt := dig "enabled" true $encryption -}}
+{{- if $offsite -}}
+{{- if not (dig "path" "" $remote) -}}
+{{- fail "postgresql.backup.remote.enabled requires postgresql.backup.remote.path — the bucket and prefix to copy into, e.g. \"my-bucket/vibops/prod\"" -}}
+{{- end -}}
+{{- if not (or (dig "existingSecret" "" $remote) (dig "config" dict $remote)) -}}
+{{- fail "postgresql.backup.remote.enabled requires either postgresql.backup.remote.existingSecret or postgresql.backup.remote.config — see docs/installation.md, Option C, Backups" -}}
+{{- end -}}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "vibops.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ dig "backup" "schedule" "30 2 * * *" .Values.postgresql | quote }}
+  concurrencyPolicy: Forbid
+  # A failed job stays visible for a week. Kubernetes keeps one by default, so
+  # the second failing night erased the evidence of the first.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 7
+  # If the controller was down at the scheduled minute the backup still catches
+  # up within the hour; past that it is missed rather than fired in a burst.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "vibops.selectorLabels" . | nindent 12 }}
+            # This label is what the database's NetworkPolicy admits. Without
+            # it the pod never reaches the server: the `-db` policy opened 5432
+            # to core, worker and beat only, and a packet a NetworkPolicy denies
+            # is not refused, it is dropped — `pg_dump` waits out its timeout
+            # and the job fails, every night, in a job history nobody reads.
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          {{- include "vibops.imagePullSecrets" . | nindent 10 }}
+          securityContext:
+            # The official image runs as uid 999; fsGroup makes the volume
+            # writable for it without an init container doing a chown.
+            fsGroup: 999
+          {{/*
+            Les etapes de la nuit : le dump — qui chiffre dans le meme flux —
+            puis la copie hors machine si elle est active.
+
+            Toutes sauf la derniere sont des initContainers, parce que c'est la
+            seule facon d'imposer un ordre : deux conteneurs d'un meme pod
+            demarrent en parallele, et chaque etape lit ce que la precedente a
+            ecrit. La derniere est le conteneur principal, donc la reussite du
+            job veut dire que toutes ont reussi.
+          */}}
+          {{- $stages := list "vibops.backupDumpContainer" }}
+          {{- if $offsite }}{{- $stages = append $stages "vibops.backupOffsiteContainer" }}{{- end }}
+          {{- if gt (len $stages) 1 }}
+          initContainers:
+            {{- range (initial $stages) }}
+            {{- include . $ | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          containers:
+            {{- include (last $stages) $ | nindent 12 }}
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ include "vibops.fullname" . }}-backups
+            # En memoire, jamais sur un disque : le code de retour de
+            # pg_dump, que le tube efface, et les globals en clair — quelques
+            # kilooctets de roles et de droits, quelle que soit la taille de la
+            # base, donc rien a dimensionner ici.
+            - name: work
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+            {{- if $offsite }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+            {{- end }}
+{{- end }}

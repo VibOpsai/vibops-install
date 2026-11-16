@@ -1,0 +1,56 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# ── PodDisruptionBudget — core ────────────────────────────────────────────────
+# Garantit qu'au moins 1 pod core reste UP pendant les rolling updates / drain nœud
+{{- if .Values.core.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vibops.fullname" . }}-core
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: core
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.core.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: core
+{{- end }}
+---
+# ── PodDisruptionBudget — agent ───────────────────────────────────────────────
+{{- if .Values.agent.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vibops.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.agent.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+{{- end }}
+---
+# ── PodDisruptionBudget — console ─────────────────────────────────────────────
+{{- if .Values.console.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vibops.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.console.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "vibops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console
+{{- end }}
+{{- end }}

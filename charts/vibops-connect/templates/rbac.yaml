@@ -1,0 +1,280 @@
+{{- if .Values.rbac.create }}
+{{- if .Values.rbac.clusterRole }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "vibops-connect.fullname" . }}
+  labels:
+    {{- include "vibops-connect.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "nodes", "services", "endpoints", "namespaces", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  # La mesure de consommation lit dcgm-exporter a travers le proxy du serveur
+  # d'API, ce qui est une ressource distincte de `services` : lister le service
+  # ne donne pas le droit de le traverser. Sans cette ligne, le collecteur
+  # recevait « cannot get resource services/proxy » et rendait None — la meme
+  # valeur que « pas d'exporteur ». La fonctionnalite etait donc inatteignable
+  # telle qu'installee par le chart. Constate le 30/09/2026 sur une L4.
+  #
+  # En lecture seule, et seulement sur le proxy : le gateway ne peut ni creer
+  # ni modifier de service.
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["get"]
+  # Et `pods/proxy`, pour la meme raison a un niveau plus fin.
+  #
+  # dcgm-exporter est un daemonset : un pod par noeud GPU, derriere un Service
+  # ClusterIP. Lire le Service route vers UN pod, choisi par le load balancing —
+  # mesure le 05/10/2026 sur un cluster a deux L4, six appels, trois fois une
+  # carte et trois fois l'autre. La mesure de la flotte ne couvrait donc que la
+  # moitie de la flotte, au hasard et sans le dire.
+  #
+  # On interroge desormais chaque pod, ce qui est une ressource RBAC distincte
+  # de `pods` : lister un pod ne donne pas le droit de le traverser, exactement
+  # comme pour `services/proxy` plus haut.
+  #
+  # En lecture seule, et c'est ce qui la separe de `pods/portforward` : un GET
+  # HTTP vers un port declare, pas un tube par lequel passe un trafic
+  # arbitraire. Elle reste donc dans le bloc de lecture, pour qu'une passerelle
+  # en observation pure mesure quand meme ses GPU.
+  - apiGroups: [""]
+    resources: ["pods/proxy"]
+    verbs: ["get"]
+  # The KAI Scheduler (NVIDIA Run:ai) queues, and the CRD that says whether it
+  # is installed. Read-only: KAIConnector observes queues, it never writes one.
+  #
+  # Missing when the connector was created on 19/10/2026, and the defect that
+  # followed is the one this repository pays for most often: KAI was measured
+  # from an administrator kubeconfig, which can do anything, and never once
+  # from the product's own service account, which could not list its queues.
+  # The connector passed, the allowlist permitted the action, the tests were
+  # green, and through the gateway the answer was "Forbidden: ... cannot list
+  # resource queues.scheduling.run.ai". Proving an integration works under an
+  # identity that is not the product's proves nothing.
+  #
+  # `customresourcedefinitions` is named separately because `kai_status` begins
+  # with `kubectl get crd queues.scheduling.run.ai`: without that right it
+  # would answer "not installed" on a cluster that carries it.
+  - apiGroups: ["scheduling.run.ai"]
+    resources: ["queues"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  # Training jobs, read only. `list_training_jobs` discovers which of these
+  # operators is installed from the cluster's own CRDs — already readable above —
+  # and then lists their objects, which needs this.
+  #
+  # The groups are named and the verbs are reads. A gateway has no business
+  # creating or deleting someone's training run: VibOps observes it, prices it
+  # and relates it to its KAI queue, and submission stays with whatever the team
+  # already uses. A group whose operator is not installed simply matches nothing.
+  - apiGroups: ["kubeflow.org", "trainer.kubeflow.org", "ray.io", "x-k8s.io"]
+    resources: ["pytorchjobs", "mpijobs", "tfjobs", "xgboostjobs", "paddlejobs",
+                "jaxjobs", "trainjobs", "rayjobs", "jobsets"]
+    verbs: ["get", "list", "watch"]
+  # Ray clusters and Serve applications as KubeRay publishes them (ADR 0061):
+  # the Ray connector reads them to find the head's dashboard service, which
+  # it then reaches through `services/proxy` above. Read-only here.
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters", "rayservices"]
+    verbs: ["get", "list", "watch"]
+  # ComputeDomains (ADR 0063): the NVIDIA DRA driver's objects for Multi-Node
+  # NVLink on a GB200 or GB300 NVL72. Read to list them and to refuse a drain
+  # that would cut a domain under a running job; writing them is the `nvlink`
+  # family below.
+  - apiGroups: ["resource.nvidia.com"]
+    resources: ["computedomains", "computedomaincliques"]
+    verbs: ["get", "list", "watch"]
+{{- $ecrit := .Values.rbac.write | default dict }}
+{{- if or .Values.rbac.allowWrite $ecrit.schedulerQueues }}
+  # Capping a KAI queue. `patch` only, and only on `queues`: `kai_set_queue_limit`
+  # changes one field of an existing queue and never creates or deletes one, so
+  # `create` and `delete` are deliberately absent — the connector could not use
+  # them, and a gateway should not hold a verb its code cannot exercise.
+  #
+  # The smallest useful write on this chart, which is why it has its own family:
+  # a site that wants queue governance and nothing else grants
+  # `rbac.write.schedulerQueues` and keeps everything below refused.
+  - apiGroups: ["scheduling.run.ai"]
+    resources: ["queues"]
+    verbs: ["patch"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.workloads }}
+  # ── Ecriture (rbac.allowWrite ou rbac.write.workloads) ──────────────────────
+  #
+  # Volontaire et nomme. Sans ces verbes, VibOps observe et n'agit pas : un
+  # `kubectl scale` ou un `helm upgrade` lance par un job est refuse par l'API
+  # server, et le job echoue sur « forbidden » — ce qui ressemble a un defaut du
+  # produit et n'en est pas un.
+  #
+  # Trois choses restent volontairement absentes, et ce sont les trois qui
+  # transformeraient une passerelle en pivot :
+  #   * `secrets` — lire les secrets du cluster n'est pas necessaire pour
+  #     deployer, et une passerelle compromise les exfiltrerait toutes ;
+  #   * `rbac.authorization.k8s.io` — une passerelle qui peut s'accorder des
+  #     droits n'a plus de limite, et ce plafond-la ne se rattrape pas ;
+  #   * `nodes` en ecriture — cordon et drain touchent la capacite du site, pas
+  #     une charge de travail. A accorder a la main si le besoin apparait.
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["create", "update", "patch", "delete"]
+  # Reading a ConfigMap, in the family that already writes them. Measured on
+  # 25/10/2026 through the demo gateway: `set_configmap` and `get_configmap`
+  # answered "Forbidden" — the family could create a ConfigMap it was not
+  # allowed to look at, so a set (a read, then a patch) and its proof both
+  # failed. The write was there since the split; the read never was.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["create", "update", "patch", "delete"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.exec }}
+  # A shell inside a running pod. Its own family because it is a different
+  # capability from deploying one, and a reviewer reads it differently.
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.networking }}
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- end }}
+{{- if or .Values.rbac.allowWrite $ecrit.namespaces }}
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+{{- end }}
+{{- if $ecrit.nodes }}
+  # Node maintenance (ADR 0059): cordon, uncordon, drain, label, annotate,
+  # taint — `patch` and `update` on nodes, and the eviction subresource a
+  # drain creates. Never implied by `allowWrite`: this family is its own named
+  # grant, because it touches site capacity rather than a workload.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+{{- end }}
+{{- if $ecrit.ray }}
+  # Operating Ray (ADR 0061): scaling a RayCluster is a `patch`; submitting,
+  # stopping and deleting a job go to the dashboard through the API server's
+  # service proxy, which is a POST or a DELETE — `create` and `delete` on
+  # `services/proxy`. That verb reaches any service of the namespaces this
+  # role spans, which is why it is a family of its own and never implied by
+  # `allowWrite`.
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters"]
+    verbs: ["patch"]
+  - apiGroups: ["ray.io"]
+    resources: ["rayjobs"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["create", "delete"]
+{{- end }}
+{{- if $ecrit.nvlink }}
+  # Multi-Node NVLink (ADR 0063): create and delete the ComputeDomain a job
+  # claims to run inside one NVLink domain of an NVL72 rack. Capacity of the
+  # rack, not a workload — never implied by `allowWrite`.
+  - apiGroups: ["resource.nvidia.com"]
+    resources: ["computedomains"]
+    verbs: ["create", "delete"]
+{{- end }}
+{{- if $ecrit.secrets }}
+  # Secrets (ADR 0059): `set_secret_value` and `get_secret_keys`. Never implied
+  # by `allowWrite` either — a gateway that reads secrets is a gateway that
+  # could exfiltrate them, and the operator who enables this knows it. Reading
+  # is part of it because a set is a read-then-patch, and because the proof of
+  # a set reads the key names back; the connector never puts a value in a
+  # result or a log.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "vibops-connect.fullname" . }}
+  labels:
+    {{- include "vibops-connect.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "vibops-connect.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "vibops-connect.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "vibops-connect.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops-connect.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "endpoints", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+{{- if .Values.rbac.allowWrite }}
+  # Meme intention qu'au-dessus, bornee au namespace du release.
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update", "patch"]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "vibops-connect.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vibops-connect.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "vibops-connect.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "vibops-connect.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
