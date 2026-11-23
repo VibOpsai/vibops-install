@@ -44,6 +44,8 @@ quickstart:
 		REDISPASS=$$(openssl rand -hex 24); \
 		BACKUPPASS=$$(openssl rand -hex 32); \
 		VAULT=$$(openssl rand -base64 32 | tr '+/' '-_'); \
+		INTERNALKEY=$$(openssl rand -hex 32); \
+		APPROLEPASS=$$(openssl rand -hex 24); \
 		sed -i.bak "s/change-me-in-production/$$SECRET/" .env; \
 		sed -i.bak "s/change-me-jwt-secret-in-production/$$JWT/" .env; \
 		sed -i.bak "s/^POSTGRES_PASSWORD=$$/POSTGRES_PASSWORD=$$PGPASS/" .env; \
@@ -53,8 +55,11 @@ quickstart:
 		sed -i.bak "s|\$${REDIS_PASSWORD}|$$REDISPASS|g" .env; \
 		sed -i.bak "s/^BACKUP_PASSPHRASE=$$/BACKUP_PASSPHRASE=$$BACKUPPASS/" .env; \
 		sed -i.bak "s|^VAULT_KEY=$$|VAULT_KEY=$$VAULT|" .env; \
+		sed -i.bak "s/^INTERNAL_API_KEY=$$/INTERNAL_API_KEY=$$INTERNALKEY/" .env; \
+		sed -i.bak "s/^APP_ROLE_PASSWORD=$$/APP_ROLE_PASSWORD=$$APPROLEPASS/" .env; \
 		rm -f .env.bak; \
-		echo "→ SECRET_KEY, JWT_SECRET_KEY, VAULT_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD, GRAFANA_PASSWORD and BACKUP_PASSPHRASE generated"; \
+		echo "→ SECRET_KEY, JWT_SECRET_KEY, VAULT_KEY, INTERNAL_API_KEY, APP_ROLE_PASSWORD, POSTGRES_PASSWORD, REDIS_PASSWORD, GRAFANA_PASSWORD and BACKUP_PASSPHRASE generated"; \
+		echo "  (APP_ROLE_PASSWORD turns on PostgreSQL Row Level Security — tenant isolation, ADR 0047)"; \
 		echo ""; \
 		echo "  ⚠ BACKUP_PASSPHRASE encrypts your nightly backups and exists only in .env."; \
 		echo "    Keep a copy of .env off this machine, or a restore will not be possible."; \

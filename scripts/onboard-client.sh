@@ -51,9 +51,9 @@ HOST=""
 DB_URL=""
 REDIS_URL=""
 ANTHROPIC_KEY=""
-ADMIN_PASSWORD="vibops-admin"
+ADMIN_PASSWORD=""   # generated below if --admin-password is not given (audit S-L1)
 SLACK_WEBHOOK=""
-VERSION="${VIBOPS_VERSION:-0.72.5}"
+VERSION="${VIBOPS_VERSION:-0.73.0}"
 NAMESPACE="vibops"
 CHART_REPO="https://davidmacamara-boop.github.io/vibops"
 LICENCE_KEY=""    # JWT RS256 fourni par VibOps — omit pour trial 14j
@@ -73,7 +73,7 @@ Required:
 Optional:
   --segment       <seg>     Segment: csp | enterprise (défaut: enterprise)
   --licence-key   <jwt>     Clé de licence VibOps RS256 (omit = trial 14j)
-  --admin-password <pass>   Mot de passe admin console (défaut: vibops-admin)
+  --admin-password <pass>   Mot de passe admin console (défaut: généré aléatoirement)
   --slack-webhook  <url>    Webhook Slack pour alertes système
   --version        <ver>    Version à déployer (défaut: ${VERSION})
   --namespace      <ns>     Namespace K8s (défaut: ${NAMESPACE})
@@ -174,6 +174,13 @@ JWT_SECRET=$(openssl rand -hex 32)
 # deux-points qu'un hash bcrypt n'a pas : il rend donc toujours False, et
 # l'administrateur ainsi cree ne pouvait jamais se connecter. Sur le chemin
 # d'onboarding des clients CSP et entreprise. Constate le 02/10/2026.
+# A random password when none was given: the published default was
+# `vibops-admin`, printed at the end on a customer path (audit S-L1).
+if [[ -z "$ADMIN_PASSWORD" ]]; then
+  ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20)
+  info "Mot de passe admin généré aléatoirement (affiché une fois à la fin)."
+fi
+
 info "Hash du mot de passe admin (scrypt, par l'image du produit)..."
 AUTH_HASH=$(docker run --rm --entrypoint python \
   "ghcr.io/davidmacamara-boop/vibops-core:${VERSION}" -c \
