@@ -7,6 +7,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.75.0] — 2026-11-26
+
+The routing series closed, the day after v0.74.0: the two rates that say whether the tiered offer drifts (ADR 0078, tier 1), an offer that adapts to each organisation — its target's platforms and its own usage (ADR 0077 §2) — and a lookup that understands product names and French. One migration (`7d4e9f2a1b3c`), two routes.
+
+### Changed — `find_tools` understands product names and French
+
+The lookup behind the tiered offer is lexical and found only what shared words with the
+English catalogue; the fleet says *VMware*, *vCenter*, *Run:ai*, *IPMI*, *redémarre*,
+*instantané*, *file d'attente*. Three tables now map those onto the catalogue's words before
+scoring — phrases, single-word aliases, and a label per family printed in the DEFERRED TOOLS
+index (*`vsphere_` (VMware vSphere / vCenter)*) — accents stripped first. Deterministic, tested
+on fifteen French and product-name requests against the real catalogue; the "no search while a
+deferred tool matched" signal reads French the same way.
+
+### Changed — the tool offer adapts to the organisation: target platforms and own usage (ADR 0077 §2)
+
+On top of the fixed core, a turn now carries the tools of the selected target's platforms —
+the connectors its gateway's site reports configured (ADR 0060), plus what its type implies, so
+a turn aimed at a Slurm cluster holds every `slurm_*` tool and the live block says to prefer them
+— and the deferred tools this organisation's agent called at least three times over 30 days,
+read from its own audit trail through the new `GET /api/v1/audit/agent-tool-usage`. One budget
+caps both (≈ 5,000 tokens), target first; what does not fit stays deferred and findable. Both
+grounds are derivable, never read off the request (ADR 0053); an unreachable core widens nothing.
+The routing signals gain `promoted`.
+
+### Added — tool-routing drift signals, as rates (ADR 0078, tier 1)
+
+The tiered offer (ADR 0080) had two ways to fail that nothing measured: a `find_tools`
+lookup that loads nothing, and a model that neither searches nor acts while the index
+names the tool. Every turn now records a `routing` dict of counts — lookups, misses,
+definitions loaded, calls to a tool the model was not given (a deferred one guessed, or
+one that does not exist), and a "no search while a deferred tool matched" candidate flag
+— beside the verdict and the episodic key, in the JSONL and in
+`training_exchanges.routing` (one nullable JSONB column, migration `7d4e9f2a1b3c`; NULL
+is an absent measurement, never a zero). `GET /api/v1/training/routing-rates?days=N`
+turns them into rates with a Wilson 95 % interval, per model and in total. Counts only —
+no query, no tool name — so the corpus keeps the privacy rule it states. They are drift
+signals, not verdicts; the thresholds are read off the first weeks of the demonstration
+fleet, not fixed here.
+
 ## [0.74.0] — 2026-11-26
 
 The agent's tool offer cut by five: a core inlined, the rest loaded on demand, with the L3 baseline re-measured green under it (13/13, 567 k cache reads against 2,501 k). And a GitLab push now reaches the same door as a GitHub push, asked for by a customer whose pipelines run on a self-hosted GitLab. Three days after v0.73.0.
