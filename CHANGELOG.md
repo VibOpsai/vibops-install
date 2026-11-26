@@ -5,7 +5,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [0.76.0] — 2026-11-26
+
+The routing series measured, the same day as v0.75.0: the L3 suite plays each scenario N times on any provider and keeps the series (ADR 0078, tier 2); the two collisions the first rate run exposed are closed by contrastive descriptions and one core addition — 4.6 % → 0.8 % over 130 trials — and the drain-node collision of 19/11 is measured at 0/20 with the target selected, so the contrastive rename is not taken up (ADR 0077). No migration, no route.
+
+### Added — L3 measures a rate, on any model (ADR 0078, tier 2)
+
+The L3 behavioural suite reaches the model through the product's own `LLMClient` — Anthropic,
+any OpenAI-compatible endpoint, Ollama, NIM, with the variables production reads — where it
+called the Anthropic SDK directly before, so the documented "candidate model" procedure never
+actually ran another vendor. `L3_MODE=rate` plays each scenario `L3_N` times without retry and
+appends one record per scenario to `docs/l3-rates.jsonl`: failures, rate, Wilson 95 % interval,
+model, endpoint, and the hashes of the prompt, the catalogue and the scenarios, so a move is
+attributable to its cause. `scripts/l3-rate.sh` runs it for any model with keys from
+`~/.vibops/l3-keys.env`; the `L3 rate` workflow runs it by hand in CI; `python -m
+tests.behavioral.rating --matrix` prints the latest rate per model. `docs/model-qualification.md`
+is the grid that reads it: entry criteria, the gate as a rate, statuses. The release gate stays
+pass-if-any. `scripts/l3-compare-models.sh` is retired.
+
+### Changed — the two measured collisions get contrastive descriptions (ADR 0077 §1, first application)
+
+The first rate run put the whole 4.6 % on two scenarios. `incident_entry_point` (2/10): the
+model called `analyze_pod_failure` alongside `correlate_incident` in the first round, which its
+own description invited — "MANDATORY: call this tool whenever the user says a pod is crashing"
+contradicted the workflow's Step 1. The description now says Step 2, after `correlate_incident`
+has returned, never in parallel with it; the prompt's Step 2 says the same. `scale_replicas_routing`
+(4/10): the model called nothing and answered in text; `patch_deployment` ended on "DESTRUCTIVE on
+staging/prod: present the result and ask for confirmation", which on a `prod` namespace reads as
+"ask first". It now says the tool itself returns the dry-run preview, so it is called first and
+the preview is what the confirmation is asked on (rule 10); rule 8 carries the same line. The
+harness records what the model said when it called nothing, and counts failures by kind, so a
+record says how a scenario failed, not only how often. Re-measured (run 45893479785, same model,
+N = 10): `incident_entry_point` 0/10; `scale_replicas_routing` 3/10, now on a different failure —
+the model obeyed rule 8 ("kind cluster → `setup_kubeconfig` IN PARALLEL with `patch_deployment`")
+and called a tool the tiered offer did not carry. A parallel instruction names a tool the offer
+must hold, so `setup_kubeconfig` joins the core (653 characters) and a prompt invariant now holds
+every tool named on a PARALLEL line to the core (ADR 0080). Third run (45895438730): both
+scenarios 0/10, **1/130 = 0.8 % [0.1–4.2]** over the suite against 4.6 % [2.1–9.7] before; the one
+failure is a text scenario untouched by this change. The three runs are in `docs/l3-rates.jsonl`.
+
+### Added — L3 knows a selected target, and measures the drain-node collision
+
+A scenario may now carry a `target:` block — the gateway the console would have selected: the
+harness promotes the target's families out of the deferred set as production does (ADR 0077 §2)
+and writes production's SELECTED TARGET block and promotion note in the live block; a guard holds
+that literal to `agent_service.py`. `required_any_tools` names a family rather than one tool.
+Scenario 14, `drain_node_on_a_slurm_target`, is the 19/11/2026 collision under production's
+context: a site with Slurm and Kubernetes, the Slurm gateway selected, "drain node gpu-node-03";
+any Slurm call on the node passes, `drain_node` fails. Its rate decides whether the contrastive
+renaming (ADR 0077 §1) is worth its cost: measured at **0/20, 0 % [0–16]** (run 45898291387), so with
+the target selected the context is enough and the rename is not taken up. The `L3 rate` workflow
+and `scripts/l3-rate.sh` take a scenario filter (`scenario` input, `--k`), so one scenario is
+measured for a fraction of a run.
 
 ## [0.75.0] — 2026-11-26
 
