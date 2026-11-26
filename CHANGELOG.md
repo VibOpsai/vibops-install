@@ -7,6 +7,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.74.0] — 2026-11-26
+
+The agent's tool offer cut by five: a core inlined, the rest loaded on demand, with the L3 baseline re-measured green under it (13/13, 567 k cache reads against 2,501 k). And a GitLab push now reaches the same door as a GitHub push, asked for by a customer whose pipelines run on a self-hosted GitLab. Three days after v0.73.0.
+
+### Changed — the tool offer is tiered: a core inlined, the rest loaded on demand (ADR 0080)
+
+Every model call carried the whole catalogue — 324 static tools, 543 with the connector
+actions, 44,000 to 70,000 tokens — while the demonstration fleet's audit log shows 55 tools
+covering 95 % of what the agent calls. A call now carries a fixed core of 69 tools (≈ 13,000
+tokens) plus `find_tools`; every other tool is named in the cached prompt, grouped by family,
+and loaded on demand by a deterministic lexical search whose results join the next call's
+tools. Nothing is removed and nothing is guessed from the request (ADR 0053 / 0077 stand): a
+deferred tool is one more step away, a withheld platform stays withheld and unfindable. The
+lookup runs nothing and is not audited. The L3 harness offers the same tiered catalogue,
+answers `find_tools` for real, and a well-formedness test checks, without a model, that every
+required deferred tool is found from the scenario's own trigger. Built for the models with a
+short context the qualification grid names (Mistral Medium, Llama, GLM); the L3 baseline on
+Claude is the measurement to rerun.
+
+### Added — a GitLab push reaches the same door as a GitHub push
+
+`POST /api/v1/webhooks/gitlab` receives a GitLab Push Hook and creates the jobs the matching
+subscriptions ask for, exactly as the GitHub endpoint does: same subscriptions (`repo` is the
+project's `path_with_namespace`), same policy check, same idempotency on commit + action, same
+system-queue guard. GitLab does not sign the body, so the endpoint checks the secret token GitLab
+sends verbatim in `X-Gitlab-Token` (`GITLAB_WEBHOOK_SECRET`), in constant time; without a secret
+the door opens with the anonymous-access switch only, like GitHub's. Tag pushes, merge-request and
+pipeline events, and branch deletions are acknowledged and ignored. The dispatch shared by both
+forges now lives in one function. Asked for by a customer whose pipelines run on a self-hosted
+GitLab (24/11/2026).
+
 ## [0.73.0] — 2026-11-23
 
 The audit's "this month" items, the Slurm governed-reclaim stage, and the L3 harness made honest: it now offers the model the catalogue production offers, and the last tagged run's 12 green scenarios included two that passed on a tool name the model had invented. Twenty-seven dependency updates taken as proposed. First release since v0.72.5 (16/11).
